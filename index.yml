@@ -1,0 +1,9 @@
+- id: stash-copilot
+  name: Stash Copilot
+  metadata:
+    description: AI-powered assistant for your Stash library - chat, insights, and vision analysis.
+  version: v0.1.0
+  date: "2026-05-29 21:36:13"
+  path: stash-copilot.zip
+  sha256: 459551313b8b076a68d60da0e0e0c50e945cbe0dff935906fd39d00084d6a9ba
+  requires: []
