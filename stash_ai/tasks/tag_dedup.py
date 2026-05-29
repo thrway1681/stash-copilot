@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import numpy as np
 
@@ -170,7 +170,7 @@ class FindDuplicateTagsTask:
         """
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         normalized = embeddings / (norms + 1e-8)
-        return np.dot(normalized, normalized.T)
+        return cast("NDArray[np.float32]", np.dot(normalized, normalized.T))
 
     def _extract_candidate_pairs(
         self,
@@ -337,7 +337,7 @@ class MergeTagsTask:
             )
             if not result or "findScenes" not in result:
                 return []
-            return result["findScenes"]["scenes"]
+            return cast("list[dict[str, Any]]", result["findScenes"]["scenes"])
         except Exception as e:
             self.log(f"Failed to find scenes with tag {tag_id}: {e}", "warning")
             return []
@@ -386,7 +386,7 @@ class MergeTagsTask:
                 {"id": str(tag_id)},
             )
             if result and "findTag" in result and result["findTag"]:
-                return result["findTag"]["name"]
+                return cast("str | None", result["findTag"]["name"])
             return None
         except Exception:
             return None

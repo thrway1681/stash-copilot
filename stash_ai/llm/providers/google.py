@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Generator
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import requests
 from stashapi import log as stash_log
@@ -120,7 +120,7 @@ class GoogleProvider(BaseLLMProvider):
         if finish_reason == "SAFETY":
             raise RuntimeError("Gemini stopped generation due to safety filters")
 
-        return candidates[0]
+        return cast("dict[str, Any]", candidates[0])
 
     def _build_generation_config(self, **kwargs: Any) -> dict[str, Any]:
         """Build generationConfig payload section.

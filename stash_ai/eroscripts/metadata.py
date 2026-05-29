@@ -46,7 +46,8 @@ def read(scene_id: int | str) -> SidecarMetadata | None:
         return None
     try:
         with open(path) as f:
-            return json.load(f)
+            data: SidecarMetadata = json.load(f)
+            return data
     except (OSError, json.JSONDecodeError):
         return None
 

@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Generator
-from typing import Any
+from typing import Any, cast
 
 import requests
 from stashapi import log as stash_log
@@ -102,7 +102,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 f"OpenRouter returned unexpected response (no choices). Keys: {list(result.keys())}"
             )
 
-        return result["choices"][0]
+        return cast("dict[str, Any]", result["choices"][0])
 
     @property
     def supports_vision(self) -> bool:

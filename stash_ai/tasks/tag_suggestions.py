@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import numpy as np
 
@@ -109,7 +109,7 @@ class TagSuggestionsTask:
         tag_normalized = tag_embeddings / (tag_norms + 1e-8)
 
         # Compute dot product (cosine similarity for normalized vectors)
-        return np.dot(frame_normalized, tag_normalized.T)
+        return cast("NDArray[np.float32]", np.dot(frame_normalized, tag_normalized.T))
 
     def _aggregate_votes(
         self,

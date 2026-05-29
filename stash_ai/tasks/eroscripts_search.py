@@ -33,7 +33,7 @@ _MAX_RESULTS = 25
 
 class SearchTaskResult(TypedDict, total=False):
     status: str  # "complete" or "error"
-    results: list[dict]
+    results: list[dict[str, Any]]
     queries_run: list[str]
     suggested_query: str
     auth_required: bool
@@ -159,7 +159,7 @@ def _scene_query_inputs(stash: StashClient, scene_id: str, log: Any) -> QueryInp
     return QueryInputs(title=title, filename=filename, studio=studio, performers=performers)
 
 
-def _serialize_result(r: SearchResult) -> dict:
+def _serialize_result(r: SearchResult) -> dict[str, Any]:
     """Convert a SearchResult dataclass into the JSON shape consumed by JS."""
     payload = asdict(r)
     # Pick the closest-to-200px thumbnail for card display.
@@ -168,7 +168,7 @@ def _serialize_result(r: SearchResult) -> dict:
     return payload
 
 
-def _pick_thumbnail(thumbnails: list[dict]) -> str | None:
+def _pick_thumbnail(thumbnails: list[dict[str, Any]]) -> str | None:
     if not thumbnails:
         return None
     target = 200

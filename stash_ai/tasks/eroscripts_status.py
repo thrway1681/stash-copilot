@@ -24,6 +24,7 @@ import time
 from typing import Any, TypedDict
 
 from ..eroscripts import metadata as metadata_mod
+from ..eroscripts.metadata import SidecarMetadata
 from ..stash_client import StashClient
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,7 +38,7 @@ class StatusResult(TypedDict, total=False):
     has_sidecar: bool
     has_funscript_on_disk: bool
     funscript_filename: str | None  # basename of the .funscript Stash will use
-    sidecar: dict | None  # raw sidecar metadata, if present
+    sidecar: SidecarMetadata | None  # raw sidecar metadata, if present
     error: str | None
     request_id: str
 

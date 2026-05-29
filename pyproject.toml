@@ -124,7 +124,9 @@ torchvision = [
 
 # ===== MYPY TYPE CHECKING =====
 [tool.mypy]
-python_version = "3.10"
+# Match the runtime/CI interpreter (3.12). The codebase uses 3.11+ stdlib
+# (e.g. datetime.UTC), so checking against 3.10 produced false positives.
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = true

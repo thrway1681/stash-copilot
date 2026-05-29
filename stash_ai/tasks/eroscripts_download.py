@@ -31,7 +31,7 @@ class DownloadResult(TypedDict, total=False):
     error: str | None
     request_id: str
     # Phase=list:
-    attachments: list[dict]
+    attachments: list[dict[str, Any]]
     external_links: list[str]
     topic_title: str
     # Phase=download:

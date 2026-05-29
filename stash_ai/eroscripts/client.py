@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
@@ -54,7 +55,7 @@ class SearchResult:
     like_count: int
     created_at: str | None
     tags: list[str]
-    thumbnails: list[dict]  # raw Discourse thumbnail objects (multi-resolution)
+    thumbnails: list[dict[str, Any]]  # raw Discourse thumbnail objects (multi-resolution)
     category_id: int | None
 
 
@@ -333,7 +334,7 @@ def _is_login_redirect(resp: requests.Response) -> bool:
     return "/login" in location
 
 
-def _parse_search_results(data: dict) -> list[SearchResult]:
+def _parse_search_results(data: dict[str, Any]) -> list[SearchResult]:
     """Merge ``topics[]`` and ``posts[]`` from a /search.json payload.
 
     Discourse search returns both arrays; we join by ``post.topic_id`` so
@@ -341,7 +342,7 @@ def _parse_search_results(data: dict) -> list[SearchResult]:
     request.
     """
     topics = data.get("topics") or []
-    posts_by_topic: dict[int, dict] = {}
+    posts_by_topic: dict[int, dict[str, Any]] = {}
     for p in data.get("posts") or []:
         tid = p.get("topic_id")
         if isinstance(tid, int) and tid not in posts_by_topic:

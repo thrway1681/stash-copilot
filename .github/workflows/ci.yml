@@ -41,14 +41,10 @@ jobs:
       - name: Run tests
         run: uv run --extra dev pytest -q --tb=short --deselect "${KNOWN_FAILING}"
 
-  # Advisory (continue-on-error): the package currently has a known lint/format
-  # baseline (~97 ruff findings, ~19 files unformatted). Surfaced as annotations
-  # without blocking. Flip to a hard gate after a `ruff check --fix` + `ruff
-  # format` cleanup pass.
+  # Hard gate: the package is lint- and format-clean. Keep it that way.
   lint:
-    name: Lint & Format (advisory)
+    name: Lint & Format
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -62,12 +58,10 @@ jobs:
       - run: uv run --extra dev ruff check stash-copilot.py stash_ai/
       - run: uv run --extra dev ruff format --check stash-copilot.py stash_ai/
 
-  # Advisory: strict mypy has a known baseline (~124 errors). Goal is "no NEW
-  # errors"; surfaced without blocking.
+  # Hard gate: strict mypy passes clean over the shipped package.
   typecheck:
-    name: Type Check (advisory)
+    name: Type Check
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -76,7 +70,10 @@ jobs:
           enable-cache: true
       - run: uv python install ${{ env.PYTHON_VERSION }}
       - run: uv sync --extra dev
-      - run: uv run --extra dev mypy .
+      # Scope to the shipped package + entry point (same as lint + the [tool.mypy]
+      # `files` setting); `.` would also drag in throwaway poc_*/standalone/tools
+      # experimental scripts, some of which import optional, uninstalled libs.
+      - run: uv run --extra dev mypy stash-copilot.py stash_ai/
 
   # End-to-end check against a REAL Dockerized Stash, mirroring docs/TESTING.md §6.
   # Proves the host-runs-ML / container-runs-Stash seam: bind-mounted DB + media

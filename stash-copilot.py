@@ -60,7 +60,7 @@ class StashPlugin:
             return
 
         # Read input from stdin (provided by Stash)
-        self._read_input()
+        self.input = self._read_input()
 
         # Set connection details from input
         if self.input:
@@ -96,16 +96,17 @@ class StashPlugin:
             raise RuntimeError("Stash connection not initialized")
         return self.stash
 
-    def _read_input(self) -> None:
+    def _read_input(self) -> dict[str, Any] | None:
         """Read and parse JSON input from stdin."""
         try:
             input_str = sys.stdin.read()
             if input_str:
-                self.input = json.loads(input_str)
                 self.log("Input received", "debug")
+                return cast("dict[str, Any]", json.loads(input_str))
         except json.JSONDecodeError as e:
             self.error(f"Failed to parse input JSON: {e}")
             sys.exit(1)
+        return None
 
     def log(self, message: str, level: str = "info") -> None:
         """
@@ -254,7 +255,7 @@ class StashPlugin:
 
         data = self.call_gql(query, {"filter": filter_params or {}})
         if data and "findScenes" in data:
-            return data["findScenes"]["scenes"]
+            return cast("list[dict[str, Any]]", data["findScenes"]["scenes"])
         return []
 
     def get_plugin_settings(self, plugin_id: str) -> dict[str, Any]:
@@ -875,8 +876,8 @@ class MyPlugin(StashPlugin):
 
             if image_provider and image_model:
                 embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
+                    provider=cast("str", image_provider),
+                    model=cast("str", image_model),
                     device=image_device,
                 )
                 model_key = embedding_config.model_key
@@ -1617,8 +1618,8 @@ class MyPlugin(StashPlugin):
 
             if image_provider and image_model:
                 embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
+                    provider=cast("str", image_provider),
+                    model=cast("str", image_model),
                     device=image_device,
                 )
                 self.log(f"Text search enabled with: {image_provider}/{image_model}", "debug")
@@ -1936,8 +1937,8 @@ class MyPlugin(StashPlugin):
 
             if use_clip:
                 image_embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
+                    provider=cast("str", image_provider),
+                    model=cast("str", image_model),
                     device=image_device,
                 )
                 self.log(
@@ -1973,8 +1974,8 @@ class MyPlugin(StashPlugin):
                     "info",
                 )
                 embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
+                    provider=cast("str", image_provider),
+                    model=cast("str", image_model),
                     device=image_device,
                 )
             else:
@@ -2201,7 +2202,7 @@ class MyPlugin(StashPlugin):
             fetch_offset = 0 if needs_db_filtering else offset
 
             # Build find_similar arguments
-            find_similar_kwargs = {
+            find_similar_kwargs: dict[str, Any] = {
                 "query_embedding": query_record["composite_embedding"],
                 "limit": fetch_limit + offset if needs_db_filtering else limit,
                 "offset": fetch_offset,
@@ -2590,8 +2591,10 @@ class MyPlugin(StashPlugin):
                 args.get("min_frames") or plugin_settings.get("vision_min_frames") or "1"
             )
 
+            # FrameExtractionConfig is fps-based; convert the seconds interval
+            # (e.g. 10s -> 0.1 fps). Guard against a zero/negative interval.
             frame_config = FrameExtractionConfig(
-                interval_seconds=frame_interval,
+                fps_rate=(1.0 / frame_interval) if frame_interval > 0 else 0.1,
                 min_frames=min_frames,
                 max_frames=0,  # No limit for analysis
                 frame_width=640,
@@ -2920,8 +2923,8 @@ class MyPlugin(StashPlugin):
                     return
 
                 embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
+                    provider=cast("str", image_provider),
+                    model=cast("str", image_model),
                     device=image_device,
                 )
                 model_key = embedding_config.model_key
@@ -3027,7 +3030,7 @@ class MyPlugin(StashPlugin):
             # Embed the query text
             try:
                 result = embedder.embed_text(query)
-                query_embedding = result["embedding"]
+                text_query_embedding = result["embedding"]
             except Exception as e:
                 self._write_search_result(
                     request_id, {"status": "error", "error": f"Failed to embed query: {e!s}"}
@@ -3038,7 +3041,7 @@ class MyPlugin(StashPlugin):
             # Note: Text-to-image search typically has lower similarity scores (0.01-0.10)
             # so we use no minimum threshold and rely on relative ranking
             results = storage.find_similar(
-                query_embedding=query_embedding,
+                query_embedding=text_query_embedding,
                 limit=limit,
                 offset=offset,
                 min_similarity=0.0,
