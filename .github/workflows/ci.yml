@@ -101,10 +101,13 @@ jobs:
           mkdir -p docker/media
           # NOTE: clip length is bounded by -t; do NOT pass duration= in the lavfi
           # spec — some sources (e.g. mandelbrot) have no duration option and abort.
-          # Tolerate any single unsupported source and just require >=1 clip below.
+          # Clips MUST be longer than the embed task's frame-sampling period (fps=0.1
+          # => one frame per 10s): a <10s clip yields 0 extracted frames, so nothing
+          # gets embedded and recommendations fail with "insufficient data". 20s gives
+          # ~2 frames per scene. Tolerate any single unsupported source (require >=1).
           for src in "testsrc" "smptebars" "rgbtestsrc" "mandelbrot" "yuvtestsrc" "gradients"; do
             ffmpeg -y -f lavfi -i "${src}=size=320x240:rate=12" \
-              -t 4 -pix_fmt yuv420p -c:v libx264 "docker/media/clip_${src}.mp4" >/dev/null 2>&1 \
+              -t 20 -pix_fmt yuv420p -c:v libx264 "docker/media/clip_${src}.mp4" >/dev/null 2>&1 \
               || echo "skip unsupported lavfi source: ${src}"
           done
           ls -1 docker/media/*.mp4
