@@ -247,3 +247,24 @@ The plugin extends Stash's scene page by injecting four AI tabs into the native 
 - Fire-and-forget — triggering a backend task with no polling or status indicator
 - Error swallowing — `catch (e) { /* ignore */ }` with no user feedback
 
+## Agent skills
+
+Configuration the engineering skills (`to-issues`, `to-prd`, `triage`, `qa`,
+`diagnose`, `tdd`, `improve-codebase-architecture`, `zoom-out`) read for this repo.
+
+### Issue tracker
+
+GitHub Issues on `thrway1681/stash-copilot`, via the `gh` CLI. **`gh` MUST be
+authenticated as the `thrway1681` pseudonym, never the personal account** — verify
+with `gh api user --jq .login` before any write. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. `CONTEXT.md` + `docs/adr/` at the repo root (created lazily by
+`/grill-with-docs`). See `docs/agents/domain.md`.
+
