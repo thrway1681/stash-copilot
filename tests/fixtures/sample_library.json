@@ -1,0 +1,37 @@
+{
+  "scenes": [
+    {
+      "id": "1",
+      "title": "Sample Scene One",
+      "play_count": 25,
+      "o_counter": 3,
+      "rating100": 50,
+      "organized": true,
+      "tags": [{"id": "10", "name": "demo"}],
+      "performers": [{"id": "100", "name": "Performer A"}],
+      "files": [{"path": "/media/one.mp4", "size": 1048576, "duration": 600}]
+    },
+    {
+      "id": "2",
+      "title": "Sample Scene Two",
+      "play_count": 2,
+      "o_counter": 0,
+      "rating100": 0,
+      "organized": false,
+      "tags": [],
+      "performers": [],
+      "files": [{"path": "/media/two.mp4", "size": 524288, "duration": 300}]
+    }
+  ],
+  "tags": [
+    {"id": "10", "name": "demo"},
+    {"id": "11", "name": "favorites"}
+  ],
+  "plugin_config": {
+    "text_llm_provider": "ollama",
+    "text_llm_model": "llama3"
+  },
+  "configuration": {
+    "general": {"databasePath": "/fake/stash.sqlite"}
+  }
+}

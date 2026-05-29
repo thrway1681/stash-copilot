@@ -1,0 +1,2365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoRA Training Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #080a10;
+  --bg: #0c0e16;
+  --surface: #12141f;
+  --surface-2: #1a1d2b;
+  --surface-3: #222538;
+  --border: rgba(255,255,255,0.06);
+  --border-active: rgba(96,165,250,0.25);
+  --text: #e8eaf0;
+  --text-2: #9ca3af;
+  --text-3: #5b6070;
+  --blue: #60a5fa;
+  --blue-dim: rgba(96,165,250,0.12);
+  --purple: #8b5cf6;
+  --purple-dim: rgba(139,92,246,0.10);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34,211,238,0.10);
+  --green: #34d399;
+  --green-dim: rgba(52,211,153,0.12);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251,191,36,0.10);
+  --red: #f87171;
+  --red-dim: rgba(248,113,113,0.10);
+  --gradient-primary: linear-gradient(135deg, #3b82f6, #6366f1, #8b5cf6);
+  --gradient-surface: linear-gradient(180deg, #12141f, #0f1119);
+  --glow-blue: 0 0 20px rgba(96,165,250,0.15), 0 0 60px rgba(96,165,250,0.05);
+  --glow-green: 0 0 12px rgba(52,211,153,0.2);
+  --glow-red: 0 0 12px rgba(248,113,113,0.2);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font-display: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+html { font-size: 15px; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-display);
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Background texture */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgba(96,165,250,0.04), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139,92,246,0.03), transparent);
+  pointer-events: none; z-index: 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(96,165,250,0.35); }
+
+/* Layout */
+.shell {
+  position: relative; z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1.5rem 3rem;
+}
+
+/* ── Header ─────────────────────────────────── */
+.header {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 1rem;
+  padding: 1rem 0 0.75rem;
+  background: linear-gradient(180deg, var(--bg-deep) 60%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: fadeSlideUp 0.35s ease-out;
+}
+
+.orb-wrap {
+  position: relative;
+  width: 36px; height: 36px;
+  flex-shrink: 0;
+}
+
+.orb {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--gradient-primary);
+  opacity: 0.85;
+}
+
+.orb.active {
+  animation: orbPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; box-shadow: 0 0 16px rgba(99,102,241,0.3); }
+  50% { transform: scale(1.12); opacity: 1; box-shadow: 0 0 28px rgba(99,102,241,0.5), 0 0 56px rgba(96,165,250,0.15); }
+}
+
+.orb-ring {
+  position: absolute; inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(96,165,250,0.15);
+  animation: orbRing 3s ease-in-out infinite;
+}
+
+.orb.active + .orb-ring {
+  border-color: rgba(96,165,250,0.3);
+}
+
+@keyframes orbRing {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 0; }
+}
+
+.header-text { flex: 1; }
+.header-text h1 {
+  font-size: 1.15rem; font-weight: 600; letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text), var(--blue));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header-meta {
+  display: flex; align-items: center; gap: 0.75rem;
+}
+
+.run-selector {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.6rem;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.run-selector:focus { border-color: var(--blue); }
+.run-selector option { background: var(--surface); color: var(--text); }
+
+.status-pill {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.25rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  font-size: 0.73rem; font-weight: 500;
+  color: var(--text-2);
+  transition: all 0.3s;
+}
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: all 0.3s;
+}
+
+.status-pill.training { border-color: rgba(52,211,153,0.3); color: var(--green); }
+.status-pill.training .status-dot {
+  background: var(--green);
+  box-shadow: var(--glow-green);
+  animation: dotPulse 2s ease-in-out infinite;
+}
+
+.status-pill.paused { border-color: rgba(251,191,36,0.3); color: var(--amber); }
+.status-pill.paused .status-dot {
+  background: var(--amber);
+}
+
+.status-pill.completed { border-color: rgba(96,165,250,0.3); color: var(--blue); }
+.status-pill.completed .status-dot {
+  background: var(--blue);
+}
+
+.status-pill.stopped { border-color: rgba(248,113,113,0.3); color: var(--red); }
+.status-pill.stopped .status-dot {
+  background: var(--red);
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Entrance animations ───────────────────── */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes progressShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ── Control Bar ───────────────────────────── */
+.control-bar {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  animation: fadeSlideUp 0.4s ease-out both;
+  animation-delay: 0.05s;
+  flex-wrap: wrap;
+}
+
+.ctrl-btn {
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.35rem 0.75rem;
+  border: none; border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: 0.72rem; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ctrl-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+
+.ctrl-btn.pause {
+  background: var(--amber-dim);
+  color: var(--amber);
+  border: 1px solid rgba(251,191,36,0.2);
+}
+.ctrl-btn.pause:hover:not(:disabled) {
+  background: rgba(251,191,36,0.2);
+  transform: translateY(-1px);
+}
+
+.ctrl-btn.stop {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(248,113,113,0.2);
+}
+.ctrl-btn.stop:hover:not(:disabled) {
+  background: rgba(248,113,113,0.2);
+  transform: translateY(-1px);
+}
+
+.ctrl-btn.resume {
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.25);
+}
+.ctrl-btn.resume:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99,102,241,0.4);
+}
+
+.ctrl-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  transition-duration: 0.05s;
+}
+
+.lr-control {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-left: auto;
+}
+
+.lr-control label {
+  font-size: 0.62rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.lr-slider {
+  width: 120px; height: 4px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.lr-value {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--blue);
+  min-width: 5rem;
+}
+
+.ctrl-btn.apply-lr {
+  background: var(--blue-dim);
+  color: var(--blue);
+  border: 1px solid rgba(96,165,250,0.2);
+  font-size: 0.68rem;
+  padding: 0.3rem 0.6rem;
+}
+.ctrl-btn.apply-lr:hover:not(:disabled) {
+  background: rgba(96,165,250,0.2);
+}
+
+/* ── Launch Panel ──────────────────────────────── */
+.launch-panel {
+  margin-top: 0.5rem;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.35s ease, opacity 0.25s ease, margin 0.25s ease;
+}
+.launch-panel.open {
+  max-height: 600px;
+  opacity: 1;
+  margin-top: 0.75rem;
+}
+.launch-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem 0.75rem;
+  padding: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.launch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.launch-field label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.launch-field input, .launch-field select {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.launch-field input:focus {
+  border-color: var(--border-active);
+}
+.launch-field.wide {
+  grid-column: 1 / -1;
+}
+.path-remap-preview {
+  margin-top: 0.3rem; padding: 0.5rem 0.6rem;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-family: var(--font-mono);
+  font-size: 0.68rem; display: flex; flex-direction: column; gap: 0.25rem;
+}
+.path-remap-preview.valid { border-color: rgba(52,211,153,0.3); }
+.path-remap-preview.invalid { border-color: rgba(248,113,113,0.3); }
+.remap-row { display: flex; gap: 0.5rem; align-items: baseline; }
+.remap-label {
+  font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-3); min-width: 3rem;
+}
+.remap-path { color: var(--text-2); word-break: break-all; }
+.remap-path .remap-changed { color: var(--green); }
+.remap-path .remap-unchanged { color: var(--red); opacity: 0.7; }
+.field-status {
+  font-size: 0.65rem; padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm); font-weight: 600;
+  margin-left: 0.4rem; display: inline-block;
+}
+.field-status.valid { color: var(--green); background: var(--green-dim); }
+.field-status.invalid { color: var(--red); background: var(--red-dim); }
+.field-status:empty { display: none; }
+.launch-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+.launch-actions .ctrl-btn.launch {
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.25);
+  font-size: 0.75rem;
+  padding: 0.4rem 1.2rem;
+}
+.launch-actions .ctrl-btn.launch:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99,102,241,0.4);
+}
+.launch-status {
+  font-size: 0.72rem;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}
+
+/* ── Process Indicators ─────────────────────── */
+.proc-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.proc-indicator .proc-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.proc-indicator.running .proc-dot {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(52,211,153,0.4);
+  animation: pulse 2s infinite;
+}
+.proc-indicator.stopped .proc-dot {
+  background: var(--text-3);
+}
+.ctrl-btn.toggle-launch {
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid rgba(52,211,153,0.2);
+}
+.ctrl-btn.toggle-launch:hover:not(:disabled) {
+  background: rgba(52,211,153,0.2);
+  transform: translateY(-1px);
+}
+.ctrl-btn.stop-all {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(248,113,113,0.2);
+}
+.ctrl-btn.stop-all:hover:not(:disabled) {
+  background: rgba(248,113,113,0.2);
+  transform: translateY(-1px);
+}
+
+/* ── Log Viewer ────────────────────────────────── */
+.log-section {
+  margin-top: 0.75rem;
+  animation: fadeSlideUp 0.4s ease-out both;
+}
+.log-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.log-tab {
+  padding: 0.5rem 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-3);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+  font-family: var(--font-display);
+}
+.log-tab:hover { color: var(--text-2); }
+.log-tab.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+.log-output {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 0.6rem;
+  max-height: 280px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-output .log-line-dash { color: var(--text-3); }
+.log-output .log-line-err { color: var(--red); }
+.log-output .log-line-ok { color: var(--green); }
+.log-empty {
+  text-align: center;
+  color: var(--text-3);
+  padding: 2rem;
+  font-size: 0.75rem;
+}
+
+/* ── Metrics Grid ───────────────────────────── */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .metrics { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 520px) {
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
+.metric {
+  position: relative;
+  padding: 0.85rem 0.9rem 0.7rem;
+  background: var(--gradient-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s, transform 0.2s, box-shadow 0.3s;
+  animation: fadeSlideUp 0.5s ease-out both;
+}
+
+.metric:nth-child(1) { animation-delay: 0.05s; }
+.metric:nth-child(2) { animation-delay: 0.10s; }
+.metric:nth-child(3) { animation-delay: 0.15s; }
+.metric:nth-child(4) { animation-delay: 0.20s; }
+.metric:nth-child(5) { animation-delay: 0.25s; }
+.metric:nth-child(6) { animation-delay: 0.30s; }
+
+.metric:hover {
+  border-color: var(--border-active);
+  transform: translateY(-2px);
+  box-shadow: var(--glow-blue);
+}
+
+.metric-label {
+  font-size: 0.62rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-3);
+  margin-bottom: 0.2rem;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 1.25rem; font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.metric-value.updated {
+  animation: countUp 0.4s ease-out;
+}
+
+.metric-value .unit {
+  font-size: 0.7rem; font-weight: 500;
+  color: var(--text-3); margin-left: 0.15rem;
+}
+
+.metric-sub {
+  font-size: 0.65rem;
+  color: var(--text-3);
+  margin-top: 0.15rem;
+  font-family: var(--font-mono);
+}
+
+.metric-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2.5px;
+  background: rgba(255,255,255,0.03);
+}
+
+.metric-bar-fill {
+  height: 100%;
+  border-radius: 0 2px 2px 0;
+  background: var(--gradient-primary);
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 8px rgba(96,165,250,0.3);
+}
+
+/* Color variants */
+.metric[data-color="blue"] .metric-value { color: var(--blue); }
+.metric[data-color="green"] .metric-value { color: var(--green); }
+.metric[data-color="purple"] .metric-value { color: var(--purple); }
+.metric[data-color="cyan"] .metric-value { color: var(--cyan); }
+.metric[data-color="amber"] .metric-value { color: var(--amber); }
+.metric[data-color="red"] .metric-value { color: var(--red); }
+
+.metric[data-color="green"] .metric-bar-fill { background: linear-gradient(90deg, #34d399, #22d3ee); }
+.metric[data-color="purple"] .metric-bar-fill { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+.metric[data-color="cyan"] .metric-bar-fill { background: linear-gradient(90deg, #22d3ee, #60a5fa); }
+.metric[data-color="amber"] .metric-bar-fill { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.metric[data-color="red"] .metric-bar-fill { background: linear-gradient(90deg, #f87171, #ef4444); }
+
+/* ── GPU Monitor Strip ──────────────────────── */
+.gpu-strip {
+  display: flex; align-items: center; gap: 1.2rem;
+  margin-top: 0.6rem;
+  padding: 0.55rem 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  animation: fadeSlideUp 0.5s ease-out both;
+  animation-delay: 0.32s;
+  flex-wrap: wrap;
+}
+
+.gpu-item {
+  display: flex; align-items: center; gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.gpu-item .gpu-label {
+  font-size: 0.6rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.gpu-item .gpu-val {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.vram-bar-wrap {
+  display: flex; align-items: center; gap: 0.4rem;
+  flex: 1;
+  min-width: 120px;
+}
+
+.vram-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.vram-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--gradient-primary);
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 6px rgba(99,102,241,0.3);
+}
+
+.vram-bar-fill.warning { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.vram-bar-fill.critical { background: linear-gradient(90deg, #f87171, #ef4444); }
+
+.gpu-unavailable {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ── Progress Section ──────────────────────── */
+.progress-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  animation: fadeSlideUp 0.5s ease-out both;
+  animation-delay: 0.35s;
+}
+
+.progress-header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.progress-epoch {
+  font-size: 0.82rem; font-weight: 600;
+  color: var(--text);
+}
+
+.progress-eta {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-3);
+}
+
+.progress-track {
+  height: 8px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--gradient-primary);
+  box-shadow: 0 0 12px rgba(99,102,241,0.3);
+  transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+  animation: progressShimmer 2s ease-in-out infinite;
+}
+
+.progress-info {
+  display: flex; gap: 1.5rem; align-items: baseline;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.progress-pct {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--blue);
+}
+
+.progress-info .sep { color: var(--text-3); opacity: 0.4; }
+
+/* ── Charts Row ────────────────────────────── */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .charts-row { grid-template-columns: 1fr; }
+}
+
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  animation: fadeSlideUp 0.5s ease-out both;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.chart-card:nth-child(1) { animation-delay: 0.38s; }
+.chart-card:nth-child(2) { animation-delay: 0.42s; }
+
+.chart-card:hover {
+  border-color: var(--border-active);
+  box-shadow: var(--glow-blue);
+}
+
+.chart-title {
+  font-size: 0.72rem; font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 220px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Gallery Section ───────────────────────── */
+.gallery-section {
+  margin-top: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  animation: fadeSlideUp 0.5s ease-out both;
+  animation-delay: 0.45s;
+}
+
+.gallery-header {
+  display: flex; align-items: center; gap: 0.75rem;
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.gallery-title {
+  font-size: 0.82rem; font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.gallery-nav {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+
+.gallery-nav select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  cursor: pointer;
+  outline: none;
+}
+.gallery-nav select:focus { border-color: var(--blue); }
+
+.gallery-arrow {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.gallery-arrow:hover { border-color: var(--blue); color: var(--blue); }
+.gallery-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.gallery-mode-toggle {
+  display: flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.gallery-mode-btn {
+  padding: 0.2rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.gallery-mode-btn:hover { color: var(--text-2); }
+
+.gallery-mode-btn.active {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.gallery-mode-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.probe-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-3);
+}
+
+.gallery-image-wrap {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.gallery-image-wrap img {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+}
+
+.gallery-placeholder {
+  color: var(--text-3);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 2rem;
+}
+
+.gallery-placeholder .placeholder-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.3;
+}
+
+/* ── Run History Table ──────────────────────── */
+.history-section {
+  margin-top: 0.75rem;
+  animation: fadeSlideUp 0.5s ease-out both;
+  animation-delay: 0.5s;
+}
+
+.section-title {
+  font-size: 0.82rem; font-weight: 600; color: var(--text-2);
+  letter-spacing: -0.01em;
+  margin-bottom: 0.5rem;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.history-table th,
+.history-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-size: 0.72rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-table th {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6rem;
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+
+.history-table td {
+  font-family: var(--font-mono);
+  color: var(--text-2);
+}
+
+.history-table tr:last-child td { border-bottom: none; }
+
+.history-table tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.history-table tbody tr:hover { background: rgba(96,165,250,0.04); }
+.history-table tbody tr.active-row { background: rgba(96,165,250,0.08); border-left: 3px solid var(--blue); }
+
+.run-status-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 100px;
+  font-size: 0.62rem; font-weight: 600;
+}
+
+.run-status-badge.training { background: var(--green-dim); color: var(--green); }
+.run-status-badge.paused { background: var(--amber-dim); color: var(--amber); }
+.run-status-badge.completed { background: var(--blue-dim); color: var(--blue); }
+.run-status-badge.stopped { background: var(--red-dim); color: var(--red); }
+.run-status-badge.idle { background: rgba(255,255,255,0.04); color: var(--text-3); }
+.run-status-badge.unknown { background: rgba(255,255,255,0.04); color: var(--text-3); }
+
+/* ── Error state ─────────────────────────────── */
+.error-banner {
+  display: none;
+  padding: 0.5rem 1rem;
+  background: var(--red-dim);
+  border: 1px solid rgba(248,113,113,0.2);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem; color: var(--red);
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+}
+.error-banner.show { display: block; }
+
+/* ── Tooltip ─────────────────────────────────── */
+.chart-tooltip {
+  position: fixed;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text);
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.chart-tooltip.visible { opacity: 1; }
+
+/* ── Footer ────────────────────────────────── */
+.footer {
+  margin-top: 2rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.65rem; color: var(--text-3);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.footer .last-poll { opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- Header -->
+  <header class="header">
+    <div class="orb-wrap">
+      <div class="orb" id="orb"></div>
+      <div class="orb-ring"></div>
+    </div>
+    <div class="header-text">
+      <h1>LoRA Training</h1>
+    </div>
+    <div class="header-meta">
+      <select class="run-selector" id="runSelector">
+        <option value="">No runs</option>
+      </select>
+      <div class="status-pill" id="statusPill">
+        <div class="status-dot"></div>
+        <span id="statusText">idle</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Control Bar -->
+  <div class="control-bar" id="controlBar">
+    <button class="ctrl-btn toggle-launch" id="btnToggleLaunch">Launch</button>
+    <button class="ctrl-btn stop-all" id="btnStopAll" disabled>Stop All</button>
+    <div class="proc-indicator stopped" id="procTraining">
+      <div class="proc-dot"></div>
+      <span>Train: off</span>
+    </div>
+    <div style="flex: 1"></div>
+    <button class="ctrl-btn resume" id="btnResume" disabled>Resume</button>
+    <button class="ctrl-btn pause" id="btnPause" disabled>Pause</button>
+    <button class="ctrl-btn stop" id="btnStop" disabled>Stop</button>
+    <div class="lr-control">
+      <label>LR</label>
+      <input type="range" class="lr-slider" id="lrSlider" min="-7" max="-3" step="0.1" value="-4">
+      <span class="lr-value" id="lrValue">1.0e-4</span>
+      <button class="ctrl-btn apply-lr" id="btnApplyLR" disabled>Apply</button>
+    </div>
+  </div>
+
+  <!-- Launch Panel (collapsible) -->
+  <div class="launch-panel" id="launchPanel">
+    <div class="launch-form">
+      <div class="launch-field wide">
+        <label>CSV Path</label>
+        <input type="text" id="launchCSV" placeholder="Path to training CSV...">
+        <span id="csvStatus" class="field-status"></span>
+        <span id="imageExistsStatus" class="field-status" style="display:none;"></span>
+      </div>
+      <div class="launch-field">
+        <label>Run Name</label>
+        <input type="text" id="launchRunName" placeholder="auto-generated">
+      </div>
+      <div class="launch-field">
+        <label>Epochs</label>
+        <input type="number" id="launchEpochs" value="10" min="1" max="500">
+      </div>
+      <div class="launch-field">
+        <label>Learning Rate</label>
+        <input type="text" id="launchLR" value="2e-4">
+      </div>
+      <div class="launch-field">
+        <label>LoRA Rank</label>
+        <input type="number" id="launchLoraRank" value="8" min="1" max="128">
+      </div>
+      <div class="launch-field">
+        <label>LoRA Alpha</label>
+        <input type="number" id="launchLoraAlpha" value="16" min="1" max="256">
+      </div>
+      <div class="launch-field">
+        <label>Patience</label>
+        <input type="number" id="launchPatience" value="3" min="1" max="50">
+      </div>
+      <div class="launch-field">
+        <label>Batch Size</label>
+        <input type="number" id="launchBatchSize" value="0" min="0" max="128">
+        <small style="color: var(--text-dim); font-size: 0.7rem;">0 = auto-detect</small>
+      </div>
+      <div class="launch-field">
+        <label>Eval Interval</label>
+        <input type="number" id="launchEvalInterval" value="0" min="0" max="10000">
+        <small style="color: var(--text-dim); font-size: 0.7rem;">0 = epoch-only</small>
+      </div>
+      <div class="launch-field" style="grid-column: 1 / -1;">
+        <label>Path Remap</label>
+        <input type="text" id="launchPathRemap" value="" placeholder="/home/user=H:">
+        <small style="color: var(--text-dim); font-size: 0.7rem;">REMOTE=LOCAL — remap CSV paths from source machine to this machine</small>
+        <div id="pathRemapPreview" class="path-remap-preview" style="display:none;">
+          <div class="remap-row">
+            <span class="remap-label">Before</span>
+            <span class="remap-path" id="remapBefore"></span>
+          </div>
+          <div class="remap-row">
+            <span class="remap-label">After</span>
+            <span class="remap-path" id="remapAfter"></span>
+          </div>
+        </div>
+      </div>
+      <div class="launch-actions">
+        <button class="ctrl-btn launch" id="btnLaunchTrain">Start Training</button>
+        <span class="launch-status" id="launchStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error banner -->
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- Metric Cards -->
+  <div class="metrics" id="metricsGrid">
+    <div class="metric" data-color="blue" data-key="train_loss">
+      <div class="metric-label">Train Loss</div>
+      <div class="metric-value" id="metricTrainLoss">--</div>
+      <div class="metric-sub" id="metricTrainLossSub"></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-color="purple" data-key="val_loss">
+      <div class="metric-label">Val Loss</div>
+      <div class="metric-value" id="metricValLoss">--</div>
+      <div class="metric-sub" id="metricValLossSub"></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-color="green" data-key="r1">
+      <div class="metric-label">R@1 (i2t)</div>
+      <div class="metric-value" id="metricR1">--</div>
+      <div class="metric-sub" id="metricR1Sub"></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-color="cyan" data-key="r5">
+      <div class="metric-label">R@5 (i2t)</div>
+      <div class="metric-value" id="metricR5">--</div>
+      <div class="metric-sub" id="metricR5Sub"></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-color="amber" data-key="lr">
+      <div class="metric-label">Learning Rate</div>
+      <div class="metric-value" id="metricLR">--</div>
+      <div class="metric-sub" id="metricLRSub"></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-color="red" data-key="vram">
+      <div class="metric-label">VRAM Used</div>
+      <div class="metric-value" id="metricVRAM">--</div>
+      <div class="metric-sub" id="metricVRAMSub"></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width: 0%"></div></div>
+    </div>
+  </div>
+
+  <!-- GPU Monitor Strip -->
+  <div class="gpu-strip" id="gpuStrip">
+    <div class="gpu-item">
+      <span class="gpu-label">GPU</span>
+      <span class="gpu-val" id="gpuUtil">--</span><span class="unit">%</span>
+    </div>
+    <div class="gpu-item vram-bar-wrap">
+      <span class="gpu-label">VRAM</span>
+      <div class="vram-bar-track">
+        <div class="vram-bar-fill" id="vramBarFill" style="width: 0%"></div>
+      </div>
+      <span class="gpu-val" id="gpuVRAMText">--</span>
+    </div>
+    <div class="gpu-item">
+      <span class="gpu-label">Temp</span>
+      <span class="gpu-val" id="gpuTemp">--</span><span class="unit">&deg;C</span>
+    </div>
+    <div class="gpu-item">
+      <span class="gpu-label">Power</span>
+      <span class="gpu-val" id="gpuPower">--</span><span class="unit">W</span>
+    </div>
+  </div>
+
+  <!-- Progress Section -->
+  <div class="progress-section" id="progressSection">
+    <div class="progress-header">
+      <span class="progress-epoch" id="progressEpoch">Epoch -- / --</span>
+      <span class="progress-eta" id="progressETA"></span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+    </div>
+    <div class="progress-info">
+      <span class="progress-pct" id="progressPct">0%</span>
+      <span class="sep">|</span>
+      <span id="progressSteps">Step 0 / 0</span>
+      <span class="sep">|</span>
+      <span id="progressElapsed">0s elapsed</span>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-title">Loss Curves</div>
+      <canvas class="chart-canvas" id="lossChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Retrieval R@K (Base vs LoRA)</div>
+      <canvas class="chart-canvas" id="rkChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Nearest-Neighbor Gallery -->
+  <div class="gallery-section" id="gallerySection">
+    <div class="gallery-header">
+      <div class="gallery-title">Nearest-Neighbor Gallery</div>
+      <div class="gallery-mode-toggle">
+        <button class="gallery-mode-btn active" id="galleryModeProbes">Probes</button>
+        <button class="gallery-mode-btn" id="galleryModeText">Text Queries</button>
+      </div>
+      <div class="gallery-nav">
+        <select id="galleryEpochSelect"></select>
+        <button class="gallery-arrow" id="galleryPrev">&larr;</button>
+        <span class="probe-label" id="probeLabel">Probe 0 / 0</span>
+        <button class="gallery-arrow" id="galleryNext">&rarr;</button>
+      </div>
+    </div>
+    <div class="gallery-image-wrap" id="galleryImageWrap">
+      <div class="gallery-placeholder">
+        <div class="placeholder-icon">&#x1f50d;</div>
+        <div>No evaluation data yet</div>
+        <div style="font-size: 0.7rem; margin-top: 0.3rem; color: var(--text-3)">
+          Gallery images appear after the first epoch completes
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Run History Table -->
+  <div class="history-section">
+    <div class="section-title">Run History</div>
+    <table class="history-table" id="historyTable">
+      <thead>
+        <tr>
+          <th>Run Name</th>
+          <th>Status</th>
+          <th>Epochs</th>
+          <th>Best Val Loss</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody id="historyBody">
+        <tr><td colspan="5" style="text-align:center; color: var(--text-3);">No runs found</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Log Viewer -->
+  <div class="log-section" id="logSection">
+    <div class="log-tabs">
+      <button class="log-tab active" id="logTabTraining" data-target="training">Training Logs</button>
+    </div>
+    <div class="log-output" id="logOutput">
+      <div class="log-empty">No log output yet. Launch a process to see logs here.</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    LoRA Training Dashboard
+    <span class="last-poll" id="lastPoll"></span>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div class="chart-tooltip" id="chartTooltip"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────
+let currentRun = '';
+let isTraining = false;
+let pollInterval = 10000;
+let runs = [];
+let lossHistory = [];
+let latestEval = null;
+let currentProbe = 0;
+let probeCount = 0;
+let selectedGalleryEpoch = 0;
+let galleryMode = 'probes';
+let textQueryCount = 0;
+let currentTextQuery = 0;
+let previousMetrics = {};
+let processState = { training: { running: false } };
+let logAutoScroll = true;
+
+// ── DOM Refs ──────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const orb = $('orb');
+const statusPill = $('statusPill');
+const statusText = $('statusText');
+const runSelector = $('runSelector');
+const errorBanner = $('errorBanner');
+const lrSlider = $('lrSlider');
+const lrValue = $('lrValue');
+const galleryEpochSelect = $('galleryEpochSelect');
+const probeLabel = $('probeLabel');
+const galleryImageWrap = $('galleryImageWrap');
+const chartTooltip = $('chartTooltip');
+const launchPanel = $('launchPanel');
+const logOutput = $('logOutput');
+const procTrainingEl = $('procTraining');
+
+// ── Init ──────────────────────────────────────────────────────────
+async function init() {
+  // Validate CSV path on load — server provides DEFAULT_CSV when field is empty
+  fetchCsvSample();
+
+  await fetchRuns();
+  pollStatus();
+  pollLossHistory();
+  pollProcesses();
+  pollLogs();
+
+  runSelector.addEventListener('change', () => {
+    currentRun = runSelector.value;
+    currentProbe = 0;
+    currentTextQuery = 0;
+    selectedGalleryEpoch = 0;
+    pollStatus();
+    pollLossHistory();
+  });
+
+  lrSlider.addEventListener('input', () => {
+    const val = Math.pow(10, parseFloat(lrSlider.value));
+    lrValue.textContent = val.toExponential(1);
+  });
+
+  // Existing control buttons (control.json based)
+  $('btnPause').addEventListener('click', () => sendControl('pause'));
+  $('btnStop').addEventListener('click', () => sendControl('stop'));
+  $('btnResume').addEventListener('click', () => sendControl('resume'));
+  $('btnApplyLR').addEventListener('click', () => {
+    const val = Math.pow(10, parseFloat(lrSlider.value));
+    sendControl('set_lr', val);
+  });
+
+  // Launch panel toggle
+  $('btnToggleLaunch').addEventListener('click', () => {
+    launchPanel.classList.toggle('open');
+  });
+
+  // Launch training
+  $('btnLaunchTrain').addEventListener('click', launchTraining);
+
+  // Stop all processes
+  $('btnStopAll').addEventListener('click', stopAllProcesses);
+
+  // Log auto-scroll detection
+  logOutput.addEventListener('scroll', () => {
+    logAutoScroll = logOutput.scrollTop + logOutput.clientHeight >= logOutput.scrollHeight - 20;
+  });
+
+  // Gallery mode toggle
+  $('galleryModeProbes').addEventListener('click', () => {
+    galleryMode = 'probes';
+    $('galleryModeProbes').classList.add('active');
+    $('galleryModeText').classList.remove('active');
+    updateGallery();
+  });
+  $('galleryModeText').addEventListener('click', () => {
+    if (textQueryCount <= 0) return;
+    galleryMode = 'text';
+    $('galleryModeText').classList.add('active');
+    $('galleryModeProbes').classList.remove('active');
+    updateGallery();
+  });
+
+  // Gallery controls
+  $('galleryPrev').addEventListener('click', () => {
+    if (galleryMode === 'probes') {
+      if (currentProbe > 0) { currentProbe--; updateGallery(); }
+    } else {
+      if (currentTextQuery > 0) { currentTextQuery--; updateGallery(); }
+    }
+  });
+  $('galleryNext').addEventListener('click', () => {
+    if (galleryMode === 'probes') {
+      if (currentProbe < probeCount - 1) { currentProbe++; updateGallery(); }
+    } else {
+      if (currentTextQuery < textQueryCount - 1) { currentTextQuery++; updateGallery(); }
+    }
+  });
+  galleryEpochSelect.addEventListener('change', () => {
+    selectedGalleryEpoch = parseInt(galleryEpochSelect.value) || 0;
+    updateGallery();
+  });
+
+  // Loss chart hover
+  const lossCanvas = $('lossChart');
+  lossCanvas.addEventListener('mousemove', e => handleLossChartHover(e, lossCanvas));
+  lossCanvas.addEventListener('mouseleave', () => { chartTooltip.classList.remove('visible'); });
+}
+
+// ── API Calls ─────────────────────────────────────────────────────
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    showError(`Failed to fetch ${url}: ${e.message}`);
+    return null;
+  }
+}
+
+async function fetchRuns() {
+  const data = await fetchJSON('/api/runs');
+  if (!data) return;
+  runs = data.runs || [];
+  updateRunSelector();
+  updateHistoryTable();
+}
+
+async function pollStatus() {
+  if (!currentRun) {
+    setTimeout(pollStatus, pollInterval);
+    return;
+  }
+
+  const data = await fetchJSON(`/api/status?run=${encodeURIComponent(currentRun)}`);
+  if (!data || data.error) {
+    setTimeout(pollStatus, pollInterval);
+    return;
+  }
+
+  isTraining = data.status === 'training';
+  pollInterval = isTraining ? 2000 : 10000;
+
+  updateStatusPill(data.status);
+  updateMetricCards(data);
+  updateGPUStrip(data.gpu);
+  updateProgress(data);
+  updateControlButtons(data.status);
+  updateEvalEpochs(data.eval_epochs || []);
+  probeCount = data.probe_count || 0;
+  textQueryCount = data.text_query_count || 0;
+  $('galleryModeText').disabled = textQueryCount <= 0;
+  updateGallery();
+  hideError();
+
+  $('lastPoll').textContent = ' | polled ' + new Date().toLocaleTimeString();
+
+  // Refresh runs list periodically
+  if (Math.random() < 0.1) fetchRuns();
+
+  setTimeout(pollStatus, pollInterval);
+}
+
+async function pollLossHistory() {
+  if (!currentRun) {
+    setTimeout(pollLossHistory, 30000);
+    return;
+  }
+
+  const data = await fetchJSON(`/api/loss-history?run=${encodeURIComponent(currentRun)}`);
+  if (data && data.history) {
+    lossHistory = data.history;
+    drawLossChart();
+  }
+
+  // Also fetch latest eval for R@K chart
+  if (runs.length > 0) {
+    const run = runs.find(r => r.name === currentRun);
+    if (run) {
+      const statusData = await fetchJSON(`/api/status?run=${encodeURIComponent(currentRun)}`);
+      if (statusData && statusData.eval_epochs && statusData.eval_epochs.length > 0) {
+        const latestEpoch = statusData.eval_epochs[statusData.eval_epochs.length - 1];
+        const evalData = await fetchJSON(`/api/eval/${encodeURIComponent(currentRun)}/${latestEpoch}`);
+        if (evalData && Object.keys(evalData).length > 0) {
+          latestEval = evalData;
+          drawRKChart();
+        }
+      }
+    }
+  }
+
+  setTimeout(pollLossHistory, isTraining ? 5000 : 30000);
+}
+
+async function sendControl(command, value = null) {
+  if (!currentRun) return;
+  try {
+    const body = { run: currentRun, command };
+    if (value !== null) body.value = value;
+    const res = await fetch('/api/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.error) {
+      showError(data.error);
+    }
+  } catch (e) {
+    showError(`Control command failed: ${e.message}`);
+  }
+}
+
+// ── Process Management ────────────────────────────────────────────
+
+async function pollProcesses() {
+  const data = await fetchJSON('/api/processes');
+  if (data) {
+    const prevTraining = processState.training.running;
+    processState = data;
+    updateProcessIndicators();
+
+    // Auto-refresh runs when training just finished
+    if (prevTraining && !data.training.running) {
+      fetchRuns();
+    }
+  }
+
+  const anyRunning = processState.training.running;
+  setTimeout(pollProcesses, anyRunning ? 2000 : 5000);
+}
+
+function updateProcessIndicators() {
+  const t = processState.training;
+
+  procTrainingEl.className = 'proc-indicator ' + (t.running ? 'running' : 'stopped');
+  procTrainingEl.querySelector('span').textContent = t.running
+    ? `Train: PID ${t.pid}` : 'Train: off';
+
+  // Button states
+  $('btnStopAll').disabled = !t.running;
+  $('btnLaunchTrain').disabled = t.running;
+  $('btnLaunchTrain').textContent = t.running ? 'Training…' : 'Start Training';
+}
+
+async function launchTraining() {
+  const btn = $('btnLaunchTrain');
+  const status = $('launchStatus');
+  btn.disabled = true;
+  status.textContent = 'Launching training…';
+
+  const body = {};
+  const csv = $('launchCSV').value.trim();
+  if (csv) body.csv = csv;
+  const runName = $('launchRunName').value.trim();
+  if (runName) body.run_name = runName;
+  const epochs = parseInt($('launchEpochs').value);
+  if (epochs) body.epochs = epochs;
+  const lr = $('launchLR').value.trim();
+  if (lr) body.lr = parseFloat(lr);
+  const rank = parseInt($('launchLoraRank').value);
+  if (rank) body.lora_rank = rank;
+  const alpha = parseInt($('launchLoraAlpha').value);
+  if (alpha) body.lora_alpha = alpha;
+  const patience = parseInt($('launchPatience').value);
+  if (patience) body.patience = patience;
+  const batchSize = parseInt($('launchBatchSize').value);
+  if (batchSize > 0) body.batch_size = batchSize;
+  const evalInterval = parseInt($('launchEvalInterval').value);
+  if (evalInterval > 0) body.eval_interval = evalInterval;
+  const pathRemap = $('launchPathRemap').value.trim();
+  if (pathRemap) body.path_remap = pathRemap;
+  try {
+    const res = await fetch('/api/train/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.error) {
+      status.textContent = 'Error: ' + data.error;
+      btn.disabled = false;
+    } else {
+      status.textContent = `Launched (PID ${data.pid})`;
+      // Refresh runs after a brief delay
+      setTimeout(fetchRuns, 3000);
+    }
+  } catch (e) {
+    status.textContent = 'Launch failed: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+// ── Path Remap Preview ───────────────────────────────────────────
+let _cachedSamplePath = null;
+let _cachedImageExists = null;
+
+async function fetchCsvSample() {
+  const csvEl = $('launchCSV');
+  const csvPath = csvEl.value.trim();
+  const preview = $('pathRemapPreview');
+  const csvStatus = $('csvStatus');
+  const imgStatus = $('imageExistsStatus');
+  try {
+    // Empty path → server uses DEFAULT_CSV
+    const url = csvPath
+      ? '/api/csv-sample?path=' + encodeURIComponent(csvPath)
+      : '/api/csv-sample';
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.sample_path) {
+      _cachedSamplePath = data.sample_path;
+      _cachedImageExists = data.image_exists;
+      // Update placeholder to show the resolved path the server actually used
+      if (!csvPath && data.csv_path) csvEl.placeholder = data.csv_path;
+      csvStatus.textContent = '\u2713 ' + data.row_count + ' rows';
+      csvStatus.className = 'field-status valid';
+      if (data.image_exists) {
+        imgStatus.textContent = '\u2713 1st image exists';
+        imgStatus.className = 'field-status valid';
+      } else {
+        imgStatus.textContent = '\u2717 1st image not found';
+        imgStatus.className = 'field-status invalid';
+      }
+      imgStatus.style.display = 'inline-block';
+      updateRemapPreview();
+    } else {
+      _cachedSamplePath = null;
+      csvStatus.textContent = '\u2717 ' + (data.error || 'not found');
+      csvStatus.className = 'field-status invalid';
+      imgStatus.style.display = 'none';
+      preview.style.display = 'none';
+    }
+  } catch {
+    _cachedSamplePath = null;
+    csvStatus.textContent = '\u2717 not found';
+    csvStatus.className = 'field-status invalid';
+    imgStatus.style.display = 'none';
+    preview.style.display = 'none';
+  }
+}
+
+async function updateRemapPreview() {
+  if (!_cachedSamplePath) await fetchCsvSample();
+  const preview = $('pathRemapPreview');
+  const remap = $('launchPathRemap').value.trim();
+  if (!_cachedSamplePath || !remap) {
+    preview.style.display = 'none';
+    preview.classList.remove('valid', 'invalid');
+    // Restore original (non-remapped) image indicator
+    if (_cachedImageExists !== null) {
+      const imgStatus = $('imageExistsStatus');
+      if (_cachedImageExists) {
+        imgStatus.textContent = '\u2713 1st image exists';
+        imgStatus.className = 'field-status valid';
+      } else {
+        imgStatus.textContent = '\u2717 1st image not found';
+        imgStatus.className = 'field-status invalid';
+      }
+    }
+    return;
+  }
+  const parts = remap.split('=');
+  if (parts.length < 2) {
+    preview.style.display = 'none';
+    return;
+  }
+  const oldPrefix = parts[0];
+  const newPrefix = parts.slice(1).join('=');
+  const before = $('remapBefore');
+  const after = $('remapAfter');
+  before.textContent = _cachedSamplePath;
+  preview.style.display = 'flex';
+  const imgStatus = $('imageExistsStatus');
+  if (_cachedSamplePath.startsWith(oldPrefix)) {
+    const suffix = _cachedSamplePath.slice(oldPrefix.length);
+    const remapped = newPrefix + suffix;
+    after.innerHTML = '<span class="remap-changed">' + escHtml(newPrefix) + '</span>' + escHtml(suffix);
+    before.innerHTML = '<span class="remap-changed">' + escHtml(oldPrefix) + '</span>' + escHtml(suffix);
+    preview.classList.add('valid');
+    preview.classList.remove('invalid');
+    // Check if the remapped image path exists on this machine
+    try {
+      const res = await fetch('/api/path-exists?path=' + encodeURIComponent(remapped));
+      const data = await res.json();
+      if (data.exists) {
+        imgStatus.textContent = '\u2713 1st image exists (remapped)';
+        imgStatus.className = 'field-status valid';
+      } else {
+        imgStatus.textContent = '\u2717 1st image not found (remapped)';
+        imgStatus.className = 'field-status invalid';
+      }
+    } catch { /* keep existing indicator */ }
+  } else {
+    after.textContent = '(no match)';
+    preview.classList.add('invalid');
+    preview.classList.remove('valid');
+  }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Launch Parameter Persistence ──────────────────────────────────
+const LAUNCH_STORAGE_KEY = 'stash-copilot-launch-params';
+const LAUNCH_FIELDS = [
+  'launchCSV', 'launchEpochs', 'launchLR', 'launchLoraRank',
+  'launchLoraAlpha', 'launchPatience', 'launchBatchSize',
+  'launchEvalInterval', 'launchPathRemap',
+];
+
+function saveLaunchParams() {
+  const params = {};
+  for (const id of LAUNCH_FIELDS) {
+    params[id] = $(id).value;
+  }
+  try { localStorage.setItem(LAUNCH_STORAGE_KEY, JSON.stringify(params)); } catch (e) {}
+}
+
+function loadLaunchParams() {
+  try {
+    const raw = localStorage.getItem(LAUNCH_STORAGE_KEY);
+    if (!raw) return;
+    const params = JSON.parse(raw);
+    for (const id of LAUNCH_FIELDS) {
+      if (params[id] !== undefined && params[id] !== '') {
+        $(id).value = params[id];
+      }
+    }
+  } catch (e) {}
+}
+
+// Restore saved params before init
+loadLaunchParams();
+
+// Auto-save on any field change
+for (const id of LAUNCH_FIELDS) {
+  $(id).addEventListener('input', saveLaunchParams);
+  $(id).addEventListener('change', saveLaunchParams);
+}
+
+$('launchCSV').addEventListener('change', fetchCsvSample);
+$('launchCSV').addEventListener('blur', fetchCsvSample);
+$('launchPathRemap').addEventListener('input', updateRemapPreview);
+
+async function stopAllProcesses() {
+  const status = $('launchStatus');
+  status.textContent = 'Stopping processes…';
+  $('btnStopAll').disabled = true;
+
+  const results = await Promise.all([
+    fetch('/api/train/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(r => r.json()).catch(() => ({})),
+  ]);
+  status.textContent = 'All processes stopped';
+  setTimeout(() => { status.textContent = ''; }, 3000);
+}
+
+// ── Log Viewer ────────────────────────────────────────────────────
+
+async function pollLogs() {
+  const data = await fetchJSON('/api/logs/training?n=200');
+  if (data && data.lines) {
+    if (data.lines.length === 0) {
+      logOutput.innerHTML = '<div class="log-empty">No log output yet. Launch a process to see logs here.</div>';
+    } else {
+      logOutput.innerHTML = data.lines.map(colorLogLine).join('\n');
+      if (logAutoScroll) {
+        logOutput.scrollTop = logOutput.scrollHeight;
+      }
+    }
+  }
+
+  setTimeout(pollLogs, processState.training.running ? 2000 : 10000);
+}
+
+function colorLogLine(line) {
+  const escaped = esc(line);
+  if (/\[dashboard\]/.test(line)) return `<span class="log-line-dash">${escaped}</span>`;
+  if (/error|exception|traceback|failed/i.test(line)) return `<span class="log-line-err">${escaped}</span>`;
+  if (/saved|complete|finished|success/i.test(line)) return `<span class="log-line-ok">${escaped}</span>`;
+  return escaped;
+}
+
+// ── UI Updates ────────────────────────────────────────────────────
+function updateRunSelector() {
+  const prev = runSelector.value;
+  runSelector.innerHTML = '';
+  if (runs.length === 0) {
+    runSelector.innerHTML = '<option value="">No runs</option>';
+    currentRun = '';
+    return;
+  }
+  for (const run of runs) {
+    const opt = document.createElement('option');
+    opt.value = run.name;
+    opt.textContent = run.name;
+    runSelector.appendChild(opt);
+  }
+  // Restore selection or pick first
+  if (prev && runs.some(r => r.name === prev)) {
+    runSelector.value = prev;
+    currentRun = prev;
+  } else {
+    runSelector.value = runs[0].name;
+    currentRun = runs[0].name;
+  }
+}
+
+function updateStatusPill(status) {
+  statusPill.className = 'status-pill ' + (status || 'idle');
+  statusText.textContent = status || 'idle';
+  if (status === 'training') {
+    orb.classList.add('active');
+  } else {
+    orb.classList.remove('active');
+  }
+}
+
+function updateMetricCards(data) {
+  setMetric('metricTrainLoss', 'metricTrainLossSub', data.train_loss, 4,
+    previousMetrics.train_loss, 'best: ' + (data.best_val_loss || 0).toFixed(4));
+  setMetric('metricValLoss', 'metricValLossSub', data.val_loss, 4,
+    previousMetrics.val_loss, 'best: ' + (data.best_val_loss || 0).toFixed(4));
+
+  // R@1 and R@5 from latest eval
+  if (latestEval) {
+    const r1 = latestEval.r1_i2t || latestEval.recall_at_1_i2t || 0;
+    const r5 = latestEval.r5_i2t || latestEval.recall_at_5_i2t || 0;
+    setMetric('metricR1', 'metricR1Sub', r1, 1, previousMetrics.r1, '%');
+    setMetric('metricR5', 'metricR5Sub', r5, 1, previousMetrics.r5, '%');
+    previousMetrics.r1 = r1;
+    previousMetrics.r5 = r5;
+  } else {
+    $('metricR1').textContent = '--';
+    $('metricR5').textContent = '--';
+  }
+
+  // Learning rate
+  const lr = data.lr || 0;
+  $('metricLR').textContent = lr > 0 ? lr.toExponential(1) : '--';
+  $('metricLRSub').textContent = '';
+
+  // VRAM
+  if (data.gpu && data.gpu.available) {
+    const used = data.gpu.vram_used_mb;
+    const total = data.gpu.vram_total_mb;
+    $('metricVRAM').innerHTML = (used / 1024).toFixed(1) + '<span class="unit">GB</span>';
+    $('metricVRAMSub').textContent = `${(used/1024).toFixed(1)} / ${(total/1024).toFixed(1)} GB`;
+    // VRAM bar fill
+    const pct = total > 0 ? (used / total * 100) : 0;
+    const vramFill = $('metricVRAM').closest('.metric').querySelector('.metric-bar-fill');
+    if (vramFill) vramFill.style.width = pct + '%';
+  } else {
+    $('metricVRAM').textContent = '--';
+    $('metricVRAMSub').textContent = 'GPU unavailable';
+  }
+
+  previousMetrics.train_loss = data.train_loss;
+  previousMetrics.val_loss = data.val_loss;
+}
+
+function setMetric(valId, subId, value, decimals, prev, subText) {
+  const el = $(valId);
+  if (value === undefined || value === null || value === 0) {
+    el.textContent = '--';
+  } else {
+    el.textContent = typeof value === 'number' ? value.toFixed(decimals) : value;
+    if (prev !== undefined && prev !== value) {
+      el.classList.add('updated');
+      setTimeout(() => el.classList.remove('updated'), 500);
+    }
+  }
+  if (subText) $(subId).textContent = subText;
+}
+
+function updateGPUStrip(gpu) {
+  if (!gpu || !gpu.available) {
+    $('gpuUtil').textContent = '--';
+    $('gpuVRAMText').textContent = '--';
+    $('gpuTemp').textContent = '--';
+    $('gpuPower').textContent = '--';
+    $('vramBarFill').style.width = '0%';
+    return;
+  }
+  $('gpuUtil').textContent = gpu.gpu_util;
+  $('gpuTemp').textContent = gpu.temp_c;
+  $('gpuPower').textContent = gpu.power_w.toFixed(0);
+
+  const used = gpu.vram_used_mb;
+  const total = gpu.vram_total_mb;
+  $('gpuVRAMText').textContent = `${(used/1024).toFixed(1)}/${(total/1024).toFixed(1)} GB`;
+
+  const pct = total > 0 ? (used / total * 100) : 0;
+  const fill = $('vramBarFill');
+  fill.style.width = pct + '%';
+  fill.className = 'vram-bar-fill' + (pct > 90 ? ' critical' : pct > 75 ? ' warning' : '');
+}
+
+function updateProgress(data) {
+  const epoch = data.epoch || 0;
+  const totalEpochs = data.total_epochs || 1;
+  const step = data.step || 0;
+  const totalSteps = data.total_steps || 1;
+
+  $('progressEpoch').textContent = `Epoch ${epoch} / ${totalEpochs}`;
+
+  const pct = totalSteps > 0 ? (step / totalSteps * 100) : 0;
+  $('progressFill').style.width = pct.toFixed(1) + '%';
+  $('progressPct').textContent = pct.toFixed(1) + '%';
+  $('progressSteps').textContent = `Step ${step} / ${totalSteps}`;
+
+  // ETA
+  const eta = data.eta_seconds || 0;
+  if (eta > 0) {
+    $('progressETA').textContent = 'ETA: ' + formatDuration(eta);
+  } else {
+    $('progressETA').textContent = '';
+  }
+
+  const elapsed = data.elapsed_seconds || 0;
+  $('progressElapsed').textContent = formatDuration(elapsed) + ' elapsed';
+}
+
+function updateControlButtons(status) {
+  const isActive = status === 'training';
+  const isPaused = status === 'paused';
+
+  $('btnPause').disabled = !isActive;
+  $('btnStop').disabled = !(isActive || isPaused);
+  $('btnResume').disabled = !isPaused;
+  $('btnApplyLR').disabled = !(isActive || isPaused);
+}
+
+function updateEvalEpochs(epochs) {
+  const prev = galleryEpochSelect.value;
+  galleryEpochSelect.innerHTML = '';
+  if (epochs.length === 0) {
+    galleryEpochSelect.innerHTML = '<option value="0">No evals</option>';
+    return;
+  }
+  for (const ep of epochs) {
+    const opt = document.createElement('option');
+    opt.value = ep;
+    opt.textContent = `Epoch ${ep}`;
+    galleryEpochSelect.appendChild(opt);
+  }
+  if (prev && epochs.includes(parseInt(prev))) {
+    galleryEpochSelect.value = prev;
+  } else {
+    galleryEpochSelect.value = epochs[epochs.length - 1];
+  }
+  selectedGalleryEpoch = parseInt(galleryEpochSelect.value) || 0;
+}
+
+function updateGallery() {
+  const isProbeMode = galleryMode === 'probes';
+  const count = isProbeMode ? probeCount : textQueryCount;
+  const current = isProbeMode ? currentProbe : currentTextQuery;
+  const label = isProbeMode ? 'Probe' : 'Query';
+
+  probeLabel.textContent = count > 0
+    ? `${label} ${current + 1} / ${count}`
+    : `${label} 0 / 0`;
+
+  $('galleryPrev').disabled = current <= 0;
+  $('galleryNext').disabled = current >= count - 1;
+
+  if (!currentRun || selectedGalleryEpoch <= 0 || count <= 0) {
+    if (!galleryImageWrap.querySelector('.gallery-placeholder')) {
+      galleryImageWrap.innerHTML = `
+        <div class="gallery-placeholder">
+          <div class="placeholder-icon">&#x1f50d;</div>
+          <div>No evaluation data yet</div>
+          <div style="font-size: 0.7rem; margin-top: 0.3rem; color: var(--text-3)">
+            Gallery images appear after the first epoch completes
+          </div>
+        </div>`;
+    }
+    return;
+  }
+
+  let url;
+  if (isProbeMode) {
+    url = `/api/gallery/${encodeURIComponent(currentRun)}/${selectedGalleryEpoch}/${currentProbe}`;
+  } else {
+    url = `/api/gallery/${encodeURIComponent(currentRun)}/${selectedGalleryEpoch}/tq/${currentTextQuery}`;
+  }
+  const existing = galleryImageWrap.querySelector('img');
+  if (existing && existing.src.endsWith(url)) return;
+  galleryImageWrap.innerHTML = `<img src="${url}" alt="${label} ${current} gallery" style="animation: scaleIn 0.3s ease-out">`;
+}
+
+function updateHistoryTable() {
+  const tbody = $('historyBody');
+  if (runs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-3);">No runs found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  for (const run of runs) {
+    const tr = document.createElement('tr');
+    if (run.name === currentRun) tr.classList.add('active-row');
+    tr.innerHTML = `
+      <td style="color: var(--blue); font-weight: 600">${esc(run.name)}</td>
+      <td><span class="run-status-badge ${run.status}">${esc(run.status)}</span></td>
+      <td>${run.epoch} / ${run.total_epochs}</td>
+      <td>${run.best_val_loss ? run.best_val_loss.toFixed(4) : '--'}</td>
+      <td>${esc(run.created || '--')}</td>
+    `;
+    tr.addEventListener('click', () => {
+      runSelector.value = run.name;
+      currentRun = run.name;
+      currentProbe = 0;
+      currentTextQuery = 0;
+      selectedGalleryEpoch = 0;
+      updateHistoryTable();
+      pollStatus();
+      pollLossHistory();
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Chart Drawing ─────────────────────────────────────────────────
+
+function drawLossChart() {
+  const canvas = $('lossChart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const H = rect.height;
+
+  // Clear
+  ctx.fillStyle = getCSS('--surface');
+  ctx.fillRect(0, 0, W, H);
+
+  if (lossHistory.length === 0) {
+    ctx.fillStyle = getCSS('--text-3');
+    ctx.font = '12px ' + getCSS('--font-mono');
+    ctx.textAlign = 'center';
+    ctx.fillText('No training data yet', W / 2, H / 2);
+    return;
+  }
+
+  const padding = { top: 20, right: 20, bottom: 30, left: 55 };
+  const plotW = W - padding.left - padding.right;
+  const plotH = H - padding.top - padding.bottom;
+
+  // Data
+  const trainLosses = lossHistory.map(d => d.train_loss);
+  const steps = lossHistory.map(d => d.step);
+  const valLosses = lossHistory.filter(d => d.val_loss !== undefined).map(d => d.val_loss);
+
+  const allLosses = [...trainLosses, ...valLosses].filter(v => v !== undefined && v !== null);
+  if (allLosses.length === 0) return;
+
+  const minLoss = Math.min(...allLosses) * 0.95;
+  const maxLoss = Math.max(...allLosses) * 1.05;
+  const minStep = Math.min(...steps);
+  const maxStep = Math.max(...steps);
+  const stepRange = maxStep - minStep || 1;
+  const lossRange = maxLoss - minLoss || 1;
+
+  const toX = s => padding.left + ((s - minStep) / stepRange) * plotW;
+  const toY = l => padding.top + (1 - (l - minLoss) / lossRange) * plotH;
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  const nGridY = 5;
+  for (let i = 0; i <= nGridY; i++) {
+    const y = padding.top + (i / nGridY) * plotH;
+    ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(W - padding.right, y); ctx.stroke();
+  }
+  const nGridX = 5;
+  for (let i = 0; i <= nGridX; i++) {
+    const x = padding.left + (i / nGridX) * plotW;
+    ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = getCSS('--text-3');
+  ctx.font = '10px ' + getCSS('--font-mono');
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= nGridY; i++) {
+    const val = maxLoss - (i / nGridY) * lossRange;
+    const y = padding.top + (i / nGridY) * plotH;
+    ctx.fillText(val.toFixed(3), padding.left - 8, y + 3);
+  }
+
+  // X-axis labels
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= nGridX; i++) {
+    const val = minStep + (i / nGridX) * stepRange;
+    const x = padding.left + (i / nGridX) * plotW;
+    ctx.fillText(Math.round(val), x, H - 8);
+  }
+
+  // Draw train loss line
+  ctx.strokeStyle = '#60a5fa';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < lossHistory.length; i++) {
+    const x = toX(steps[i]);
+    const y = toY(trainLosses[i]);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Draw val loss points (if any in the log)
+  const valEntries = lossHistory.filter(d => d.val_loss !== undefined);
+  if (valEntries.length > 0) {
+    ctx.strokeStyle = '#8b5cf6';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < valEntries.length; i++) {
+      const x = toX(valEntries[i].step);
+      const y = toY(valEntries[i].val_loss);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Val loss dots
+    ctx.fillStyle = '#8b5cf6';
+    for (const entry of valEntries) {
+      const x = toX(entry.step);
+      const y = toY(entry.val_loss);
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // Legend
+  ctx.font = '10px ' + getCSS('--font-mono');
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#60a5fa';
+  ctx.fillRect(padding.left + 5, padding.top + 5, 14, 2);
+  ctx.fillText('train', padding.left + 24, padding.top + 10);
+  ctx.fillStyle = '#8b5cf6';
+  ctx.fillRect(padding.left + 5, padding.top + 18, 14, 2);
+  ctx.fillText('val', padding.left + 24, padding.top + 23);
+
+  // Current value indicators
+  if (trainLosses.length > 0) {
+    const lastX = toX(steps[steps.length - 1]);
+    const lastY = toY(trainLosses[trainLosses.length - 1]);
+    ctx.fillStyle = '#60a5fa';
+    ctx.beginPath(); ctx.arc(lastX, lastY, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(96,165,250,0.3)';
+    ctx.beginPath(); ctx.arc(lastX, lastY, 7, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function handleLossChartHover(e, canvas) {
+  if (lossHistory.length === 0) { chartTooltip.classList.remove('visible'); return; }
+
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const padding = { left: 55, right: 20 };
+  const plotW = rect.width - padding.left - padding.right;
+
+  const steps = lossHistory.map(d => d.step);
+  const minStep = Math.min(...steps);
+  const maxStep = Math.max(...steps);
+  const stepRange = maxStep - minStep || 1;
+
+  const hoveredStep = minStep + ((mouseX - padding.left) / plotW) * stepRange;
+  // Find nearest data point
+  let nearest = lossHistory[0];
+  let nearestDist = Infinity;
+  for (const entry of lossHistory) {
+    const dist = Math.abs(entry.step - hoveredStep);
+    if (dist < nearestDist) { nearestDist = dist; nearest = entry; }
+  }
+
+  chartTooltip.innerHTML = `Step ${nearest.step}<br>Train: ${nearest.train_loss.toFixed(4)}` +
+    (nearest.val_loss !== undefined ? `<br>Val: ${nearest.val_loss.toFixed(4)}` : '');
+  chartTooltip.style.left = (e.clientX + 12) + 'px';
+  chartTooltip.style.top = (e.clientY - 10) + 'px';
+  chartTooltip.classList.add('visible');
+}
+
+function drawRKChart() {
+  const canvas = $('rkChart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const H = rect.height;
+
+  ctx.fillStyle = getCSS('--surface');
+  ctx.fillRect(0, 0, W, H);
+
+  if (!latestEval) {
+    ctx.fillStyle = getCSS('--text-3');
+    ctx.font = '12px ' + getCSS('--font-mono');
+    ctx.textAlign = 'center';
+    ctx.fillText('No evaluation data yet', W / 2, H / 2);
+    return;
+  }
+
+  const padding = { top: 20, right: 20, bottom: 40, left: 45 };
+  const plotW = W - padding.left - padding.right;
+  const plotH = H - padding.top - padding.bottom;
+
+  // Metrics to show
+  const metricKeys = [
+    { key: 'r1_i2t', alt: 'recall_at_1_i2t', label: 'R@1' },
+    { key: 'r5_i2t', alt: 'recall_at_5_i2t', label: 'R@5' },
+    { key: 'r10_i2t', alt: 'recall_at_10_i2t', label: 'R@10' },
+  ];
+
+  const baseVals = [];
+  const loraVals = [];
+  const labels = [];
+
+  for (const mk of metricKeys) {
+    const lora = latestEval[mk.key] || latestEval[mk.alt] || 0;
+    const base = latestEval['base_' + mk.key] || latestEval['base_' + mk.alt] || 0;
+    loraVals.push(lora);
+    baseVals.push(base);
+    labels.push(mk.label);
+  }
+
+  const maxVal = Math.max(...loraVals, ...baseVals, 1) * 1.15;
+  const groupWidth = plotW / labels.length;
+  const barWidth = groupWidth * 0.3;
+  const gap = groupWidth * 0.1;
+
+  // Y-axis grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = padding.top + (i / 5) * plotH;
+    ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(W - padding.right, y); ctx.stroke();
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = getCSS('--text-3');
+  ctx.font = '10px ' + getCSS('--font-mono');
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const val = maxVal * (1 - i / 5);
+    const y = padding.top + (i / 5) * plotH;
+    ctx.fillText(val.toFixed(0) + '%', padding.left - 8, y + 3);
+  }
+
+  // Draw bars
+  for (let i = 0; i < labels.length; i++) {
+    const groupX = padding.left + i * groupWidth + groupWidth / 2;
+
+    // Base bar (gray)
+    const baseH = (baseVals[i] / maxVal) * plotH;
+    const baseX = groupX - barWidth - gap / 2;
+    const baseY = padding.top + plotH - baseH;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    roundRect(ctx, baseX, baseY, barWidth, baseH, 3);
+    ctx.fill();
+
+    // LoRA bar (blue gradient)
+    const loraH = (loraVals[i] / maxVal) * plotH;
+    const loraX = groupX + gap / 2;
+    const loraY = padding.top + plotH - loraH;
+    const grad = ctx.createLinearGradient(0, loraY, 0, loraY + loraH);
+    grad.addColorStop(0, '#60a5fa');
+    grad.addColorStop(1, '#6366f1');
+    ctx.fillStyle = grad;
+    roundRect(ctx, loraX, loraY, barWidth, loraH, 3);
+    ctx.fill();
+
+    // Value labels on top
+    ctx.fillStyle = getCSS('--text-3');
+    ctx.font = '9px ' + getCSS('--font-mono');
+    ctx.textAlign = 'center';
+    if (baseVals[i] > 0) {
+      ctx.fillText(baseVals[i].toFixed(1), baseX + barWidth / 2, baseY - 4);
+    }
+    ctx.fillStyle = '#60a5fa';
+    ctx.fillText(loraVals[i].toFixed(1), loraX + barWidth / 2, loraY - 4);
+
+    // X-axis label
+    ctx.fillStyle = getCSS('--text-2');
+    ctx.font = '11px ' + getCSS('--font-mono');
+    ctx.fillText(labels[i], groupX, H - 10);
+  }
+
+  // Legend
+  ctx.font = '10px ' + getCSS('--font-mono');
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(W - padding.right - 100, padding.top + 5, 12, 10);
+  ctx.fillStyle = getCSS('--text-3');
+  ctx.fillText('Base', W - padding.right - 84, padding.top + 13);
+
+  const lGrad = ctx.createLinearGradient(0, 0, 12, 0);
+  lGrad.addColorStop(0, '#60a5fa');
+  lGrad.addColorStop(1, '#6366f1');
+  ctx.fillStyle = lGrad;
+  ctx.fillRect(W - padding.right - 100, padding.top + 20, 12, 10);
+  ctx.fillStyle = '#60a5fa';
+  ctx.fillText('LoRA', W - padding.right - 84, padding.top + 28);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  if (h <= 0) { h = 1; y = y + h - 1; }
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ── Utilities ─────────────────────────────────────────────────────
+function formatDuration(s) {
+  if (s < 60) return Math.round(s) + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + Math.round(s % 60) + 's';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h + 'h ' + m + 'm';
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function getCSS(prop) {
+  return getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
+}
+
+function showError(msg) {
+  errorBanner.textContent = msg;
+  errorBanner.classList.add('show');
+}
+
+function hideError() {
+  errorBanner.classList.remove('show');
+}
+
+// Redraw charts on resize
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { drawLossChart(); drawRKChart(); }, 200);
+});
+
+// Boot
+init();
+</script>
+</body>
+</html>

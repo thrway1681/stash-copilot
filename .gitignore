@@ -1,0 +1,72 @@
+# Worktrees
+.worktrees/
+
+# IDE settings
+.vscode/
+idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Claude Code
+.claude/
+
+# Local/user data - entire assets directory is runtime-generated
+assets/
+
+# Vendor libraries (installed via npm postinstall - but entire assets/ is ignored)
+test.json
+*.local.md
+
+# OS files
+.DS_Store
+._*
+Thumbs.db
+
+# Test videos (explicit content - not for git)
+tests/videos/*.mp4
+# But DO include synthetic test videos
+!tests/videos/synthetic/
+
+# Dockerized dev Stash: throwaway media + bind-mounted config/DB (machine-local)
+docker/media/*
+!docker/media/.gitkeep
+docker/stash-config/
+
+# Release build output (scripts/package_plugin.sh)
+dist/
+
+# Playwright
+node_modules/
+/test-results/
+/test-recordings/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+.playwright-mcp/
+
+# Test screenshots (generated during testing)
+tests/screenshots/
+
+# Database files
+embeddings.db
+
+# EroScripts session cookie (user secret, chmod 600)
+.eroscripts_auth.json
+
+# Secrets / local environment (never commit)
+.env
+.gemini_caption_experiment_key.txt
+
+# Coverage artifacts
+.coverage
+htmlcov/
+
+# Superpowers tool scratch
+.superpowers/

@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caption Workbench</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0b0b12;
+  --surface: #14141e;
+  --surface-2: #1c1c2a;
+  --border: #2a2a3a;
+  --text: #e4e4e7;
+  --text-2: #9ca3af;
+  --text-3: #6b7280;
+  --gemini: #34d399;
+  --claude: #a78bfa;
+  --accent: #6366f1;
+  --error: #f87171;
+  --radius: 10px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  padding: 1rem 1.5rem;
+  height: 100vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+header { margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 1rem; }
+header h1 { font-size: 1.3rem; font-weight: 700; }
+header p { color: var(--text-2); font-size: 0.8rem; }
+
+/* ── API Keys ────────────────────────────────── */
+.api-keys {
+  display: flex; gap: 1.5rem; margin-bottom: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  flex-shrink: 0;
+}
+.key-group { flex: 1; display: flex; align-items: center; gap: 0.5rem; }
+.key-group label {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.75rem; color: var(--text-2); white-space: nowrap;
+}
+.key-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--error); display: inline-block;
+}
+.key-dot.set { background: var(--gemini); }
+.key-wrap { display: flex; gap: 0.35rem; flex: 1; }
+.key-wrap input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.35rem 0.6rem; color: var(--text); font-family: monospace; font-size: 0.78rem;
+}
+.key-wrap input:focus { outline: none; border-color: var(--accent); }
+.btn-sm {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-2); padding: 0.3rem 0.55rem; cursor: pointer; font-size: 0.75rem;
+  white-space: nowrap;
+}
+.btn-sm:hover { color: var(--text); border-color: var(--text-3); }
+
+/* ── Main Layout ─────────────────────────────── */
+.main-layout {
+  display: flex; gap: 1rem; flex: 1; min-height: 0;
+}
+
+/* ── Frame Browser (left sidebar) ────────────── */
+.frame-browser {
+  width: 210px; flex-shrink: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.browser-header {
+  padding: 0.5rem; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; position: relative;
+}
+.browser-header .scene-label {
+  font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3); font-weight: 600; padding: 0 0.2rem 0.25rem;
+}
+
+/* ── Custom Scene Picker ─────────────────────── */
+.scene-picker {
+  position: relative;
+}
+.scene-picker-selected {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.3rem; cursor: pointer; transition: border-color 0.15s;
+}
+.scene-picker-selected:hover { border-color: var(--text-3); }
+.scene-picker.open .scene-picker-selected { border-color: var(--accent); }
+.scene-picker-thumb {
+  width: 56px; height: 32px; border-radius: 4px; object-fit: cover;
+  background: #000; flex-shrink: 0;
+}
+.scene-picker-text {
+  flex: 1; font-size: 0.8rem; color: var(--text); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scene-picker-chevron {
+  font-size: 0.6rem; color: var(--text-3); flex-shrink: 0;
+  transition: transform 0.2s; margin-right: 0.25rem;
+}
+.scene-picker.open .scene-picker-chevron { transform: rotate(180deg); }
+.scene-picker-dropdown {
+  display: none; position: absolute; top: 100%; left: 0; right: 0;
+  margin-top: 4px; z-index: 100;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  max-height: 280px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.scene-picker-dropdown::-webkit-scrollbar { width: 5px; }
+.scene-picker-dropdown::-webkit-scrollbar-track { background: transparent; }
+.scene-picker-dropdown::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.scene-picker.open .scene-picker-dropdown { display: block; }
+.scene-picker-option {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.5rem; cursor: pointer;
+  transition: background 0.1s;
+}
+.scene-picker-option:first-child { border-radius: 7px 7px 0 0; }
+.scene-picker-option:last-child { border-radius: 0 0 7px 7px; }
+.scene-picker-option:hover { background: var(--surface); }
+.scene-picker-option.active { background: var(--surface); }
+.scene-picker-option img {
+  width: 64px; height: 36px; border-radius: 4px; object-fit: cover;
+  background: #000; flex-shrink: 0;
+}
+.scene-picker-option span {
+  font-size: 0.8rem; color: var(--text);
+}
+.scene-picker-option.active span { color: var(--accent); font-weight: 600; }
+.scene-picker-option .scene-frame-count {
+  font-size: 0.7rem; color: var(--text-3); margin-left: auto;
+}
+.thumb-list {
+  flex: 1; overflow-y: auto; padding: 0.4rem;
+  display: flex; flex-direction: column; gap: 0.35rem;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.thumb-list::-webkit-scrollbar { width: 5px; }
+.thumb-list::-webkit-scrollbar-track { background: transparent; }
+.thumb-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.thumb-list::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+.thumb-item {
+  cursor: pointer; border: 2px solid transparent; border-radius: 6px;
+  overflow: hidden; position: relative; flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+.thumb-item:hover { border-color: var(--text-3); }
+.thumb-item.selected { border-color: var(--accent); }
+.thumb-item img {
+  width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;
+  background: #000;
+}
+.thumb-label {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,0.85));
+  padding: 12px 6px 3px; font-size: 0.68rem; color: var(--text-2);
+  text-align: center;
+}
+.thumb-item.selected .thumb-label { color: var(--accent); font-weight: 600; }
+
+/* ── Content Area (right) ────────────────────── */
+.content-area {
+  flex: 1; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0;
+  overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.content-area::-webkit-scrollbar { width: 5px; }
+.content-area::-webkit-scrollbar-track { background: transparent; }
+.content-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Image Preview ───────────────────────────── */
+.frame-preview {
+  background: #000; border-radius: var(--radius); overflow: hidden;
+  aspect-ratio: 16/9; max-height: 45vh;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); flex-shrink: 0;
+}
+.frame-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* ── Model Bar ───────────────────────────────── */
+.model-bar {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.65rem 0.85rem;
+  display: flex; align-items: flex-start; gap: 1rem; flex-shrink: 0;
+}
+.model-bar-providers {
+  flex: 1; display: flex; gap: 1.25rem; min-width: 0; flex-wrap: wrap;
+}
+.provider-group { min-width: 0; }
+.provider-label {
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-3); margin-bottom: 0.15rem; padding-left: 1px;
+}
+.provider-label.gemini { color: var(--gemini); }
+.provider-label.claude { color: var(--claude); }
+.models-scroll {
+  max-height: 120px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.models-scroll::-webkit-scrollbar { width: 4px; }
+.models-scroll::-webkit-scrollbar-track { background: transparent; }
+.models-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.model-cb {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.12rem 0; cursor: pointer; font-size: 0.82rem; white-space: nowrap;
+}
+.model-cb input[type="checkbox"] { accent-color: var(--accent); }
+.model-cb:hover { color: #fff; }
+.models-status {
+  font-size: 0.78rem; color: var(--text-3); padding: 0.2rem 0;
+}
+.models-status.loading {
+  display: flex; align-items: center; gap: 0.4rem; color: var(--text-2);
+}
+.models-status.error { color: var(--error); font-size: 0.75rem; }
+.custom-row {
+  display: flex; gap: 0.3rem; margin-top: 0.2rem;
+}
+.custom-row input {
+  width: 120px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.2rem 0.4rem; color: var(--text); font-size: 0.75rem;
+}
+.custom-row input:focus { outline: none; border-color: var(--accent); }
+
+.model-bar-controls {
+  display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-end; flex-shrink: 0;
+}
+.control-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  font-size: 0.78rem; color: var(--text-2);
+}
+.control-row input[type="range"] { width: 80px; }
+.control-row span { min-width: 1.8em; text-align: right; font-family: monospace; font-size: 0.78rem; }
+.control-row input[type="number"] {
+  width: 42px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.2rem 0.3rem; color: var(--text); font-size: 0.78rem; text-align: center;
+  font-family: monospace;
+}
+.control-row input[type="number"]:focus { outline: none; border-color: var(--accent); }
+/* Hide number spinners */
+.control-row input[type="number"]::-webkit-inner-spin-button,
+.control-row input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.control-row input[type="number"] { -moz-appearance: textfield; }
+.generate-btn {
+  padding: 0.5rem 1.4rem;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
+  border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s; white-space: nowrap;
+}
+.generate-btn:hover:not(:disabled) { opacity: 0.88; }
+.generate-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Results ─────────────────────────────────── */
+.results-area { }
+.results-grid {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center;
+}
+.results-grid > * {
+  width: min(100%, 420px);
+}
+.result-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  border-left: 3px solid var(--border);
+}
+.result-card[data-provider="gemini"] { border-left-color: var(--gemini); }
+.result-card[data-provider="claude"] { border-left-color: var(--claude); }
+.result-card-head {
+  padding: 0.5rem 0.75rem; display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.result-model { font-weight: 600; font-size: 0.85rem; }
+.result-card[data-provider="gemini"] .result-model { color: var(--gemini); }
+.result-card[data-provider="claude"] .result-model { color: var(--claude); }
+.result-meta { font-size: 0.75rem; color: var(--text-3); display: flex; gap: 0.6rem; align-items: center; }
+.result-body {
+  padding: 0.75rem; font-size: 0.88rem; line-height: 1.6; min-height: 50px;
+}
+.result-card.loading .result-body {
+  display: flex; align-items: center; gap: 0.5rem; color: var(--text-2);
+}
+.result-card.error .result-body { color: var(--error); font-size: 0.82rem; }
+.copy-btn {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-3); padding: 2px 8px; cursor: pointer; font-size: 0.7rem;
+}
+.copy-btn:hover { color: var(--text); border-color: var(--text-3); }
+
+/* ── Token Usage ─────────────────────────────── */
+.token-usage {
+  padding: 0.5rem 0.75rem; border-top: 1px solid var(--border);
+  background: var(--bg); font-size: 0.75rem; font-family: monospace;
+}
+.token-bar {
+  display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+  margin-bottom: 0.35rem; background: var(--surface-2);
+}
+.token-bar-seg {
+  height: 100%; transition: width 0.3s;
+}
+.token-bar-seg.image { background: #f59e0b; }
+.token-bar-seg.text { background: #6366f1; }
+.token-bar-seg.other { background: #64748b; }
+.token-bar-seg.output { background: #34d399; }
+.token-legend {
+  display: flex; flex-wrap: wrap; gap: 0.2rem 0.75rem; color: var(--text-2);
+}
+.token-legend-item {
+  display: flex; align-items: center; gap: 0.3rem;
+}
+.token-dot {
+  width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0;
+}
+.token-dot.image { background: #f59e0b; }
+.token-dot.text { background: #6366f1; }
+.token-dot.other { background: #64748b; }
+.token-dot.output { background: #34d399; }
+.token-value { color: var(--text); font-weight: 600; }
+.token-pct { color: var(--text-3); }
+.token-est { font-style: italic; color: var(--text-3); font-size: 0.68rem; }
+
+/* ── Benchmark Stats ─────────────────────────── */
+.bench-stats {
+  padding: 0.6rem 0.75rem; border-top: 1px solid var(--border);
+  background: var(--bg); font-size: 0.78rem; font-family: monospace;
+}
+.bench-stats-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem 0.75rem;
+}
+.bench-stat-label { color: var(--text-3); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.bench-stat-value { color: var(--text); font-weight: 600; }
+.bench-runs {
+  margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: 0.25rem;
+}
+.bench-run-tag {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 6px; font-size: 0.7rem; color: var(--text-2);
+}
+.bench-progress {
+  font-size: 0.78rem; color: var(--text-2);
+}
+
+/* ── Collapsible Prompt ──────────────────────── */
+.prompt-section {
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.prompt-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 0.85rem; cursor: pointer; user-select: none;
+}
+.prompt-toggle:hover { background: var(--surface-2); border-radius: var(--radius); }
+.prompt-toggle h3 {
+  font-size: 0.88rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.prompt-chevron {
+  display: inline-block; transition: transform 0.2s; font-size: 0.7rem; color: var(--text-3);
+}
+.prompt-section.open .prompt-chevron { transform: rotate(90deg); }
+.prompt-toggle-actions { display: flex; gap: 0.4rem; }
+.prompt-body {
+  display: none; padding: 0 0.85rem 0.75rem;
+}
+.prompt-section.open .prompt-body { display: block; }
+#prompt-editor {
+  width: 100%; min-height: 160px; resize: vertical;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.75rem 0.85rem; color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.8rem; line-height: 1.5; tab-size: 2;
+}
+#prompt-editor:focus { outline: none; border-color: var(--accent); }
+
+/* ── Spinner ─────────────────────────────────── */
+.spinner {
+  width: 14px; height: 14px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.7s linear infinite; flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Banner ──────────────────────────────────── */
+.error-banner {
+  background: #1a0505; border: 1px solid #7f1d1d; border-radius: var(--radius);
+  padding: 0.75rem 1rem; margin-bottom: 0.75rem; color: var(--error); font-size: 0.85rem;
+}
+.error-banner code {
+  background: #2a0a0a; padding: 0.12rem 0.35rem; border-radius: 4px; font-size: 0.8rem;
+}
+
+/* ── Responsive ──────────────────────────────── */
+@media (max-width: 900px) {
+  body { overflow: auto; height: auto; }
+  .main-layout { flex-direction: column; }
+  .frame-browser { width: 100%; max-height: 200px; flex-direction: row; }
+  .browser-header { border-bottom: none; border-right: 1px solid var(--border); }
+  .thumb-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .thumb-item { width: 120px; flex-shrink: 0; }
+  .api-keys { flex-direction: column; }
+  .model-bar { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Caption Workbench</h1>
+  <p>Compare multimodal LLM captions side-by-side</p>
+</header>
+
+<div id="error-banner"></div>
+
+<section class="api-keys">
+  <div class="key-group">
+    <label><span class="key-dot" id="gemini-dot"></span> Gemini</label>
+    <div class="key-wrap">
+      <input type="password" id="gemini-key" placeholder="Paste Gemini / Google API key">
+      <button class="btn-sm" onclick="toggleVis('gemini-key', this)">Show</button>
+    </div>
+  </div>
+  <div class="key-group">
+    <label><span class="key-dot" id="claude-dot"></span> Claude</label>
+    <div class="key-wrap">
+      <input type="password" id="claude-key" placeholder="Paste Anthropic API key">
+      <button class="btn-sm" onclick="toggleVis('claude-key', this)">Show</button>
+    </div>
+  </div>
+</section>
+
+<div class="main-layout">
+  <!-- Left: Frame Browser -->
+  <aside class="frame-browser">
+    <div class="browser-header">
+      <div class="scene-label">Scene</div>
+      <div class="scene-picker" id="scene-picker">
+        <div class="scene-picker-selected" id="scene-picker-selected">
+          <img class="scene-picker-thumb" id="scene-picker-thumb" src="" alt="">
+          <span class="scene-picker-text" id="scene-picker-text">Loading...</span>
+          <span class="scene-picker-chevron">&#9660;</span>
+        </div>
+        <div class="scene-picker-dropdown" id="scene-picker-dropdown"></div>
+      </div>
+    </div>
+    <div class="thumb-list" id="thumb-list"></div>
+  </aside>
+
+  <!-- Right: Image + Models + Results -->
+  <div class="content-area">
+    <div class="frame-preview">
+      <img id="frame-img" alt="Select a frame">
+    </div>
+
+    <div class="results-area">
+      <div id="results-grid" class="results-grid"></div>
+    </div>
+
+    <div class="model-bar">
+      <div class="model-bar-providers" id="model-list"></div>
+      <div class="model-bar-controls">
+        <div class="control-row">
+          <label>Temp</label>
+          <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.2">
+          <span id="temp-val">0.2</span>
+        </div>
+        <div class="control-row">
+          <label>Runs</label>
+          <input type="number" id="bench-runs" min="1" max="20" value="1">
+        </div>
+        <button class="generate-btn" id="generate-btn" disabled>Generate</button>
+      </div>
+    </div>
+
+    <section class="prompt-section" id="prompt-section">
+      <div class="prompt-toggle" id="prompt-toggle">
+        <h3><span class="prompt-chevron">&#9654;</span> Prompt</h3>
+        <div class="prompt-toggle-actions">
+          <button class="btn-sm" id="restore-prompt" onclick="event.stopPropagation()">Restore Default</button>
+        </div>
+      </div>
+      <div class="prompt-body">
+        <textarea id="prompt-editor" rows="14"></textarea>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────
+
+const PROVIDERS = {
+  gemini: { name: 'Gemini', models: [] },
+  claude: { name: 'Claude', models: [] },
+};
+
+// Fetched from server (/api/prompt) — single source of truth in constants.py
+let DEFAULT_PROMPT = '';
+
+// ── State ───────────────────────────────────────────────────────────────
+
+let scenes = {};
+let currentScene = '';
+let currentFrame = '';
+let generating = false;
+
+// ── Init ────────────────────────────────────────────────────────────────
+
+async function init() {
+  await setupPrompt();
+  buildModelList();
+  loadKeys();
+  bindEvents();
+
+  try {
+    const resp = await fetch('/api/scenes');
+    scenes = await resp.json();
+    populateScenes();
+  } catch {
+    showBanner('Server not reachable. Start it with: <code>uv run python tools/dataset/caption_workbench.py</code>');
+  }
+}
+
+// ── API Keys ────────────────────────────────────────────────────────────
+
+const _keyTimers = {};
+
+function loadKeys() {
+  for (const id of ['gemini-key', 'claude-key']) {
+    const el = document.getElementById(id);
+    el.value = localStorage.getItem('wb_' + id) || '';
+    updateDot(id);
+  }
+  for (const prov of Object.keys(PROVIDERS)) {
+    if (getKey(prov)) fetchModels(prov);
+  }
+}
+
+function saveKey(id) {
+  localStorage.setItem('wb_' + id, document.getElementById(id).value);
+  updateDot(id);
+
+  const prov = id.replace('-key', '');
+  clearTimeout(_keyTimers[prov]);
+  _keyTimers[prov] = setTimeout(() => {
+    if (getKey(prov)) {
+      fetchModels(prov);
+    } else {
+      PROVIDERS[prov].models = [];
+      renderProviderModels(prov);
+    }
+  }, 500);
+}
+
+function updateDot(id) {
+  const dotId = id.replace('-key', '-dot');
+  const dot = document.getElementById(dotId);
+  if (dot) dot.classList.toggle('set', !!document.getElementById(id).value.trim());
+}
+
+async function fetchModels(provKey) {
+  const container = document.getElementById(`models-${provKey}`);
+  if (!container) return;
+
+  container.innerHTML = '<div class="models-status loading"><div class="spinner"></div> Loading...</div>';
+
+  try {
+    const resp = await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: provKey, api_key: getKey(provKey) }),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      container.innerHTML = `<div class="models-status error">${data.error}</div>`;
+      PROVIDERS[provKey].models = [];
+    } else {
+      PROVIDERS[provKey].models = data.models || [];
+      renderProviderModels(provKey);
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="models-status error">Failed to fetch models</div>`;
+  }
+  updateGenerateBtn();
+}
+
+function getKey(provider) {
+  return document.getElementById(provider + '-key').value.trim();
+}
+
+function toggleVis(inputId, btn) {
+  const el = document.getElementById(inputId);
+  const show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Hide' : 'Show';
+}
+
+// ── Scenes / Frames ─────────────────────────────────────────────────────
+
+function populateScenes() {
+  const sceneNames = Object.keys(scenes).sort((a, b) => {
+    const na = parseInt(a.split('_')[1]), nb = parseInt(b.split('_')[1]);
+    return na - nb;
+  });
+  if (!sceneNames.length) { showBanner('No scenes found in assets/embedded_frames/'); return; }
+
+  currentScene = sceneNames.includes('scene_10065') ? 'scene_10065' : sceneNames[0];
+
+  // Build dropdown options
+  const dropdown = document.getElementById('scene-picker-dropdown');
+  dropdown.innerHTML = '';
+  for (const name of sceneNames) {
+    const firstFrame = scenes[name][0];
+    const thumbSrc = firstFrame ? `/assets/embedded_frames/${name}/${firstFrame}` : '';
+    const frameCount = scenes[name].length;
+
+    const opt = document.createElement('div');
+    opt.className = 'scene-picker-option' + (name === currentScene ? ' active' : '');
+    opt.dataset.scene = name;
+    opt.innerHTML = `
+      <img src="${thumbSrc}" loading="lazy" alt="${name}">
+      <span>${name.replace('scene_', 'Scene ')}</span>
+      <span class="scene-frame-count">${frameCount}f</span>`;
+    opt.addEventListener('click', () => {
+      currentScene = name;
+      updateScenePicker();
+      closeScenePicker();
+      populateFrames();
+    });
+    dropdown.appendChild(opt);
+  }
+
+  updateScenePicker();
+  populateFrames();
+}
+
+function updateScenePicker() {
+  const firstFrame = scenes[currentScene]?.[0];
+  const thumbSrc = firstFrame ? `/assets/embedded_frames/${currentScene}/${firstFrame}` : '';
+  document.getElementById('scene-picker-thumb').src = thumbSrc;
+  document.getElementById('scene-picker-text').textContent =
+    currentScene.replace('scene_', 'Scene ');
+
+  // Update active state in dropdown
+  document.querySelectorAll('.scene-picker-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.scene === currentScene);
+  });
+}
+
+function closeScenePicker() {
+  document.getElementById('scene-picker').classList.remove('open');
+}
+
+function populateFrames() {
+  const list = document.getElementById('thumb-list');
+  list.innerHTML = '';
+  const frames = scenes[currentScene] || [];
+
+  for (const f of frames) {
+    const item = document.createElement('div');
+    item.className = 'thumb-item';
+    item.dataset.frame = f;
+    item.innerHTML = `
+      <img src="/assets/embedded_frames/${currentScene}/${f}" loading="lazy" alt="${f}">
+      <div class="thumb-label">${f.replace('frame_', '').replace('.jpg', '')}</div>`;
+    item.addEventListener('click', () => selectFrame(f));
+    list.appendChild(item);
+  }
+
+  // Select first frame
+  if (frames.length) selectFrame(frames[0]);
+}
+
+function selectFrame(frameName) {
+  currentFrame = frameName;
+
+  // Update thumbnail selection
+  document.querySelectorAll('.thumb-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.frame === frameName);
+  });
+
+  // Scroll selected thumbnail into view
+  const selected = document.querySelector('.thumb-item.selected');
+  if (selected) selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+  // Update main image
+  document.getElementById('frame-img').src =
+    `/assets/embedded_frames/${currentScene}/${frameName}`;
+}
+
+// ── Model List ──────────────────────────────────────────────────────────
+
+function buildModelList() {
+  const container = document.getElementById('model-list');
+  container.innerHTML = '';
+
+  for (const [provKey, prov] of Object.entries(PROVIDERS)) {
+    const group = document.createElement('div');
+    group.className = 'provider-group';
+    group.innerHTML = `<div class="provider-label ${provKey}">${prov.name}</div>
+      <div id="models-${provKey}"></div>
+      <div class="custom-row">
+        <input type="text" placeholder="custom model" id="custom-input-${provKey}">
+        <button class="btn-sm" onclick="addCustomModel('${provKey}')">+</button>
+      </div>`;
+    container.appendChild(group);
+    renderProviderModels(provKey);
+  }
+}
+
+function renderProviderModels(provKey) {
+  const container = document.getElementById(`models-${provKey}`);
+  if (!container) return;
+
+  const apiModels = PROVIDERS[provKey].models || [];
+  const customModels = JSON.parse(localStorage.getItem(`wb_custom_${provKey}`) || '[]');
+  const allModels = [...customModels, ...apiModels];
+
+  if (!allModels.length && !getKey(provKey)) {
+    container.innerHTML = '<div class="models-status">Enter API key to load models</div>';
+    return;
+  }
+  if (!allModels.length) return;
+
+  container.innerHTML = '';
+  const scroll = document.createElement('div');
+  scroll.className = 'models-scroll';
+  for (const m of allModels) {
+    const lbl = document.createElement('label');
+    lbl.className = 'model-cb';
+    lbl.innerHTML = `<input type="checkbox" value="${m.id}" data-provider="${provKey}"
+      data-name="${m.name}"> <span>${m.name}</span>`;
+    scroll.appendChild(lbl);
+  }
+  container.appendChild(scroll);
+}
+
+function addCustomModel(provKey) {
+  const input = document.getElementById(`custom-input-${provKey}`);
+  const id = input.value.trim();
+  if (!id) return;
+
+  const customKey = `wb_custom_${provKey}`;
+  const existing = JSON.parse(localStorage.getItem(customKey) || '[]');
+  if (existing.some(m => m.id === id)) return;
+
+  existing.push({ id, name: id });
+  localStorage.setItem(customKey, JSON.stringify(existing));
+  input.value = '';
+  renderProviderModels(provKey);
+  updateGenerateBtn();
+}
+
+function getSelectedModels() {
+  return Array.from(document.querySelectorAll('#model-list input:checked')).map(cb => ({
+    provider: cb.dataset.provider,
+    model: cb.value,
+    name: cb.dataset.name,
+  }));
+}
+
+// ── Prompt ───────────────────────────────────────────────────────────────
+
+async function setupPrompt() {
+  const el = document.getElementById('prompt-editor');
+  // Fetch canonical prompt from server (sourced from constants.py)
+  try {
+    const resp = await fetch('/api/prompt');
+    const data = await resp.json();
+    DEFAULT_PROMPT = data.prompt || '';
+  } catch {
+    // Fallback: keep empty, user can type manually
+  }
+  el.value = localStorage.getItem('wb_prompt') || DEFAULT_PROMPT;
+}
+
+// ── Generate ────────────────────────────────────────────────────────────
+
+async function onGenerate() {
+  const models = getSelectedModels();
+  if (!models.length || generating) return;
+
+  const prompt = document.getElementById('prompt-editor').value;
+  const temperature = parseFloat(document.getElementById('temperature').value);
+  const runs = Math.max(1, Math.min(20, parseInt(document.getElementById('bench-runs').value) || 1));
+  const btn = document.getElementById('generate-btn');
+
+  generating = true;
+  btn.disabled = true;
+
+  const grid = document.getElementById('results-grid');
+  grid.innerHTML = '';
+
+  if (runs === 1) {
+    // Single run: parallel, same as before
+    btn.textContent = 'Generating...';
+    for (const m of models) {
+      grid.appendChild(makeCard(m, 'loading'));
+    }
+
+    await Promise.all(models.map(m => runCaption(m, prompt, temperature)));
+  } else {
+    // Benchmark mode: run each model N times sequentially, show live progress
+    btn.textContent = `Benchmarking (0/${models.length * runs})...`;
+
+    for (const m of models) {
+      grid.appendChild(makeBenchCard(m, runs));
+    }
+
+    let completed = 0;
+    // Run all models in parallel, but each model's runs are sequential
+    await Promise.all(models.map(async (m) => {
+      const apiKey = getKey(m.provider);
+      if (!apiKey) {
+        fillBenchCard(m.model, { error: `No ${m.provider} API key set` });
+        return;
+      }
+
+      const times = [];
+      let lastCaption = '';
+      let lastError = '';
+      let lastUsage = null;
+
+      for (let i = 0; i < runs; i++) {
+        updateBenchProgress(m.model, i, runs);
+        const start = performance.now();
+        try {
+          const resp = await fetch('/api/caption', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: m.provider, model: m.model, api_key: apiKey,
+              scene: currentScene, frame: currentFrame, prompt, temperature,
+            }),
+          });
+          const data = await resp.json();
+          const sec = (performance.now() - start) / 1000;
+          if (data.error) {
+            lastError = data.error;
+          } else {
+            times.push(sec);
+            lastCaption = data.caption;
+            if (data.usage) lastUsage = data.usage;
+          }
+        } catch (e) {
+          lastError = e.message;
+        }
+        completed++;
+        btn.textContent = `Benchmarking (${completed}/${models.length * runs})...`;
+      }
+
+      if (times.length === 0) {
+        fillBenchCard(m.model, { error: lastError || 'All runs failed' });
+      } else {
+        fillBenchCard(m.model, { times, caption: lastCaption, usage: lastUsage });
+      }
+    }));
+  }
+
+  generating = false;
+  btn.disabled = false;
+  btn.textContent = 'Generate';
+  updateGenerateBtn();
+}
+
+async function runCaption(m, prompt, temperature) {
+  const apiKey = getKey(m.provider);
+  if (!apiKey) {
+    fillCard(m.model, { error: `No ${m.provider} API key set` });
+    return;
+  }
+  const start = performance.now();
+  try {
+    const resp = await fetch('/api/caption', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: m.provider, model: m.model, api_key: apiKey,
+        scene: currentScene, frame: currentFrame, prompt, temperature,
+      }),
+    });
+    const data = await resp.json();
+    const sec = ((performance.now() - start) / 1000).toFixed(1);
+    if (data.error) {
+      fillCard(m.model, { error: data.error, time: sec });
+    } else {
+      fillCard(m.model, { caption: data.caption, time: sec, usage: data.usage });
+    }
+  } catch (e) {
+    const sec = ((performance.now() - start) / 1000).toFixed(1);
+    fillCard(m.model, { error: e.message, time: sec });
+  }
+}
+
+// ── Single-run cards ────────────────────────────────────────────────────
+
+function makeCard(model, state) {
+  const card = document.createElement('div');
+  card.className = `result-card ${state}`;
+  card.dataset.provider = model.provider;
+  card.dataset.model = model.model;
+  card.innerHTML = `
+    <div class="result-card-head">
+      <span class="result-model">${model.name}</span>
+      <span class="result-meta"><span class="result-time"></span></span>
+    </div>
+    <div class="result-body">
+      ${state === 'loading' ? '<div class="spinner"></div><span>Sending to ' + model.name + '...</span>' : ''}
+    </div>`;
+  return card;
+}
+
+function fillCard(modelId, result) {
+  const card = document.querySelector(`.result-card[data-model="${modelId}"]`);
+  if (!card) return;
+  card.classList.remove('loading');
+
+  const body = card.querySelector('.result-body');
+  const timeEl = card.querySelector('.result-time');
+  const metaEl = card.querySelector('.result-meta');
+
+  if (result.time) timeEl.textContent = result.time + 's';
+
+  if (result.error) {
+    card.classList.add('error');
+    body.textContent = result.error;
+  } else {
+    body.textContent = result.caption;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.onclick = () => {
+      navigator.clipboard.writeText(result.caption);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    };
+    metaEl.appendChild(btn);
+
+    // Append token usage if available
+    if (result.usage) {
+      card.appendChild(renderTokenUsage(result.usage));
+    }
+  }
+}
+
+function renderTokenUsage(usage) {
+  const { input_tokens, output_tokens, total_tokens, image_tokens, text_tokens, text_tokens_estimated } = usage;
+  const div = document.createElement('div');
+  div.className = 'token-usage';
+
+  // The bar should always fill to 100%.
+  // Use image + text + output as the denominator so segments always sum correctly.
+  // Any gap between (image+text) and input_tokens is "other" (system tokens, etc.)
+  const other_tokens = Math.max(0, input_tokens - image_tokens - text_tokens);
+  const barTotal = image_tokens + text_tokens + other_tokens + output_tokens;
+
+  const imgPct = barTotal ? (image_tokens / barTotal * 100) : 0;
+  const txtPct = barTotal ? (text_tokens / barTotal * 100) : 0;
+  const otherPct = barTotal ? (other_tokens / barTotal * 100) : 0;
+  const outPct = barTotal ? (output_tokens / barTotal * 100) : 0;
+
+  // Proportional bar — always fills to 100%
+  let barSegs = `
+    <div class="token-bar-seg image" style="width:${imgPct}%" title="Image: ${image_tokens}"></div>
+    <div class="token-bar-seg text" style="width:${txtPct}%" title="Prompt text: ${text_tokens}"></div>`;
+  if (otherPct > 0.5) {
+    barSegs += `<div class="token-bar-seg other" style="width:${otherPct}%" title="Other input: ${other_tokens}"></div>`;
+  }
+  barSegs += `<div class="token-bar-seg output" style="width:${outPct}%" title="Output: ${output_tokens}"></div>`;
+  const bar = `<div class="token-bar">${barSegs}</div>`;
+
+  // Legend with values and percentages
+  const est = text_tokens_estimated ? ' <span class="token-est">(est.)</span>' : '';
+  let legendItems = `
+    <div class="token-legend-item"><span class="token-dot image"></span> Image: <span class="token-value">${image_tokens.toLocaleString()}</span> <span class="token-pct">(${imgPct.toFixed(1)}%)</span></div>
+    <div class="token-legend-item"><span class="token-dot text"></span> Prompt: <span class="token-value">${text_tokens.toLocaleString()}</span>${est} <span class="token-pct">(${txtPct.toFixed(1)}%)</span></div>`;
+  if (other_tokens > 0) {
+    legendItems += `<div class="token-legend-item"><span class="token-dot other"></span> Other: <span class="token-value">${other_tokens.toLocaleString()}</span> <span class="token-pct">(${otherPct.toFixed(1)}%)</span></div>`;
+  }
+  legendItems += `
+    <div class="token-legend-item"><span class="token-dot output"></span> Output: <span class="token-value">${output_tokens.toLocaleString()}</span> <span class="token-pct">(${outPct.toFixed(1)}%)</span></div>
+    <div class="token-legend-item">Total: <span class="token-value">${total_tokens.toLocaleString()}</span></div>`;
+  const legend = `<div class="token-legend">${legendItems}</div>`;
+
+  div.innerHTML = bar + legend;
+  return div;
+}
+
+// ── Benchmark cards ─────────────────────────────────────────────────────
+
+function makeBenchCard(model, runs) {
+  const card = document.createElement('div');
+  card.className = 'result-card loading';
+  card.dataset.provider = model.provider;
+  card.dataset.model = model.model;
+  card.innerHTML = `
+    <div class="result-card-head">
+      <span class="result-model">${model.name}</span>
+      <span class="result-meta"><span class="result-time"></span></span>
+    </div>
+    <div class="result-body">
+      <div class="spinner"></div>
+      <span class="bench-progress">Run 1/${runs}...</span>
+    </div>`;
+  return card;
+}
+
+function updateBenchProgress(modelId, runIdx, totalRuns) {
+  const card = document.querySelector(`.result-card[data-model="${modelId}"]`);
+  if (!card) return;
+  const prog = card.querySelector('.bench-progress');
+  if (prog) prog.textContent = `Run ${runIdx + 1}/${totalRuns}...`;
+}
+
+function fillBenchCard(modelId, result) {
+  const card = document.querySelector(`.result-card[data-model="${modelId}"]`);
+  if (!card) return;
+  card.classList.remove('loading');
+
+  const body = card.querySelector('.result-body');
+  const timeEl = card.querySelector('.result-time');
+  const metaEl = card.querySelector('.result-meta');
+
+  if (result.error) {
+    card.classList.add('error');
+    body.textContent = result.error;
+    return;
+  }
+
+  const times = result.times;
+  const sorted = [...times].sort((a, b) => a - b);
+  const min = sorted[0];
+  const max = sorted[sorted.length - 1];
+  const avg = times.reduce((a, b) => a + b, 0) / times.length;
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+  timeEl.textContent = `avg ${avg.toFixed(1)}s`;
+
+  // Add copy button
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'copy-btn';
+  copyBtn.textContent = 'Copy';
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(result.caption);
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => copyBtn.textContent = 'Copy', 1500);
+  };
+  metaEl.appendChild(copyBtn);
+
+  // Show last caption
+  body.textContent = result.caption;
+
+  // Add benchmark stats footer
+  const stats = document.createElement('div');
+  stats.className = 'bench-stats';
+  stats.innerHTML = `
+    <div class="bench-stats-grid">
+      <div><div class="bench-stat-label">Min</div><div class="bench-stat-value">${min.toFixed(2)}s</div></div>
+      <div><div class="bench-stat-label">Avg</div><div class="bench-stat-value">${avg.toFixed(2)}s</div></div>
+      <div><div class="bench-stat-label">Median</div><div class="bench-stat-value">${median.toFixed(2)}s</div></div>
+      <div><div class="bench-stat-label">Max</div><div class="bench-stat-value">${max.toFixed(2)}s</div></div>
+    </div>
+    <div class="bench-runs">${times.map(t => `<span class="bench-run-tag">${t.toFixed(2)}s</span>`).join('')}</div>`;
+  card.appendChild(stats);
+
+  // Add token usage from last run
+  if (result.usage) {
+    card.appendChild(renderTokenUsage(result.usage));
+  }
+}
+
+// ── Events ──────────────────────────────────────────────────────────────
+
+function bindEvents() {
+  // API keys
+  for (const id of ['gemini-key', 'claude-key']) {
+    document.getElementById(id).addEventListener('input', () => saveKey(id));
+  }
+
+  // Scene picker toggle
+  document.getElementById('scene-picker-selected').addEventListener('click', () => {
+    document.getElementById('scene-picker').classList.toggle('open');
+  });
+  // Close scene picker when clicking outside
+  document.addEventListener('click', (e) => {
+    const picker = document.getElementById('scene-picker');
+    if (!picker.contains(e.target)) picker.classList.remove('open');
+  });
+
+  // Temperature
+  document.getElementById('temperature').addEventListener('input', (e) => {
+    document.getElementById('temp-val').textContent = e.target.value;
+  });
+
+  // Model checkboxes (delegated)
+  document.getElementById('model-list').addEventListener('change', updateGenerateBtn);
+
+  // Generate
+  document.getElementById('generate-btn').addEventListener('click', onGenerate);
+
+  // Prompt toggle
+  document.getElementById('prompt-toggle').addEventListener('click', () => {
+    document.getElementById('prompt-section').classList.toggle('open');
+  });
+
+  // Prompt persistence
+  document.getElementById('prompt-editor').addEventListener('input', (e) => {
+    localStorage.setItem('wb_prompt', e.target.value);
+  });
+
+  // Restore default prompt
+  document.getElementById('restore-prompt').addEventListener('click', () => {
+    document.getElementById('prompt-editor').value = DEFAULT_PROMPT;
+    localStorage.removeItem('wb_prompt');
+  });
+
+  // Keyboard shortcut: Ctrl+Enter to generate
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      onGenerate();
+    }
+  });
+}
+
+function updateGenerateBtn() {
+  const btn = document.getElementById('generate-btn');
+  if (!generating) {
+    btn.disabled = getSelectedModels().length === 0;
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+function showBanner(html) {
+  document.getElementById('error-banner').innerHTML =
+    `<div class="error-banner">${html}</div>`;
+}
+
+// ── Start ───────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

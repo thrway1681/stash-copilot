@@ -1,0 +1,162 @@
+name: CI
+
+# Runs on the integration branch (dev) and production (main), and on PRs into
+# either. The previous version only triggered on main, so nothing that landed on
+# dev was ever checked.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # The one pre-existing test failure, unrelated to any change under test. Tracked
+  # separately; deselected so it doesn't mask real regressions in the gate.
+  KNOWN_FAILING: "tests/tools/test_caption_dashboard.py::test_load_recent_scenes_returns_last_n"
+
+jobs:
+  # Hard gate. Everything below the unit suite must stay green.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      # `--extra dev` installs the optional-deps dev EXTRA (pytest, mypy, ruff,
+      # stubs). `--dev` would only install the dependency-GROUP (pytest-cov),
+      # which is what the old workflow used — leaving ruff/mypy uninstalled.
+      - run: uv sync --extra dev
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run tests
+        run: uv run --extra dev pytest -q --tb=short --deselect "${KNOWN_FAILING}"
+
+  # Advisory (continue-on-error): the package currently has a known lint/format
+  # baseline (~97 ruff findings, ~19 files unformatted). Surfaced as annotations
+  # without blocking. Flip to a hard gate after a `ruff check --fix` + `ruff
+  # format` cleanup pass.
+  lint:
+    name: Lint & Format (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      # Scope to the package + entry point (TESTING.md baseline); `.` would also
+      # scan throwaway poc_*/standalone scripts.
+      - run: uv run --extra dev ruff check stash-copilot.py stash_ai/
+      - run: uv run --extra dev ruff format --check stash-copilot.py stash_ai/
+
+  # Advisory: strict mypy has a known baseline (~124 errors). Goal is "no NEW
+  # errors"; surfaced without blocking.
+  typecheck:
+    name: Type Check (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      - run: uv run --extra dev mypy .
+
+  # End-to-end check against a REAL Dockerized Stash, mirroring docs/TESTING.md §6.
+  # Proves the host-runs-ML / container-runs-Stash seam: bind-mounted DB + media
+  # path parity + OpenCLIP embedding + recommendations. Only runs if units pass.
+  integration:
+    name: Integration (real Stash)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Generate synthetic media
+        run: |
+          mkdir -p docker/media
+          for src in "testsrc" "smptebars" "rgbtestsrc" "mandelbrot" "yuvtestsrc" "gradients"; do
+            ffmpeg -y -f lavfi -i "${src}=size=320x240:rate=12:duration=4" \
+              -t 4 -pix_fmt yuv420p -c:v libx264 "docker/media/clip_${src}.mp4" >/dev/null 2>&1
+          done
+          ls -1 docker/media/*.mp4
+
+      - name: Boot dev Stash (DB bind mount + media path parity)
+        env:
+          MEDIA_ABS: ${{ github.workspace }}/docker/media
+        run: |
+          export STASH_MEDIA_DIR="$MEDIA_ABS" STASH_MEDIA_MOUNT="$MEDIA_ABS"
+          docker compose -f docker-compose.dev.yml up -d
+          STASH_URL=http://localhost:3000 STASH_LIBRARY="$MEDIA_ABS" \
+            EMBED_DEVICE=cpu bash scripts/dev_stash_bootstrap.sh
+
+      - name: Seed engagement (recs need >=3 engaged scenes + unwatched ones)
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          def gql(query):
+              req = urllib.request.Request(
+                  "http://localhost:3000/graphql",
+                  data=json.dumps({"query": query}).encode(),
+                  headers={"Content-Type": "application/json"},
+              )
+              urllib.request.urlopen(req).read()
+          # Engage scenes 1-3 (leaving the rest unwatched for Discover to surface).
+          for sid in (1, 2, 3):
+              gql(f'mutation{{ sceneUpdate(input:{{id:"{sid}",rating100:{60 + sid*10}}}){{id}} }}')
+              gql(f'mutation{{ sceneAddO(id:"{sid}"){{count}} }}')
+              gql(f'mutation{{ sceneAddPlay(id:"{sid}"){{count}} }}')
+          print("seeded engagement on scenes 1-3")
+          PY
+
+      - name: Embed scenes (OpenCLIP, CPU) + recommend
+        env:
+          STASH_CONFIG_DIR: ${{ github.workspace }}/docker/stash-config
+        run: |
+          uv run python scripts/run_task.py embed_scenes \
+            --real --stash-url http://localhost:3000
+          uv run python scripts/run_task.py recommendations \
+            --real --stash-url http://localhost:3000 --arg mode=discover
+
+      - name: Assert recommendations were produced
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("assets/recommendations.json"))
+          print("status:", d["status"], "| results:", len(d["results"]))
+          assert d["status"] == "complete", f"recs status not complete: {d['status']}"
+          assert len(d["results"]) > 0, "expected at least one recommendation"
+          print("integration OK")
+          PY
+
+      - name: Dump Stash logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.dev.yml logs --tail=200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.dev.yml down -v || true

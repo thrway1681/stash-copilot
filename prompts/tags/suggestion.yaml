@@ -1,0 +1,32 @@
+# Tag suggestion prompts
+# Placeholders: {description}, {context_section}
+
+suggestion: |
+  Based on the following scene description, suggest relevant tags with confidence scores.
+
+  **Scene Description:**
+  {description}
+
+  {context_section}
+
+  **Instructions:**
+  1. ONLY suggest tags from the "Available tags" list above
+  2. Do NOT suggest tags already in "Current scene tags"
+  3. Assign a confidence score (0-100) based on how certain you are the tag applies
+  4. Include a timestamp if the tag applies to a specific moment in the scene
+  5. Briefly explain why you're suggesting each tag
+
+  Output your response in EXACTLY this XML format:
+
+  <suggested_tags>
+    <tag name="tag_name" confidence="85" timestamp="0:45">Brief reason why this tag applies</tag>
+    <tag name="another_tag" confidence="70">Reason for tag (no timestamp if it applies throughout)</tag>
+  </suggested_tags>
+
+  Confidence guidelines:
+  - 90-100: Absolutely certain, clearly visible/obvious
+  - 70-89: Very likely, strong evidence in description
+  - 50-69: Probable, moderate evidence
+  - 30-49: Possible but uncertain
+
+  Only include tags you're at least 30% confident about. Output ONLY the XML block, nothing else.

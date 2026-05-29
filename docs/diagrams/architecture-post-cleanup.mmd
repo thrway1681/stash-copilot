@@ -1,0 +1,151 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#fff', 'primaryBorderColor': '#312e81', 'lineColor': '#6366f1', 'secondaryColor': '#8b5cf6', 'tertiaryColor': '#1e1b4b'}}}%%
+graph TB
+    subgraph Frontend["Frontend Layer"]
+        JS["stash-copilot.js"]
+        CSS["stash-copilot.css"]
+    end
+
+    subgraph Entry["Entry Point"]
+        Main["stash-copilot.py"]
+        StashPlugin["StashPlugin"]
+    end
+
+    subgraph Config["Configuration (NEW)"]
+        PluginConfig["PluginConfig"]
+        LLMProviderConfig["LLMProviderConfig"]
+        EmbeddingSettings["EmbeddingSettings"]
+        RecommendationSettings["RecommendationSettings"]
+        Defaults["defaults.py"]
+        Legacy["legacy.py"]
+    end
+
+    subgraph Exceptions["Exceptions (NEW)"]
+        StashCopilotError["StashCopilotError"]
+        LLMError["LLMError"]
+        VisionError["VisionError"]
+        EmbeddingError["EmbeddingError"]
+        StorageError["StorageError"]
+        TaskError["TaskError"]
+    end
+
+    subgraph LLM["LLM Providers"]
+        LLMRegistry["Provider Registry"]
+        OllamaProvider["OllamaProvider"]
+        OpenRouterProvider["OpenRouterProvider"]
+        AnthropicProvider["AnthropicProvider"]
+        OpenAIProvider["OpenAIProvider"]
+        ModelCaps["model_caps.py"]
+    end
+
+    subgraph Embeddings["Embedding System"]
+        EmbedRegistry["Embedding Registry"]
+        OpenCLIP["OpenCLIPProvider"]
+        EmbedStorage["EmbeddingStorage"]
+        FrameSearch["FrameSearch"]
+    end
+
+    subgraph Recommendations["Recommendation Engine"]
+        RecEngine["RecommendationEngine"]
+        Engagement["EngagementCalculator"]
+        Profile["UserProfileBuilder"]
+        Clusters["ClusterEngine"]
+    end
+
+    subgraph Tasks["Task Handlers"]
+        SceneVision["SceneVisionTask"]
+        EmbedScenes["EmbedScenesTask"]
+        RecTask["RecommendationsTask"]
+        ChatTask["ChatTask"]
+        FrameAnalysis["FrameAnalysisTask"]
+    end
+
+    subgraph Tools["LLM Tools"]
+        DatabaseTool["DatabaseTool"]
+        EmbeddingsTool["EmbeddingsTool"]
+        VisionTool["VisionTool"]
+    end
+
+    subgraph Data["Data Layer"]
+        StashDB["Stash SQLite"]
+        PluginDB["Plugin SQLite"]
+        Aggregators["Aggregators"]
+    end
+
+    %% Entry flow
+    Main --> StashPlugin
+    StashPlugin --> PluginConfig
+    PluginConfig --> Defaults
+    PluginConfig --> Legacy
+
+    %% Config relationships
+    PluginConfig --> LLMProviderConfig
+    PluginConfig --> EmbeddingSettings
+    PluginConfig --> RecommendationSettings
+
+    %% LLM flow
+    LLMProviderConfig --> LLMRegistry
+    LLMRegistry --> OllamaProvider
+    LLMRegistry --> OpenRouterProvider
+    LLMRegistry --> AnthropicProvider
+    LLMRegistry --> OpenAIProvider
+    ModelCaps --> LLMRegistry
+
+    %% Embedding flow
+    EmbeddingSettings --> EmbedRegistry
+    EmbedRegistry --> OpenCLIP
+    OpenCLIP --> EmbedStorage
+    EmbedStorage --> FrameSearch
+
+    %% Recommendation flow
+    RecEngine --> Engagement
+    RecEngine --> Profile
+    RecEngine --> Clusters
+    RecEngine --> EmbedStorage
+
+    %% Task dispatch
+    StashPlugin --> Tasks
+    SceneVision --> LLMRegistry
+    SceneVision --> Tools
+    EmbedScenes --> EmbedRegistry
+    RecTask --> RecEngine
+    ChatTask --> LLMRegistry
+    FrameAnalysis --> LLMRegistry
+
+    %% Tools
+    DatabaseTool --> StashDB
+    EmbeddingsTool --> EmbedStorage
+    VisionTool --> LLMRegistry
+
+    %% Data layer
+    Aggregators --> StashDB
+    EmbedStorage --> PluginDB
+
+    %% Frontend
+    Frontend --> Main
+
+    %% Exception hierarchy
+    StashCopilotError --> LLMError
+    LLMError --> VisionError
+    StashCopilotError --> EmbeddingError
+    StashCopilotError --> StorageError
+    StashCopilotError --> TaskError
+
+    classDef frontend fill:#4f46e5,stroke:#312e81,color:#fff
+    classDef config fill:#8b5cf6,stroke:#5b21b6,color:#fff
+    classDef llm fill:#06b6d4,stroke:#0e7490,color:#fff
+    classDef embeddings fill:#10b981,stroke:#065f46,color:#fff
+    classDef recommendations fill:#f59e0b,stroke:#92400e,color:#fff
+    classDef tasks fill:#ef4444,stroke:#7f1d1d,color:#fff
+    classDef data fill:#6366f1,stroke:#312e81,color:#fff
+    classDef tools fill:#ec4899,stroke:#831843,color:#fff
+    classDef exceptions fill:#dc2626,stroke:#7f1d1d,color:#fff
+
+    class JS,CSS frontend
+    class PluginConfig,LLMProviderConfig,EmbeddingSettings,RecommendationSettings,Defaults,Legacy config
+    class LLMRegistry,OllamaProvider,OpenRouterProvider,AnthropicProvider,OpenAIProvider,ModelCaps llm
+    class EmbedRegistry,OpenCLIP,EmbedStorage,FrameSearch embeddings
+    class RecEngine,Engagement,Profile,Clusters recommendations
+    class SceneVision,EmbedScenes,RecTask,ChatTask,FrameAnalysis tasks
+    class StashDB,PluginDB,Aggregators data
+    class DatabaseTool,EmbeddingsTool,VisionTool tools
+    class StashCopilotError,LLMError,VisionError,EmbeddingError,StorageError,TaskError exceptions

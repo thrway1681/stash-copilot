@@ -1,0 +1,53 @@
+# Development Stash server for Stash Copilot.
+#
+# Provides a reproducible, throwaway Stash instance to develop the plugin against
+# WITHOUT touching your real ~/.stash. All state lives in named volumes, so
+# `down -v` gives you a clean slate.
+#
+# The plugin's Python/ML code runs on the HOST (where torch/faiss are installed),
+# not inside this container: the official stashapp/stash image is Alpine/musl and
+# cannot install the glibc torch/faiss wheels. Drive tasks against this server
+# with the local harness:
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   # open http://localhost:3000 and complete first-run setup (skip auth locally)
+#   uv run python scripts/run_task.py stats_summary \
+#       --real --stash-url http://localhost:3000 --api-key "$STASH_API_KEY"
+#
+#   docker compose -f docker-compose.dev.yml down       # stop, keep data
+#   docker compose -f docker-compose.dev.yml down -v     # stop, wipe data (fresh)
+#
+# Put sample media under ./docker/media to have something to scan.
+
+services:
+  stash:
+    image: stashapp/stash:latest
+    container_name: stash-copilot-dev
+    ports:
+      # Host 3000 -> Stash's internal 9999 (matches the project's dev convention).
+      - "3000:9999"
+    environment:
+      STASH_PORT: "9999"
+      STASH_STASH: /data/
+      STASH_GENERATED: /generated/
+      STASH_METADATA: /metadata/
+      STASH_CACHE: /cache/
+    volumes:
+      # Config dir is a HOST bind mount (not a named volume) so the plugin's
+      # host-run data tasks can read stash-go.sqlite directly. get_stash_db_path()
+      # finds it via STASH_CONFIG_DIR=./docker/stash-config on the host.
+      - ./docker/stash-config:/root/.stash
+      - stash-metadata:/metadata
+      - stash-generated:/generated
+      - stash-cache:/cache
+      # Media mount. Defaults to ./docker/media -> /data. For host/container PATH
+      # PARITY (so host-run ML tasks can open files by the path the DB records),
+      # set STASH_MEDIA_DIR and STASH_MEDIA_MOUNT to the SAME absolute host path
+      # and point the Stash library there at setup time. See docs/TESTING.md.
+      - ${STASH_MEDIA_DIR:-./docker/media}:${STASH_MEDIA_MOUNT:-/data}:ro
+    restart: unless-stopped
+
+volumes:
+  stash-metadata:
+  stash-generated:
+  stash-cache:

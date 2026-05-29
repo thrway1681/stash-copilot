@@ -1,0 +1,88 @@
+name: Release
+
+# Cut a release by pushing a version tag:  git tag v1.2.3 && git push origin v1.2.3
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. v1.2.3)"
+        required: true
+
+permissions:
+  contents: write   # create the GitHub Release and push to the gh-pages branch
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package plugin
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          [ -z "$VERSION" ] && VERSION="${GITHUB_REF_NAME}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Builds the vendored frontend assets (npm postinstall) and zips the bundle
+      # plus a Stash plugin-source index.yml into dist/.
+      - name: Build bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/package_plugin.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-bundle
+          path: dist/
+
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-bundle
+          path: dist
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: ${{ github.event.inputs.version || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/stash-copilot.zip
+
+  plugin-index:
+    name: Publish Stash plugin source (GitHub Pages)
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-bundle
+          path: dist
+      # Publishes index.yml + the zip to the gh-pages branch. Users add the
+      # resulting Pages URL (…/index.yml) as a plugin source in Stash, then
+      # install/update from Settings -> Plugins. NOTE: enable GitHub Pages for
+      # this repo (Settings -> Pages -> Source: gh-pages branch) once.
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          keep_files: true   # retain previously published version zips

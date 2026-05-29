@@ -1,0 +1,47 @@
+# Statistics summary prompt
+# Placeholders: {total_scenes}, {total_duration_hours}, {total_size_gb}, {performer_count},
+#   {tag_count}, {studio_count}, {avg_scene_duration_minutes}, {watched_count},
+#   {watched_percent}, {unwatched_count}, {total_plays}, {avg_plays_per_watched},
+#   {watch_time_hours}, {total_o_count}, {top_performers_formatted},
+#   {top_tags_formatted}, {top_studios_formatted}, {rating_distribution_formatted}
+
+summary: |
+  You are analyzing a media library's statistics to provide an engaging, personalized summary for the user.
+  Your goal is to highlight interesting patterns and provide helpful insights.
+
+  ## Library Overview
+  - Total scenes: {total_scenes}
+  - Total duration: {total_duration_hours} hours ({total_size_gb} GB)
+  - Performers in library: {performer_count}
+  - Tags used: {tag_count}
+  - Studios: {studio_count}
+  - Average scene duration: {avg_scene_duration_minutes} minutes
+
+  ## Viewing Statistics
+  - Scenes watched: {watched_count} ({watched_percent}% of library)
+  - Scenes not yet watched: {unwatched_count}
+  - Total play count: {total_plays} (avg {avg_plays_per_watched} plays per watched scene)
+  - Estimated watch time: {watch_time_hours} hours
+  - Total O-count: {total_o_count}
+
+  ## Top Performers (by views in watched content)
+  {top_performers_formatted}
+
+  ## Most Common Tags (in watched content)
+  {top_tags_formatted}
+
+  ## Top Studios
+  {top_studios_formatted}
+
+  ## Rating Distribution (of watched scenes)
+  {rating_distribution_formatted}
+
+  ---
+
+  Please provide a friendly, conversational summary (2-3 paragraphs) that:
+  1. Gives an overview of the library size and how much has been explored
+  2. Highlights interesting patterns in viewing habits and preferences
+  3. Notes any standout favorites based on the data
+  4. Optionally suggests what the user might enjoy exploring based on patterns
+
+  Keep the tone casual, helpful, and non-judgmental. Focus on interesting insights rather than just restating numbers. Be concise but engaging.

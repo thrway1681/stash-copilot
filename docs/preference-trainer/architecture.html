@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scene Preference Trainer - Architecture & Algorithms</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #12121a;
+    --bg-card: #1a1a2e;
+    --bg-card-alt: #16162a;
+    --border: #2a2a4a;
+    --text-primary: #e8e8f0;
+    --text-secondary: #a0a0c0;
+    --text-muted: #6a6a8a;
+    --accent-pink: #ec4899;
+    --accent-purple: #8b5cf6;
+    --accent-blue: #3b82f6;
+    --accent-green: #10b981;
+    --accent-orange: #f59e0b;
+    --accent-cyan: #06b6d4;
+    --accent-red: #ef4444;
+    --glow-pink: rgba(236, 72, 153, 0.3);
+    --glow-purple: rgba(139, 92, 246, 0.3);
+    --glow-blue: rgba(59, 130, 246, 0.2);
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    padding: 0;
+  }
+
+  /* Page container */
+  .page {
+    width: 1100px;
+    margin: 0 auto;
+    padding: 60px 60px;
+    min-height: 100vh;
+    position: relative;
+  }
+
+  .page-break {
+    page-break-before: always;
+    padding-top: 60px;
+  }
+
+  /* Cover page */
+  .cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -200px;
+    left: -200px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--glow-pink) 0%, transparent 70%);
+    border-radius: 50%;
+    filter: blur(80px);
+    z-index: 0;
+  }
+
+  .cover::after {
+    content: '';
+    position: absolute;
+    bottom: -200px;
+    right: -200px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--glow-purple) 0%, transparent 70%);
+    border-radius: 50%;
+    filter: blur(80px);
+    z-index: 0;
+  }
+
+  .cover-content {
+    position: relative;
+    z-index: 1;
+  }
+
+  .cover-icon {
+    width: 120px;
+    height: 120px;
+    margin-bottom: 40px;
+  }
+
+  .cover h1 {
+    font-size: 52px;
+    font-weight: 900;
+    letter-spacing: -2px;
+    line-height: 1.1;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 50%, #3b82f6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .cover h2 {
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    margin-bottom: 48px;
+  }
+
+  .cover-meta {
+    display: flex;
+    gap: 32px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .cover-meta span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Section headers */
+  h2.section-title {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--border);
+    position: relative;
+  }
+
+  h2.section-title::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 120px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-pink), var(--accent-purple));
+  }
+
+  .section-subtitle {
+    color: var(--text-secondary);
+    font-size: 16px;
+    margin-bottom: 40px;
+  }
+
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 32px 0 16px;
+    color: var(--text-primary);
+  }
+
+  h4 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    color: var(--accent-cyan);
+  }
+
+  p {
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    font-size: 15px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin: 24px 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card.glow-pink {
+    border-color: rgba(236, 72, 153, 0.3);
+    box-shadow: 0 0 40px rgba(236, 72, 153, 0.08);
+  }
+
+  .card.glow-purple {
+    border-color: rgba(139, 92, 246, 0.3);
+    box-shadow: 0 0 40px rgba(139, 92, 246, 0.08);
+  }
+
+  .card.glow-blue {
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 40px rgba(59, 130, 246, 0.08);
+  }
+
+  .card.glow-green {
+    border-color: rgba(16, 185, 129, 0.3);
+    box-shadow: 0 0 40px rgba(16, 185, 129, 0.08);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .card-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .badge-pink { background: rgba(236, 72, 153, 0.15); color: var(--accent-pink); }
+  .badge-purple { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
+  .badge-blue { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); }
+  .badge-green { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+  .badge-orange { background: rgba(245, 158, 11, 0.15); color: var(--accent-orange); }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 14px;
+  }
+
+  thead th {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-weight: 600;
+    text-align: left;
+    padding: 14px 16px;
+    border-bottom: 2px solid var(--accent-purple);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+
+  tbody tr:hover {
+    background: rgba(139, 92, 246, 0.05);
+  }
+
+  /* Code blocks */
+  .code-block {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 12px;
+    padding: 20px 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #c9d1d9;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+
+  .code-block .keyword { color: #ff7b72; }
+  .code-block .string { color: #a5d6ff; }
+  .code-block .comment { color: #8b949e; font-style: italic; }
+  .code-block .number { color: #79c0ff; }
+  .code-block .func { color: #d2a8ff; }
+  .code-block .type { color: #ffa657; }
+
+  /* Formula blocks */
+  .formula {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(59, 130, 246, 0.08));
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    text-align: center;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+  }
+
+  .formula .label {
+    display: block;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-purple);
+    margin-bottom: 12px;
+  }
+
+  /* SVG diagram containers */
+  .diagram-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin: 24px 0;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  .diagram-container svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .diagram-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+  }
+
+  /* Grid layouts */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 24px 0;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    margin: 24px 0;
+  }
+
+  /* Metric cards */
+  .metric {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+  }
+
+  .metric-value {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 4px;
+  }
+
+  .metric-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .pink { color: var(--accent-pink); }
+  .purple { color: var(--accent-purple); }
+  .blue { color: var(--accent-blue); }
+  .green { color: var(--accent-green); }
+  .orange { color: var(--accent-orange); }
+  .cyan { color: var(--accent-cyan); }
+
+  /* Flow arrows */
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    margin: 16px 0;
+  }
+
+  .flow-num {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .flow-num.pink-bg { background: rgba(236, 72, 153, 0.2); color: var(--accent-pink); }
+  .flow-num.purple-bg { background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }
+  .flow-num.blue-bg { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
+  .flow-num.green-bg { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); }
+
+  .flow-content h4 {
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+
+  .flow-content p {
+    margin: 0;
+    font-size: 14px;
+  }
+
+  /* Highlight box */
+  .highlight {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.06), rgba(139, 92, 246, 0.06));
+    border-left: 3px solid var(--accent-pink);
+    border-radius: 0 12px 12px 0;
+    padding: 20px 24px;
+    margin: 24px 0;
+  }
+
+  .highlight p {
+    color: var(--text-primary);
+    margin: 0;
+    font-size: 15px;
+  }
+
+  /* List styles */
+  ul, ol {
+    margin: 12px 0 12px 24px;
+    color: var(--text-secondary);
+    font-size: 15px;
+  }
+
+  li {
+    margin-bottom: 8px;
+  }
+
+  li strong {
+    color: var(--text-primary);
+  }
+
+  /* Comparison indicator */
+  .vs-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent-purple);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-purple);
+  }
+
+  /* Footer */
+  .page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 60px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== COVER PAGE ==================== -->
+<div class="page cover">
+  <div class="cover-content">
+    <svg class="cover-icon" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Brain/AI icon with heart -->
+      <defs>
+        <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#ec4899;stop-opacity:1" />
+          <stop offset="50%" style="stop-color:#8b5cf6;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+        </linearGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <circle cx="60" cy="60" r="55" stroke="url(#grad1)" stroke-width="2" fill="none" opacity="0.3"/>
+      <circle cx="60" cy="60" r="45" stroke="url(#grad1)" stroke-width="1.5" fill="none" opacity="0.2"/>
+      <!-- Heart shape -->
+      <path d="M60 85 C60 85 30 65 30 48 C30 38 38 30 48 30 C53 30 57 33 60 37 C63 33 67 30 72 30 C82 30 90 38 90 48 C90 65 60 85 60 85Z"
+            fill="url(#grad1)" opacity="0.8" filter="url(#glow)"/>
+      <!-- Neural network dots -->
+      <circle cx="35" cy="35" r="3" fill="#ec4899" opacity="0.6"/>
+      <circle cx="85" cy="35" r="3" fill="#3b82f6" opacity="0.6"/>
+      <circle cx="25" cy="60" r="2.5" fill="#8b5cf6" opacity="0.5"/>
+      <circle cx="95" cy="60" r="2.5" fill="#8b5cf6" opacity="0.5"/>
+      <circle cx="35" cy="85" r="3" fill="#3b82f6" opacity="0.6"/>
+      <circle cx="85" cy="85" r="3" fill="#ec4899" opacity="0.6"/>
+      <!-- Connection lines -->
+      <line x1="35" y1="35" x2="48" y2="37" stroke="#ec4899" stroke-width="0.8" opacity="0.3"/>
+      <line x1="85" y1="35" x2="72" y2="37" stroke="#3b82f6" stroke-width="0.8" opacity="0.3"/>
+      <line x1="25" y1="60" x2="38" y2="55" stroke="#8b5cf6" stroke-width="0.8" opacity="0.3"/>
+      <line x1="95" y1="60" x2="82" y2="55" stroke="#8b5cf6" stroke-width="0.8" opacity="0.3"/>
+    </svg>
+    <h1>Scene Preference<br>Trainer</h1>
+    <h2>Architecture & Algorithm Design Document</h2>
+    <div class="cover-meta">
+      <span>Stash Copilot Plugin</span>
+      <span>|</span>
+      <span>February 2026</span>
+      <span>|</span>
+      <span>Research & Design</span>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE 2: EXECUTIVE SUMMARY ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">Executive Summary</h2>
+  <p class="section-subtitle">A Tinder-like preference learning system that uses existing embeddings and engagement data to efficiently learn user taste with minimal effort.</p>
+
+  <div class="highlight">
+    <p><strong>Core insight:</strong> With embedding-aware pair selection, only ~25-30 swipes are needed to build a meaningful preference model from a 1000-scene library, compared to thousands with random selection.</p>
+  </div>
+
+  <div class="grid-3">
+    <div class="metric">
+      <div class="metric-value pink">~30</div>
+      <div class="metric-label">Swipes for convergence</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value purple">3</div>
+      <div class="metric-label">Progressive phases</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value blue">768d</div>
+      <div class="metric-label">Embedding dimensions</div>
+    </div>
+  </div>
+
+  <h3>System Goals</h3>
+  <ul>
+    <li><strong>Efficient learning:</strong> Minimize the number of user interactions needed to build a reliable preference model</li>
+    <li><strong>Warm start:</strong> Leverage existing engagement data (o_count, play_count, ratings) as a Bayesian prior</li>
+    <li><strong>Embedding-driven:</strong> Use pre-computed OpenCLIP embeddings for intelligent pair selection</li>
+    <li><strong>Progressive refinement:</strong> Start with broad taste discovery, narrow to fine-grained preferences</li>
+    <li><strong>Integration:</strong> Feed learned preferences back into the existing recommendation engine</li>
+  </ul>
+
+  <h3>Recommended Algorithm Stack</h3>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Layered Architecture</div>
+    <svg width="900" height="380" viewBox="0 0 900 380" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Layer 4 (bottom) -->
+      <rect x="50" y="290" width="800" height="70" rx="12" fill="#1a1a2e" stroke="#f59e0b" stroke-width="1.5" opacity="0.9"/>
+      <text x="90" y="318" fill="#f59e0b" font-family="Inter" font-size="11" font-weight="700" text-transform="uppercase" letter-spacing="1">LAYER 4</text>
+      <text x="90" y="340" fill="#e8e8f0" font-family="Inter" font-size="15" font-weight="600">Swiss-Style Session Structure</text>
+      <text x="400" y="330" fill="#a0a0c0" font-family="Inter" font-size="13">Organizes swipes into rounds with progress tracking and convergence detection</text>
+
+      <!-- Layer 3 -->
+      <rect x="50" y="210" width="800" height="70" rx="12" fill="#1a1a2e" stroke="#10b981" stroke-width="1.5" opacity="0.9"/>
+      <text x="90" y="238" fill="#10b981" font-family="Inter" font-size="11" font-weight="700" letter-spacing="1">LAYER 3</text>
+      <text x="90" y="260" fill="#e8e8f0" font-family="Inter" font-size="15" font-weight="600">Engagement-Based Warm Start</text>
+      <text x="400" y="250" fill="#a0a0c0" font-family="Inter" font-size="13">Ridge regression maps engagement scores to initial preference vector in embedding space</text>
+
+      <!-- Layer 2 -->
+      <rect x="50" y="130" width="800" height="70" rx="12" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="1.5" opacity="0.9"/>
+      <text x="90" y="158" fill="#8b5cf6" font-family="Inter" font-size="11" font-weight="700" letter-spacing="1">LAYER 2</text>
+      <text x="90" y="180" fill="#e8e8f0" font-family="Inter" font-size="15" font-weight="600">Active Learning with Embeddings</text>
+      <text x="400" y="170" fill="#a0a0c0" font-family="Inter" font-size="13">Selects maximally informative pairs using similarity, uncertainty, and info gain</text>
+
+      <!-- Layer 1 (top) -->
+      <rect x="50" y="50" width="800" height="70" rx="12" fill="#1a1a2e" stroke="#ec4899" stroke-width="1.5" opacity="0.9"/>
+      <text x="90" y="78" fill="#ec4899" font-family="Inter" font-size="11" font-weight="700" letter-spacing="1">LAYER 1 (CORE)</text>
+      <text x="90" y="100" fill="#e8e8f0" font-family="Inter" font-size="15" font-weight="600">Bayesian Bradley-Terry Model</text>
+      <text x="400" y="90" fill="#a0a0c0" font-family="Inter" font-size="13">Tracks per-scene preference with uncertainty via posterior distribution p ~ N(mu, Sigma)</text>
+
+      <!-- Arrows between layers -->
+      <path d="M450 120 L450 130" stroke="#6a6a8a" stroke-width="1.5" marker-end="url(#arrowGray)"/>
+      <path d="M450 200 L450 210" stroke="#6a6a8a" stroke-width="1.5" marker-end="url(#arrowGray)"/>
+      <path d="M450 280 L450 290" stroke="#6a6a8a" stroke-width="1.5" marker-end="url(#arrowGray)"/>
+
+      <defs>
+        <marker id="arrowGray" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6a6a8a"/>
+        </marker>
+      </defs>
+    </svg>
+  </div>
+</div>
+
+<!-- ==================== PAGE 3: ALGORITHM COMPARISON ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">Algorithm Comparison</h2>
+  <p class="section-subtitle">Five ranking algorithms evaluated for pairwise preference learning from scene comparisons.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Criterion</th>
+        <th>ELO</th>
+        <th>TrueSkill</th>
+        <th>Swiss</th>
+        <th>Bradley-Terry</th>
+        <th>Active Learning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Convergence</strong><br><small>Swipes for top-50 of 1K scenes</small></td>
+        <td>3000-5000</td>
+        <td>1500-3000</td>
+        <td>~5000</td>
+        <td>1500-2500</td>
+        <td style="color: #10b981; font-weight: 600;">500-1500</td>
+      </tr>
+      <tr>
+        <td><strong>Implementation</strong></td>
+        <td style="color: #10b981;">Very Low</td>
+        <td>Medium</td>
+        <td style="color: #10b981;">Low</td>
+        <td>Medium</td>
+        <td>Medium-High</td>
+      </tr>
+      <tr>
+        <td><strong>Uncertainty</strong></td>
+        <td style="color: #ef4444;">None</td>
+        <td style="color: #10b981;">Excellent</td>
+        <td style="color: #ef4444;">None</td>
+        <td>Good (Bayesian)</td>
+        <td>Via base algo</td>
+      </tr>
+      <tr>
+        <td><strong>Warm Start</strong></td>
+        <td>Weak</td>
+        <td style="color: #10b981;">Excellent</td>
+        <td>Moderate</td>
+        <td style="color: #10b981;">Excellent</td>
+        <td>N/A</td>
+      </tr>
+      <tr>
+        <td><strong>Embedding Integration</strong></td>
+        <td style="color: #ef4444;">None</td>
+        <td>Indirect</td>
+        <td style="color: #ef4444;">None</td>
+        <td style="color: #10b981;">Direct</td>
+        <td style="color: #10b981;">Core capability</td>
+      </tr>
+      <tr>
+        <td><strong>Large Library</strong></td>
+        <td>Poor</td>
+        <td>Moderate</td>
+        <td>Poor</td>
+        <td>Moderate</td>
+        <td style="color: #10b981;">Excellent</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="highlight">
+    <p><strong>Recommendation:</strong> Bayesian Bradley-Terry (Layer 1) + Active Learning with Embeddings (Layer 2). This combination provides the strongest warm-start capability, principled uncertainty tracking, and the fewest comparisons needed through intelligent pair selection.</p>
+  </div>
+
+  <h3>Why Bayesian Bradley-Terry?</h3>
+
+  <div class="grid-2">
+    <div class="card glow-pink">
+      <div class="card-header">
+        <span class="card-badge badge-pink">Advantage</span>
+      </div>
+      <h4>Feature-Augmented Model</h4>
+      <p>Learns a preference direction in embedding space: <code>score(s) = p &middot; e_s</code>. Can rank scenes that have <em>never been compared</em>, based purely on their embeddings.</p>
+    </div>
+    <div class="card glow-purple">
+      <div class="card-header">
+        <span class="card-badge badge-purple">Advantage</span>
+      </div>
+      <h4>Bayesian Uncertainty</h4>
+      <p>Maintains full posterior p ~ N(&mu;, &Sigma;). Knows exactly how confident each ranking is. Convergence detection is built-in: when &sigma; drops below threshold, stop asking.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE 4: SYSTEM ARCHITECTURE ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">System Architecture</h2>
+  <p class="section-subtitle">How the preference trainer integrates with existing Stash Copilot infrastructure.</p>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Full System Data Flow</div>
+    <svg width="920" height="700" viewBox="0 0 920 700" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="pinkGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style="stop-color:#ec4899;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#f472b6;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#a78bfa;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#60a5fa;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#34d399;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style="stop-color:#f59e0b;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#fbbf24;stop-opacity:1" />
+        </linearGradient>
+        <marker id="arrowPink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#ec4899"/>
+        </marker>
+        <marker id="arrowPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b5cf6"/>
+        </marker>
+        <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+        </marker>
+        <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/>
+        </marker>
+        <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+        </marker>
+      </defs>
+
+      <!-- ===== EXISTING INFRASTRUCTURE (Left) ===== -->
+      <text x="30" y="28" fill="#6a6a8a" font-family="Inter" font-size="11" font-weight="700" letter-spacing="1.5">EXISTING INFRASTRUCTURE</text>
+
+      <!-- Engagement Calculator -->
+      <rect x="30" y="45" width="220" height="65" rx="10" fill="#1a1a2e" stroke="#10b981" stroke-width="1.2"/>
+      <text x="50" y="70" fill="#10b981" font-family="Inter" font-size="10" font-weight="600" letter-spacing="0.5">ENGAGEMENT CALCULATOR</text>
+      <text x="50" y="90" fill="#a0a0c0" font-family="Inter" font-size="11">o_count, views, duration, rating</text>
+
+      <!-- Taste Map Clusters -->
+      <rect x="30" y="125" width="220" height="65" rx="10" fill="#1a1a2e" stroke="#f59e0b" stroke-width="1.2"/>
+      <text x="50" y="150" fill="#f59e0b" font-family="Inter" font-size="10" font-weight="600" letter-spacing="0.5">TASTE MAP CLUSTERS</text>
+      <text x="50" y="170" fill="#a0a0c0" font-family="Inter" font-size="11">K-Means clusters, centroids</text>
+
+      <!-- Embedding Storage -->
+      <rect x="30" y="205" width="220" height="65" rx="10" fill="#1a1a2e" stroke="#3b82f6" stroke-width="1.2"/>
+      <text x="50" y="230" fill="#3b82f6" font-family="Inter" font-size="10" font-weight="600" letter-spacing="0.5">EMBEDDING STORAGE</text>
+      <text x="50" y="250" fill="#a0a0c0" font-family="Inter" font-size="11">Visual + metadata embeddings (768d)</text>
+
+      <!-- ===== NEW COMPONENTS (Center & Right) ===== -->
+      <text x="340" y="28" fill="#ec4899" font-family="Inter" font-size="11" font-weight="700" letter-spacing="1.5">NEW: PREFERENCE TRAINER</text>
+
+      <!-- Warm Start -->
+      <rect x="320" y="45" width="260" height="90" rx="10" fill="#1a1a2e" stroke="#10b981" stroke-width="1.5"/>
+      <rect x="320" y="45" width="260" height="28" rx="10 10 0 0" fill="rgba(16, 185, 129, 0.1)"/>
+      <text x="340" y="65" fill="#10b981" font-family="Inter" font-size="11" font-weight="700">WARM START</text>
+      <text x="340" y="90" fill="#a0a0c0" font-family="Inter" font-size="12">Ridge regression on engagement</text>
+      <text x="340" y="108" fill="#a0a0c0" font-family="Inter" font-size="12">p0 = (X'X + lambda I)^-1 X'y</text>
+      <text x="340" y="126" fill="#6a6a8a" font-family="Inter" font-size="10">Outputs: initial p, Sigma</text>
+
+      <!-- Pair Selection Engine -->
+      <rect x="320" y="155" width="260" height="120" rx="10" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="1.5"/>
+      <rect x="320" y="155" width="260" height="28" rx="10 10 0 0" fill="rgba(139, 92, 246, 0.1)"/>
+      <text x="340" y="175" fill="#8b5cf6" font-family="Inter" font-size="11" font-weight="700">PAIR SELECTION ENGINE</text>
+      <text x="340" y="200" fill="#a0a0c0" font-family="Inter" font-size="11">Phase 1: Inter-cluster (diverse)</text>
+      <text x="340" y="218" fill="#a0a0c0" font-family="Inter" font-size="11">Phase 2: Intra-cluster (similar)</text>
+      <text x="340" y="236" fill="#a0a0c0" font-family="Inter" font-size="11">Phase 3: Boundary (uncertainty)</text>
+      <text x="340" y="260" fill="#6a6a8a" font-family="Inter" font-size="10">IG(i,j) = 0.5 log(1 + d'Sigma d / sigma^2)</text>
+
+      <!-- Swipe UI -->
+      <rect x="660" y="45" width="230" height="90" rx="10" fill="#1a1a2e" stroke="#ec4899" stroke-width="1.5"/>
+      <rect x="660" y="45" width="230" height="28" rx="10 10 0 0" fill="rgba(236, 72, 153, 0.1)"/>
+      <text x="680" y="65" fill="#ec4899" font-family="Inter" font-size="11" font-weight="700">SWIPE UI</text>
+      <text x="680" y="90" fill="#a0a0c0" font-family="Inter" font-size="12">Tinder cards / Tournament</text>
+      <text x="680" y="108" fill="#a0a0c0" font-family="Inter" font-size="12">Like / Dislike / Super / Skip</text>
+      <text x="680" y="126" fill="#6a6a8a" font-family="Inter" font-size="10">Tracks response_time_ms</text>
+
+      <!-- Bayesian BT Model -->
+      <rect x="320" y="300" width="570" height="120" rx="10" fill="#1a1a2e" stroke="#ec4899" stroke-width="2"/>
+      <rect x="320" y="300" width="570" height="28" rx="10 10 0 0" fill="rgba(236, 72, 153, 0.1)"/>
+      <text x="340" y="320" fill="#ec4899" font-family="Inter" font-size="11" font-weight="700">BAYESIAN BRADLEY-TERRY MODEL</text>
+
+      <text x="340" y="350" fill="#e8e8f0" font-family="JetBrains Mono" font-size="12">p ~ N(mu, Sigma)</text>
+      <text x="340" y="372" fill="#a0a0c0" font-family="JetBrains Mono" font-size="11">P(A > B) = sigma(p' (eA - eB))</text>
+      <text x="340" y="394" fill="#a0a0c0" font-family="JetBrains Mono" font-size="11">Update: Sigma_new^-1 = Sigma_old^-1 + lambda * d * d' / sigma^2</text>
+
+      <text x="680" y="350" fill="#10b981" font-family="Inter" font-size="11" font-weight="600">Outputs:</text>
+      <text x="680" y="370" fill="#a0a0c0" font-family="Inter" font-size="11">preference_vector (768d)</text>
+      <text x="680" y="388" fill="#a0a0c0" font-family="Inter" font-size="11">per-scene uncertainty (sigma)</text>
+      <text x="680" y="406" fill="#a0a0c0" font-family="Inter" font-size="11">convergence metrics</text>
+
+      <!-- Recommendation Engine (existing, enhanced) -->
+      <rect x="320" y="450" width="570" height="90" rx="10" fill="#1a1a2e" stroke="#f59e0b" stroke-width="1.5"/>
+      <rect x="320" y="450" width="570" height="28" rx="10 10 0 0" fill="rgba(245, 158, 11, 0.1)"/>
+      <text x="340" y="470" fill="#f59e0b" font-family="Inter" font-size="11" font-weight="700">RECOMMENDATION ENGINE (ENHANCED)</text>
+      <text x="340" y="500" fill="#e8e8f0" font-family="JetBrains Mono" font-size="12">p_final = normalize((1 - alpha) * p_engagement + alpha * p_swipe)</text>
+      <text x="340" y="525" fill="#a0a0c0" font-family="Inter" font-size="11">alpha = sigmoid((n_swipes - 15) / 5) --- Smooth transition from engagement to swipe preferences</text>
+
+      <!-- Database -->
+      <rect x="320" y="570" width="570" height="80" rx="10" fill="#1a1a2e" stroke="#6a6a8a" stroke-width="1.2"/>
+      <text x="340" y="595" fill="#6a6a8a" font-family="Inter" font-size="10" font-weight="700" letter-spacing="1">SQLITE DATABASE</text>
+      <text x="340" y="615" fill="#a0a0c0" font-family="Inter" font-size="11">preference_comparisons  |  preference_model_state  |  preference_sessions</text>
+      <text x="340" y="635" fill="#6a6a8a" font-family="Inter" font-size="10">+ existing: scene_embeddings, frame_embeddings, o_moment_embeddings</text>
+
+      <!-- ===== ARROWS ===== -->
+      <!-- Engagement -> Warm Start -->
+      <path d="M250 77 L320 77" stroke="#10b981" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowGreen)"/>
+
+      <!-- Clusters -> Pair Selection -->
+      <path d="M250 157 L320 200" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowOrange)"/>
+
+      <!-- Embeddings -> Pair Selection -->
+      <path d="M250 237 L320 230" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowBlue)"/>
+
+      <!-- Warm Start -> BT Model -->
+      <path d="M450 135 L450 300" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+      <text x="455" y="220" fill="#10b981" font-family="Inter" font-size="9">initial p0, Sigma0</text>
+
+      <!-- Pair Selection -> Swipe UI -->
+      <path d="M580 215 L660 100" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+      <text x="600" y="145" fill="#8b5cf6" font-family="Inter" font-size="9">selected pairs</text>
+
+      <!-- Swipe UI -> BT Model -->
+      <path d="M775 135 L775 300" stroke="#ec4899" stroke-width="1.5" marker-end="url(#arrowPink)"/>
+      <text x="780" y="220" fill="#ec4899" font-family="Inter" font-size="9">winner/loser</text>
+
+      <!-- BT Model -> Pair Selection (feedback loop) -->
+      <path d="M320 360 L280 360 L280 215 L320 215" stroke="#8b5cf6" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrowPurple)"/>
+      <text x="265" y="290" fill="#8b5cf6" font-family="Inter" font-size="9" transform="rotate(-90, 265, 290)">uncertainty</text>
+
+      <!-- BT Model -> Rec Engine -->
+      <path d="M605 420 L605 450" stroke="#ec4899" stroke-width="1.5" marker-end="url(#arrowPink)"/>
+
+      <!-- Rec Engine -> DB -->
+      <path d="M605 540 L605 570" stroke="#f59e0b" stroke-width="1.2" marker-end="url(#arrowOrange)"/>
+
+      <!-- Embeddings -> Rec Engine -->
+      <path d="M140 270 L140 490 L320 490" stroke="#3b82f6" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrowBlue)"/>
+    </svg>
+  </div>
+</div>
+
+<!-- ==================== PAGE 5: PROGRESSIVE PHASES ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">Progressive Refinement</h2>
+  <p class="section-subtitle">Three phases of preference learning, from broad taste discovery to fine-grained boundary refinement.</p>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Three-Phase Learning Process</div>
+    <svg width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Phase 1 -->
+      <rect x="20" y="30" width="260" height="290" rx="14" fill="#1a1a2e" stroke="#ec4899" stroke-width="1.5"/>
+      <rect x="20" y="30" width="260" height="40" rx="14 14 0 0" fill="rgba(236, 72, 153, 0.15)"/>
+      <text x="40" y="55" fill="#ec4899" font-family="Inter" font-size="13" font-weight="700">PHASE 1: BROAD STROKES</text>
+
+      <text x="40" y="95" fill="#e8e8f0" font-family="Inter" font-size="12" font-weight="600">6-10 swipes</text>
+      <text x="40" y="115" fill="#a0a0c0" font-family="Inter" font-size="11">Inter-cluster representative</text>
+      <text x="40" y="133" fill="#a0a0c0" font-family="Inter" font-size="11">comparisons (round-robin)</text>
+
+      <!-- Cluster visualization -->
+      <circle cx="80" cy="195" r="30" fill="rgba(236, 72, 153, 0.1)" stroke="#ec4899" stroke-width="1" stroke-dasharray="3,2"/>
+      <circle cx="80" cy="195" r="4" fill="#ec4899"/>
+      <circle cx="70" cy="185" r="2.5" fill="#ec4899" opacity="0.5"/>
+      <circle cx="90" cy="200" r="2.5" fill="#ec4899" opacity="0.5"/>
+      <circle cx="75" cy="208" r="2.5" fill="#ec4899" opacity="0.5"/>
+
+      <circle cx="175" cy="180" r="30" fill="rgba(139, 92, 246, 0.1)" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="3,2"/>
+      <circle cx="175" cy="180" r="4" fill="#8b5cf6"/>
+      <circle cx="165" cy="170" r="2.5" fill="#8b5cf6" opacity="0.5"/>
+      <circle cx="185" cy="185" r="2.5" fill="#8b5cf6" opacity="0.5"/>
+      <circle cx="170" cy="193" r="2.5" fill="#8b5cf6" opacity="0.5"/>
+
+      <circle cx="140" cy="250" r="30" fill="rgba(59, 130, 246, 0.1)" stroke="#3b82f6" stroke-width="1" stroke-dasharray="3,2"/>
+      <circle cx="140" cy="250" r="4" fill="#3b82f6"/>
+      <circle cx="130" cy="240" r="2.5" fill="#3b82f6" opacity="0.5"/>
+      <circle cx="150" cy="255" r="2.5" fill="#3b82f6" opacity="0.5"/>
+
+      <!-- VS arrows between clusters -->
+      <line x1="105" y1="190" x2="148" y2="182" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,2"/>
+      <text x="115" y="180" fill="#f59e0b" font-family="Inter" font-size="9" font-weight="700">VS</text>
+
+      <text x="40" y="305" fill="#6a6a8a" font-family="Inter" font-size="10">Learns: Which taste clusters preferred</text>
+
+      <!-- Arrow 1->2 -->
+      <path d="M290 175 L310 175" stroke="#6a6a8a" stroke-width="2" marker-end="url(#arrowGray)"/>
+
+      <!-- Phase 2 -->
+      <rect x="320" y="30" width="260" height="290" rx="14" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="1.5"/>
+      <rect x="320" y="30" width="260" height="40" rx="14 14 0 0" fill="rgba(139, 92, 246, 0.15)"/>
+      <text x="340" y="55" fill="#8b5cf6" font-family="Inter" font-size="13" font-weight="700">PHASE 2: REFINEMENT</text>
+
+      <text x="340" y="95" fill="#e8e8f0" font-family="Inter" font-size="12" font-weight="600">12-18 swipes</text>
+      <text x="340" y="115" fill="#a0a0c0" font-family="Inter" font-size="11">Similar pairs within top 2-3</text>
+      <text x="340" y="133" fill="#a0a0c0" font-family="Inter" font-size="11">preferred clusters</text>
+
+      <!-- Zoomed cluster -->
+      <circle cx="450" cy="210" r="65" fill="rgba(139, 92, 246, 0.08)" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="410" y="165" fill="#8b5cf6" font-family="Inter" font-size="9" font-weight="600">TOP CLUSTER</text>
+      <circle cx="430" cy="200" r="4" fill="#ec4899"/>
+      <circle cx="455" cy="195" r="4" fill="#f59e0b"/>
+      <circle cx="470" cy="215" r="4" fill="#10b981"/>
+      <circle cx="435" cy="230" r="4" fill="#3b82f6"/>
+      <circle cx="460" cy="240" r="4" fill="#8b5cf6"/>
+
+      <!-- Comparison lines within cluster -->
+      <line x1="432" y1="202" x2="453" y2="197" stroke="#ec4899" stroke-width="1.2"/>
+      <line x1="457" y1="197" x2="468" y2="213" stroke="#f59e0b" stroke-width="1.2"/>
+      <line x1="437" y1="228" x2="458" y2="238" stroke="#3b82f6" stroke-width="1.2"/>
+
+      <text x="340" y="305" fill="#6a6a8a" font-family="Inter" font-size="10">Learns: Fine ranking within clusters</text>
+
+      <!-- Arrow 2->3 -->
+      <path d="M590 175 L610 175" stroke="#6a6a8a" stroke-width="2" marker-end="url(#arrowGray)"/>
+
+      <!-- Phase 3 -->
+      <rect x="620" y="30" width="260" height="290" rx="14" fill="#1a1a2e" stroke="#3b82f6" stroke-width="1.5"/>
+      <rect x="620" y="30" width="260" height="40" rx="14 14 0 0" fill="rgba(59, 130, 246, 0.15)"/>
+      <text x="640" y="55" fill="#3b82f6" font-family="Inter" font-size="13" font-weight="700">PHASE 3: BOUNDARY</text>
+
+      <text x="640" y="95" fill="#e8e8f0" font-family="Inter" font-size="12" font-weight="600">1-3 per session (ongoing)</text>
+      <text x="640" y="115" fill="#a0a0c0" font-family="Inter" font-size="11">Uncertainty sampling at the</text>
+      <text x="640" y="133" fill="#a0a0c0" font-family="Inter" font-size="11">decision boundary</text>
+
+      <!-- Decision boundary visualization -->
+      <line x1="660" y1="275" x2="860" y2="170" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="5,3"/>
+      <text x="860" y="188" fill="#3b82f6" font-family="Inter" font-size="9">boundary</text>
+
+      <!-- Points on either side -->
+      <circle cx="690" cy="200" r="4" fill="#10b981"/>
+      <circle cx="710" cy="190" r="4" fill="#10b981"/>
+      <circle cx="730" cy="220" r="4" fill="#10b981"/>
+      <circle cx="770" cy="240" r="4" fill="#10b981"/>
+      <text x="660" y="265" fill="#10b981" font-family="Inter" font-size="9">Liked</text>
+
+      <circle cx="790" cy="195" r="4" fill="#ef4444"/>
+      <circle cx="810" cy="210" r="4" fill="#ef4444"/>
+      <circle cx="830" cy="230" r="4" fill="#ef4444"/>
+      <circle cx="815" cy="250" r="4" fill="#ef4444"/>
+      <text x="820" y="270" fill="#ef4444" font-family="Inter" font-size="9">Disliked</text>
+
+      <!-- Uncertain point at boundary -->
+      <circle cx="755" cy="218" r="6" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="2,2"/>
+      <circle cx="755" cy="218" r="2" fill="#f59e0b"/>
+      <text x="745" y="240" fill="#f59e0b" font-family="Inter" font-size="8" font-weight="600">???</text>
+
+      <text x="640" y="305" fill="#6a6a8a" font-family="Inter" font-size="10">Learns: Edge cases near decision line</text>
+    </svg>
+  </div>
+
+  <h3>Comparison Budget</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Phase</th>
+        <th>Swipes</th>
+        <th>Cumulative</th>
+        <th>Pair Selection Strategy</th>
+        <th>What It Learns</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="card-badge badge-pink">Phase 1</span></td>
+        <td>6-10</td>
+        <td>6-10</td>
+        <td>Diverse: cluster representatives, round-robin</td>
+        <td>Which taste categories preferred</td>
+      </tr>
+      <tr>
+        <td><span class="card-badge badge-purple">Phase 2</span></td>
+        <td>12-18</td>
+        <td>18-28</td>
+        <td>Similar: high cosine-sim pairs within top clusters</td>
+        <td>Fine ranking within preferred taste</td>
+      </tr>
+      <tr>
+        <td><span class="card-badge badge-blue">Phase 3</span></td>
+        <td>1-3/session</td>
+        <td>28+</td>
+        <td>Uncertainty: max info-gain at decision boundary</td>
+        <td>Edge cases, boundary precision</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="highlight">
+    <p><strong>After ~25-30 total swipes</strong>, the preference model outperforms the engagement-only profile for recommendation quality. The blend weight <code>&alpha; = sigmoid((n-15)/5)</code> smoothly transitions from engagement (before swipes) to swipe-based preferences.</p>
+  </div>
+</div>
+
+<!-- ==================== PAGE 6: CORE MATH ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">Core Mathematics</h2>
+  <p class="section-subtitle">The key formulas powering the preference learning system.</p>
+
+  <div class="formula">
+    <span class="label">Bradley-Terry Comparison Probability</span>
+    P(A preferred over B | p) = &sigma;(p<sup>T</sup> (e<sub>A</sub> - e<sub>B</sub>)) = 1 / (1 + exp(-p<sup>T</sup> (e<sub>A</sub> - e<sub>B</sub>)))
+  </div>
+
+  <div class="formula">
+    <span class="label">Preference Vector Update (SGD on Log-Likelihood)</span>
+    p<sub>t+1</sub> = normalize( p<sub>t</sub> + &eta; &middot; (1 - &sigma;(p<sub>t</sub><sup>T</sup> d)) &middot; d )<br>
+    <small style="color: var(--text-muted);">where d = e<sub>winner</sub> - e<sub>loser</sub>, &eta; = learning rate</small>
+  </div>
+
+  <div class="formula">
+    <span class="label">Bayesian Posterior Update (Laplace Approximation)</span>
+    &Sigma;<sub>t+1</sub><sup>-1</sup> = &Sigma;<sub>t</sub><sup>-1</sup> + &lambda;<sub>t</sub> &middot; d &middot; d<sup>T</sup> / &sigma;<sup>2</sup><br>
+    <small style="color: var(--text-muted);">where &lambda;<sub>t</sub> = &sigma;(s)(1 - &sigma;(s)), s = p<sup>T</sup>d</small>
+  </div>
+
+  <div class="formula">
+    <span class="label">Information Gain for Pair Selection</span>
+    IG(i, j) = &frac12; log(1 + d<sup>T</sup> &Sigma; d / &sigma;<sup>2</sup>)<br>
+    <small style="color: var(--text-muted);">Select pair (i,j) that maximizes IG to learn most from each swipe</small>
+  </div>
+
+  <div class="formula">
+    <span class="label">Warm Start: Engagement &rarr; Prior</span>
+    &mu;<sub>0</sub> = (X<sup>T</sup>X + &lambda;I)<sup>-1</sup> X<sup>T</sup>y &nbsp;&nbsp;&nbsp; &Sigma;<sub>0</sub> = &sigma;<sub>noise</sub><sup>2</sup> &middot; (X<sup>T</sup>X + &lambda;I)<sup>-1</sup><br>
+    <small style="color: var(--text-muted);">X = embedding matrix, y = normalized engagement scores</small>
+  </div>
+
+  <div class="formula">
+    <span class="label">Preference Source Blending</span>
+    p<sub>final</sub> = normalize((1 - &alpha;) &middot; p<sub>engagement</sub> + &alpha; &middot; p<sub>swipe</sub>)<br>
+    &alpha; = sigmoid((n<sub>swipes</sub> - 15) / 5)
+  </div>
+
+  <div class="formula">
+    <span class="label">Contrastive Preference (Like X, Not Y)</span>
+    p = normalize( mean(e<sub>liked</sub>) - &beta; &middot; mean(e<sub>disliked</sub>) )<br>
+    <small style="color: var(--text-muted);">&beta; = 0.5 (negative signal attenuation)</small>
+  </div>
+
+  <h3>Convergence Detection</h3>
+  <div class="card glow-blue">
+    <p>The system tracks convergence at multiple levels to know when to stop asking:</p>
+    <ul>
+      <li><strong>Global:</strong> Average &sigma; across all scenes drops below 2.5</li>
+      <li><strong>Top-K:</strong> Maximum &sigma; in top-50 scenes drops below 1.5</li>
+      <li><strong>Stability:</strong> Kendall-&tau; rank correlation between successive re-fits exceeds 0.9</li>
+      <li><strong>Pairwise:</strong> Adjacent scenes in ranking are statistically distinguishable: &mu;<sub>A</sub> - &mu;<sub>B</sub> > 2&radic;(&sigma;<sub>A</sub><sup>2</sup> + &sigma;<sub>B</sub><sup>2</sup>)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ==================== PAGE 7: DATA SCHEMA ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">Data Schema</h2>
+  <p class="section-subtitle">New SQLite tables extending the existing stash_copilot.sqlite database.</p>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Entity Relationship Diagram</div>
+    <svg width="880" height="480" viewBox="0 0 880 480" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- preference_comparisons table -->
+      <rect x="30" y="30" width="340" height="260" rx="10" fill="#1a1a2e" stroke="#ec4899" stroke-width="1.5"/>
+      <rect x="30" y="30" width="340" height="35" rx="10 10 0 0" fill="rgba(236, 72, 153, 0.15)"/>
+      <text x="50" y="53" fill="#ec4899" font-family="JetBrains Mono" font-size="13" font-weight="600">preference_comparisons</text>
+
+      <text x="50" y="90" fill="#f59e0b" font-family="JetBrains Mono" font-size="11">PK</text>
+      <text x="80" y="90" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">id</text>
+      <text x="230" y="90" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER AUTOINCREMENT</text>
+
+      <line x1="45" y1="100" x2="355" y2="100" stroke="#2a2a4a" stroke-width="0.5"/>
+
+      <text x="80" y="120" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">scene_a_id</text>
+      <text x="230" y="120" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER NOT NULL</text>
+
+      <text x="80" y="142" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">scene_b_id</text>
+      <text x="230" y="142" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER NOT NULL</text>
+
+      <text x="80" y="164" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">winner_id</text>
+      <text x="230" y="164" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER NOT NULL</text>
+
+      <text x="80" y="186" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">phase</text>
+      <text x="230" y="186" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT NOT NULL</text>
+
+      <text x="80" y="208" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">response_time_ms</text>
+      <text x="230" y="208" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER</text>
+
+      <text x="80" y="230" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">session_id</text>
+      <text x="230" y="230" fill="#3b82f6" font-family="JetBrains Mono" font-size="10">TEXT FK</text>
+
+      <text x="80" y="252" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">model_key</text>
+      <text x="230" y="252" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT NOT NULL</text>
+
+      <text x="80" y="274" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">created_at</text>
+      <text x="230" y="274" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT NOT NULL</text>
+
+      <!-- preference_model_state table -->
+      <rect x="500" y="30" width="350" height="200" rx="10" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="1.5"/>
+      <rect x="500" y="30" width="350" height="35" rx="10 10 0 0" fill="rgba(139, 92, 246, 0.15)"/>
+      <text x="520" y="53" fill="#8b5cf6" font-family="JetBrains Mono" font-size="13" font-weight="600">preference_model_state</text>
+
+      <text x="520" y="90" fill="#f59e0b" font-family="JetBrains Mono" font-size="11">PK</text>
+      <text x="550" y="90" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">model_key</text>
+      <text x="700" y="90" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT</text>
+
+      <line x1="515" y1="100" x2="835" y2="100" stroke="#2a2a4a" stroke-width="0.5"/>
+
+      <text x="550" y="120" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">preference_mean</text>
+      <text x="700" y="120" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">BLOB (768 floats)</text>
+
+      <text x="550" y="142" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">preference_covariance</text>
+      <text x="700" y="142" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">BLOB (768x768)</text>
+
+      <text x="550" y="164" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">n_comparisons</text>
+      <text x="700" y="164" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER</text>
+
+      <text x="550" y="186" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">noise_variance</text>
+      <text x="700" y="186" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">REAL</text>
+
+      <text x="550" y="208" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">phase / updated_at</text>
+      <text x="700" y="208" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT</text>
+
+      <!-- preference_sessions table -->
+      <rect x="500" y="280" width="350" height="180" rx="10" fill="#1a1a2e" stroke="#3b82f6" stroke-width="1.5"/>
+      <rect x="500" y="280" width="350" height="35" rx="10 10 0 0" fill="rgba(59, 130, 246, 0.15)"/>
+      <text x="520" y="303" fill="#3b82f6" font-family="JetBrains Mono" font-size="13" font-weight="600">preference_sessions</text>
+
+      <text x="520" y="340" fill="#f59e0b" font-family="JetBrains Mono" font-size="11">PK</text>
+      <text x="550" y="340" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">session_id</text>
+      <text x="700" y="340" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT</text>
+
+      <line x1="515" y1="350" x2="835" y2="350" stroke="#2a2a4a" stroke-width="0.5"/>
+
+      <text x="550" y="370" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">started_at</text>
+      <text x="700" y="370" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT NOT NULL</text>
+
+      <text x="550" y="392" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">completed_at</text>
+      <text x="700" y="392" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT</text>
+
+      <text x="550" y="414" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">comparison_count</text>
+      <text x="700" y="414" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">INTEGER DEFAULT 0</text>
+
+      <text x="550" y="436" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">phase</text>
+      <text x="700" y="436" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">TEXT NOT NULL</text>
+
+      <text x="550" y="458" fill="#e8e8f0" font-family="JetBrains Mono" font-size="11">convergence_avg_sigma</text>
+      <text x="700" y="458" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10">REAL</text>
+
+      <!-- FK arrows -->
+      <path d="M370 230 L500 340" stroke="#3b82f6" stroke-width="1.2" stroke-dasharray="4,3"/>
+      <circle cx="370" cy="230" r="3" fill="#3b82f6"/>
+      <circle cx="500" cy="340" r="3" fill="#3b82f6"/>
+    </svg>
+  </div>
+
+  <h3>Integration with Existing Tables</h3>
+  <p>These new tables sit alongside the existing <code>scene_embeddings</code>, <code>frame_embeddings</code>, and <code>o_moment_embeddings</code> tables in <code>stash_copilot.sqlite</code>. Schema version bumps from 7 to 8 with automatic migration.</p>
+
+  <div class="grid-2">
+    <div class="card glow-green">
+      <h4>Read Dependencies</h4>
+      <ul>
+        <li><code>scene_embeddings</code> &rarr; embedding vectors for similarity</li>
+        <li><code>taste_clusters</code> &rarr; cluster assignments for Phase 1</li>
+        <li>Stash DB <code>scenes_view_dates</code> &rarr; engagement priors</li>
+        <li>Stash DB <code>scenes_o_dates</code> &rarr; engagement priors</li>
+      </ul>
+    </div>
+    <div class="card glow-purple">
+      <h4>Write Outputs</h4>
+      <ul>
+        <li><code>preference_comparisons</code> &rarr; swipe history log</li>
+        <li><code>preference_model_state</code> &rarr; learned preference vector</li>
+        <li><code>preference_sessions</code> &rarr; session metadata</li>
+        <li>Enhanced recommendations via blended profile</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE 8: BLEND WEIGHT VISUALIZATION ==================== -->
+<div class="page page-break">
+  <h2 class="section-title">Preference Blending</h2>
+  <p class="section-subtitle">How swipe data gradually takes over from engagement data as more comparisons are collected.</p>
+
+  <div class="diagram-container">
+    <div class="diagram-title">Alpha Blending Weight: sigmoid((n_swipes - 15) / 5)</div>
+    <svg width="800" height="400" viewBox="0 0 800 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Grid -->
+      <rect x="80" y="40" width="680" height="300" fill="#12121a" rx="4"/>
+
+      <!-- Horizontal grid lines -->
+      <line x1="80" y1="40" x2="760" y2="40" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="80" y1="100" x2="760" y2="100" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="80" y1="160" x2="760" y2="160" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="80" y1="190" x2="760" y2="190" stroke="#2a2a4a" stroke-width="0.5" stroke-dasharray="4,3"/>
+      <line x1="80" y1="220" x2="760" y2="220" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="80" y1="280" x2="760" y2="280" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="80" y1="340" x2="760" y2="340" stroke="#2a2a4a" stroke-width="0.5"/>
+
+      <!-- Vertical grid lines -->
+      <line x1="80" y1="40" x2="80" y2="340" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="216" y1="40" x2="216" y2="340" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="352" y1="40" x2="352" y2="340" stroke="#2a2a4a" stroke-width="0.5" stroke-dasharray="4,3"/>
+      <line x1="488" y1="40" x2="488" y2="340" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="624" y1="40" x2="624" y2="340" stroke="#2a2a4a" stroke-width="0.5"/>
+      <line x1="760" y1="40" x2="760" y2="340" stroke="#2a2a4a" stroke-width="0.5"/>
+
+      <!-- Y-axis labels -->
+      <text x="65" y="45" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="end">1.0</text>
+      <text x="65" y="105" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="end">0.8</text>
+      <text x="65" y="165" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="end">0.6</text>
+      <text x="65" y="195" fill="#ec4899" font-family="JetBrains Mono" font-size="10" text-anchor="end">0.5</text>
+      <text x="65" y="225" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="end">0.4</text>
+      <text x="65" y="285" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="end">0.2</text>
+      <text x="65" y="345" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="end">0.0</text>
+
+      <text x="30" y="190" fill="#a0a0c0" font-family="Inter" font-size="10" text-anchor="middle" transform="rotate(-90, 30, 190)">&alpha; (swipe weight)</text>
+
+      <!-- X-axis labels -->
+      <text x="80" y="360" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="middle">0</text>
+      <text x="216" y="360" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="middle">5</text>
+      <text x="352" y="360" fill="#ec4899" font-family="JetBrains Mono" font-size="10" text-anchor="middle">15</text>
+      <text x="488" y="360" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="middle">25</text>
+      <text x="624" y="360" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="middle">35</text>
+      <text x="760" y="360" fill="#6a6a8a" font-family="JetBrains Mono" font-size="10" text-anchor="middle">50</text>
+
+      <text x="420" y="385" fill="#a0a0c0" font-family="Inter" font-size="11" text-anchor="middle">Number of Swipes</text>
+
+      <!-- Sigmoid curve: alpha = sigmoid((n - 15) / 5) -->
+      <!-- Plotted from n=0 to n=50 -->
+      <!-- y = 340 - 300 * sigmoid((n-15)/5) -->
+      <path d="M80,333 C80,333 120,331 148,328 C176,324 196,320 216,312
+               C236,302 256,288 276,272 C296,254 316,232 336,208
+               C352,190 368,168 386,148 C406,128 424,112 444,98
+               C464,86 484,78 504,72 C524,68 544,64 564,60
+               C584,56 604,54 624,52 C644,50 664,48 684,47
+               C704,46 724,45 744,44 C760,44 760,44 760,44"
+            stroke="url(#grad1)" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+      <!-- Fill area under curve -->
+      <path d="M80,333 C80,333 120,331 148,328 C176,324 196,320 216,312
+               C236,302 256,288 276,272 C296,254 316,232 336,208
+               C352,190 368,168 386,148 C406,128 424,112 444,98
+               C464,86 484,78 504,72 C524,68 544,64 564,60
+               C584,56 604,54 624,52 C644,50 664,48 684,47
+               C704,46 724,45 744,44 C760,44 760,340 80,340 Z"
+            fill="url(#grad1)" opacity="0.08"/>
+
+      <!-- Annotation dots -->
+      <circle cx="216" cy="312" r="5" fill="#ec4899" stroke="#0a0a0f" stroke-width="2"/>
+      <text x="216" y="302" fill="#ec4899" font-family="Inter" font-size="9" text-anchor="middle" font-weight="600">&alpha;=0.12</text>
+      <text x="216" y="290" fill="#6a6a8a" font-family="Inter" font-size="8" text-anchor="middle">mostly engagement</text>
+
+      <circle cx="352" cy="190" r="5" fill="#ec4899" stroke="#0a0a0f" stroke-width="2"/>
+      <text x="370" y="182" fill="#ec4899" font-family="Inter" font-size="9" font-weight="600">&alpha;=0.50</text>
+      <text x="370" y="170" fill="#6a6a8a" font-family="Inter" font-size="8">balanced</text>
+
+      <circle cx="488" cy="72" r="5" fill="#ec4899" stroke="#0a0a0f" stroke-width="2"/>
+      <text x="488" y="62" fill="#ec4899" font-family="Inter" font-size="9" text-anchor="middle" font-weight="600">&alpha;=0.88</text>
+      <text x="488" y="50" fill="#6a6a8a" font-family="Inter" font-size="8" text-anchor="middle">mostly swipes</text>
+
+      <!-- Zones -->
+      <rect x="80" y="340" width="272" height="4" fill="#10b981" rx="2" opacity="0.5"/>
+      <text x="216" y="396" fill="#10b981" font-family="Inter" font-size="9" text-anchor="middle">Engagement-dominant</text>
+      <rect x="352" y="340" width="408" height="4" fill="#8b5cf6" rx="2" opacity="0.5"/>
+      <text x="556" y="396" fill="#8b5cf6" font-family="Inter" font-size="9" text-anchor="middle">Swipe-dominant</text>
+
+      <defs>
+        <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style="stop-color:#ec4899"/>
+          <stop offset="100%" style="stop-color:#8b5cf6"/>
+        </linearGradient>
+      </defs>
+    </svg>
+  </div>
+
+  <div class="grid-2">
+    <div class="card glow-green">
+      <h4 style="color: #10b981;">Engagement Profile (1 - &alpha;)</h4>
+      <p>Built from existing play data:</p>
+      <div class="code-block">
+<span class="comment"># Existing formula</span>
+score = (<span class="number">o_count</span> * <span class="number">20.0</span>)
+      + (<span class="number">replays</span> * <span class="number">2.0</span>)
+      + (<span class="number">play_hours</span> * <span class="number">1.0</span>)
+      + (<span class="number">stars</span> * <span class="number">1.5</span>)
+      </div>
+    </div>
+    <div class="card glow-pink">
+      <h4 style="color: #ec4899;">Swipe Preference (&alpha;)</h4>
+      <p>Learned from direct comparisons:</p>
+      <div class="code-block">
+<span class="comment"># Contrastive formula</span>
+p = <span class="func">normalize</span>(
+    <span class="func">mean</span>(<span class="type">e_liked</span>)
+    - <span class="number">0.5</span> * <span class="func">mean</span>(<span class="type">e_disliked</span>)
+)
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

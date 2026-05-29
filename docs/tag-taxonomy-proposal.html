@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tag Taxonomy Proposal</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --surface: #181825;
+    --surface2: #313244;
+    --text: #cdd6f4;
+    --subtext: #a6adc8;
+    --accent: #89b4fa;
+    --green: #a6e3a1;
+    --yellow: #f9e2af;
+    --red: #f38ba8;
+    --mauve: #cba6f7;
+    --teal: #94e2d5;
+    --border: #45475a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 { color: var(--accent); font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { color: var(--mauve); font-size: 1.4rem; margin: 2.5rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { color: var(--teal); font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  p { color: var(--subtext); margin: 0.5rem 0 1rem; }
+  .meta { color: var(--subtext); font-size: 0.9rem; margin-bottom: 2rem; }
+  .meta span { color: var(--text); }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0 2rem;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+  }
+  .stat-card .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
+  .stat-card .label { color: var(--subtext); font-size: 0.85rem; }
+  .stat-card.warn .num { color: var(--red); }
+  .stat-card.ok .num { color: var(--green); }
+
+  .diagram-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin: 1rem 0 2rem;
+    overflow-x: auto;
+  }
+  .diagram-wrap .mermaid { display: flex; justify-content: center; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 2rem;
+    font-size: 0.9rem;
+  }
+  th {
+    background: var(--surface2);
+    color: var(--accent);
+    text-align: left;
+    padding: 0.6rem 1rem;
+    border-bottom: 2px solid var(--border);
+  }
+  td {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: var(--surface); }
+  td code, th code { background: var(--surface2); padding: 0.1em 0.4em; border-radius: 3px; font-size: 0.85em; color: var(--yellow); }
+
+  .badge {
+    display: inline-block;
+    padding: 0.1em 0.6em;
+    border-radius: 4px;
+    font-size: 0.78em;
+    font-weight: 600;
+    margin-left: 0.4em;
+  }
+  .badge.warn { background: rgba(243,139,168,0.15); color: var(--red); border: 1px solid rgba(243,139,168,0.3); }
+  .badge.ok   { background: rgba(166,227,161,0.15); color: var(--green); border: 1px solid rgba(166,227,161,0.3); }
+  .badge.info { background: rgba(137,180,250,0.15); color: var(--accent); border: 1px solid rgba(137,180,250,0.3); }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.7;
+    color: var(--subtext);
+    margin: 1rem 0 2rem;
+  }
+  blockquote {
+    border-left: 3px solid var(--mauve);
+    padding: 0.4rem 1rem;
+    color: var(--subtext);
+    font-style: italic;
+    margin: 0.5rem 0 1rem;
+    background: var(--surface);
+    border-radius: 0 6px 6px 0;
+  }
+  ul { padding-left: 1.5rem; color: var(--subtext); margin-bottom: 1rem; }
+  ul li { margin: 0.25rem 0; }
+  ul li strong { color: var(--text); }
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 2rem; }
+  .toc h3 { margin-top: 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin: 0.2rem 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Tag Taxonomy Proposal</h1>
+<div class="meta">
+  Generated: <span>2026-02-18</span> &nbsp;·&nbsp;
+  Source: <span>316 tags from Stash GraphQL API</span> &nbsp;·&nbsp;
+  Status: <span style="color:var(--yellow)">Draft — pending review</span>
+</div>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <ul>
+    <li><a href="#state">Current State</a></li>
+    <li><a href="#overview">Overview: 9 Axes</a></li>
+    <li><a href="#acts">Axis 1: Sex Acts</a></li>
+    <li><a href="#positions">Axis 2: Positions</a></li>
+    <li><a href="#outcomes">Axis 3: Outcomes</a></li>
+    <li><a href="#anatomy">Axis 4: Anatomy & Body</a></li>
+    <li><a href="#ethnicity">Axis 5: Ethnicity / Race</a></li>
+    <li><a href="#content">Axis 6: Content Style</a></li>
+    <li><a href="#kink">Axis 7: Kink & Fetish</a></li>
+    <li><a href="#clothing">Axis 8: Clothing & Costume</a></li>
+    <li><a href="#admin">Axis 9: Administrative</a></li>
+    <li><a href="#conflicts">Structural Conflicts to Fix</a></li>
+    <li><a href="#dupes">Duplicate / Alias Candidates</a></li>
+    <li><a href="#decisions">Tags Needing Decisions</a></li>
+    <li><a href="#homeless">Tags With No Obvious Home</a></li>
+  </ul>
+</div>
+
+<!-- CURRENT STATE -->
+<h2 id="state">Current State</h2>
+<div class="stat-grid">
+  <div class="stat-card ok"><div class="num">316</div><div class="label">Total tags</div></div>
+  <div class="stat-card warn"><div class="num">196</div><div class="label">Completely isolated (no relationships)</div></div>
+  <div class="stat-card warn"><div class="num">32</div><div class="label">Multiple parents (conflicts)</div></div>
+  <div class="stat-card"><div class="num">48</div><div class="label">Tags with children</div></div>
+  <div class="stat-card warn"><div class="num">214</div><div class="label">Root tags (no parent)</div></div>
+</div>
+<p>The existing hierarchy is largely flat — 196 tags have no relationships at all, and 32 tags have conflicting multiple parents that create ambiguous inheritance.</p>
+
+<hr>
+
+<!-- OVERVIEW -->
+<h2 id="overview">Overview: 9 Axes</h2>
+<blockquote>Core principle: parent-child relationships only mean "is a more specific type of". Cross-axis associations (e.g. anatomy ↔ acts) are represented by co-tagging, not hierarchy.</blockquote>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    ROOT["🏷️ Stash Taxonomy"]
+    ROOT --> ACTS["🎬 Sex Acts\nwhat is happening"]
+    ROOT --> POS["🧍 Positions\nhow bodies are arranged"]
+    ROOT --> OUT["💦 Outcomes\nhow it ends"]
+    ROOT --> ANAT["🫀 Anatomy & Body\nphysical attributes"]
+    ROOT --> ETH["🌍 Ethnicity / Race"]
+    ROOT --> CONT["🎥 Content Style\nformat, production"]
+    ROOT --> KINK["⛓️ Kink & Fetish"]
+    ROOT --> CLOTH["👗 Clothing & Costume"]
+    ROOT --> META["🗂️ Administrative\nworkflow / internal"]
+</div>
+</div>
+
+<hr>
+
+<!-- ACTS -->
+<h2 id="acts">Axis 1: 🎬 Sex Acts</h2>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    ACTS["🎬 Sex Acts"]
+    ACTS --> SOLO["Solo"]
+    ACTS --> PARTNER["Partner Sex"]
+    ACTS --> GROUP["Group Sex"]
+
+    SOLO --> MAST["Masturbation"]
+    SOLO --> STRIP["Striptease"]
+    SOLO --> JOI["Jerk Off Instruction"]
+    MAST --> PFING["Pussy Fingering"]
+    MAST --> PRUB["Pussy Rubbing"]
+
+    PARTNER --> VAG["Vaginal Sex"]
+    PARTNER --> ANAL["Anal Sex"]
+    PARTNER --> ORAL["Oral Sex"]
+    PARTNER --> OUTER["Outercourse"]
+    PARTNER --> LES["Lesbian"]
+
+    VAG --> DVP["Double Vaginal Penetration"]
+    ANAL --> ANALPLAY["Anal Play"]
+    ANAL --> ANALFIST["Anal Fisting"]
+    ANAL --> DAP["Double Anal Penetration"]
+    ANAL --> PEG["Pegging / Strap-on"]
+
+    ORAL --> BJ["Blowjob"]
+    ORAL --> CUNNI["Cunnilingus ⚠️ merge: Pussy Eating, Pussy Licking"]
+    ORAL --> RIM["Rimming ⚠️ merge: Ass Eating"]
+    ORAL --> FACES["Facesitting"]
+    ORAL --> ATM["Ass to Mouth"]
+    ORAL --> S69["69"]
+
+    BJ --> DT["Deepthroat"]
+    BJ --> FF["Face Fuck"]
+    BJ --> GAG["Gag"]
+    BJ --> BS["Ball Sucking"]
+    BJ --> PL["Penis Licking"]
+    BJ --> HFBJ["Hands Free Blowjob"]
+
+    OUTER --> HJ["Handjob"]
+    OUTER --> FJ["Footjob"]
+    OUTER --> TF["Titfuck"]
+    OUTER --> BUTTJ["Buttjob"]
+    OUTER --> GRIND["Grinding"]
+
+    LES --> TRIB["Tribbing / Scissoring"]
+
+    GROUP --> THREE["Threesome"]
+    GROUP --> ORGY["Orgy"]
+    GROUP --> DP["Double Penetration"]
+    THREE --> FFM["Threesome FFM"]
+    ORGY --> GB["Gangbang"]
+    DP --> DAP2["DAP"]
+    DP --> DVP2["DVP"]
+</div>
+</div>
+
+<hr>
+
+<!-- POSITIONS -->
+<h2 id="positions">Axis 2: 🧍 Positions</h2>
+<blockquote>Positions are orthogonal to acts. Doggy Style can be vaginal or anal — it belongs here, not as a child of either act.</blockquote>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    POS["🧍 Positions"]
+    POS --> MISS["Missionary"]
+    POS --> DOG["Doggy Style"]
+    POS --> COW["Cowgirl / Riding ⚠️ merge: Cowgirl + Riding"]
+    POS --> STAND["Standing"]
+    POS --> PRONE["Prone Bone"]
+    POS --> SPOON["Reverse Riding ⚠️ review vs Spooning"]
+    MISS --> FOLD["Folded Missionary"]
+    DOG --> SDOG["Standing Doggy Style"]
+    COW --> RCOW["Reverse Cowgirl ⚠️ merge: Reverse Riding"]
+    STAND --> SAC["Stand And Carry"]
+    STAND --> SCR["Standing Cradle"]
+</div>
+</div>
+
+<hr>
+
+<!-- OUTCOMES -->
+<h2 id="outcomes">Axis 3: 💦 Outcomes</h2>
+<blockquote>Organized by <strong>where</strong> the cum goes, not which act preceded it. This is why Facial has no act as parent — it can follow any act.</blockquote>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    OUT["💦 Outcomes"]
+    OUT --> FORG["Female Orgasm"]
+    OUT --> CUMSHOT["Cum Shot"]
+    OUT --> CUMPLAY["Cum Play"]
+
+    FORG --> SQUIRT["Squirting"]
+    FORG --> AHEG["Ahegao"]
+
+    CUMSHOT --> INT["Internal"]
+    CUMSHOT --> EXT["External"]
+    CUMSHOT --> MOUT["Mouth"]
+    CUMSHOT --> MULTI["Multiple Cumshots"]
+    CUMSHOT --> FAC2["Fucking After Cumshot"]
+
+    INT --> VCREAM["Vaginal Creampie"]
+    INT --> ACREAM["Anal Creampie"]
+    VCREAM --> SURP["Surprise Creampie"]
+    VCREAM --> FACR["Fucking After Creampie"]
+
+    EXT --> FAC["Facial"]
+    EXT --> BODY["Body Shot"]
+    FAC --> OMF["Open Mouth Facial"]
+    FAC --> FPOV["Facial - POV"]
+    FAC --> COF["Cum on Face ⚠️ same as Facial?"]
+    BODY --> COT["Cum on Tits"]
+    BODY --> COA["Cum on Ass"]
+    BODY --> COP["Cum on Pussy"]
+
+    MOUT --> CIM["Cum in Mouth"]
+    CIM --> SWAL["Cum Swallowing"]
+    CIM --> SPIT["Spit"]
+
+    CUMPLAY --> CDRIP["Cum Drip"]
+    CUMPLAY --> CSWAP["Cum Swapping"]
+    CUMPLAY --> CCLEAN["Cumshot Clean-up"]
+</div>
+</div>
+
+<hr>
+
+<!-- ANATOMY -->
+<h2 id="anatomy">Axis 4: 🫀 Anatomy & Body</h2>
+<blockquote>Body part and physical attribute tags. These describe <strong>what is present</strong>, not what happens. Never a parent of act tags.</blockquote>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    ANAT["🫀 Anatomy & Body"]
+    ANAT --> ASS["Ass"]
+    ANAT --> BOOBS["Boobs"]
+    ANAT --> PUSSY["Pussy"]
+    ANAT --> DICK["Dick"]
+    ANAT --> MOUTH["Mouth"]
+    ANAT --> HAND["Hand"]
+    ANAT --> FEET["Feet"]
+    ANAT --> BODYTYPE["Body Type"]
+
+    ASS --> ASSHOLE["Asshole"]
+    ASS --> BIGASS["Big Ass"]
+    ASS --> MEDASS["Medium Ass"]
+    ASS --> RNDASS["Round Ass"]
+    ASSHOLE --> ACLS["Asshole Closeup"]
+    ACLS --> AVCLS["Asshole Very Closeup"]
+    BIGASS --> PAWG["PAWG"]
+    BIGASS --> PAAG["PAAG"]
+
+    BOOBS --> BIGTITS["Big Tits"]
+    BOOBS --> MEDTITS["Medium Tits"]
+    BOOBS --> SMTITS["Small Tits"]
+    BOOBS --> NATTITS["Natural Tits"]
+    BOOBS --> FKTITS["Fake Tits"]
+    BOOBS --> SAGTITS["Saggy Tits"]
+    BOOBS --> PERTITS["Perfect Tits"]
+    BOOBS --> BROWNAR["Brown Areolas"]
+    BOOBS --> SMALAR["Small Areolas"]
+
+    PUSSY --> INNIE["Innie"]
+    PUSSY --> FATPU["Fat Pussy"]
+    PUSSY --> HAIRPU["Hairy Pussy"]
+    PUSSY --> SHAVPU["Shaved Pussy"]
+    PUSSY --> PINKPU["Pink Pussy"]
+    PUSSY --> PIERCPU["Pierced Pussy"]
+    PUSSY --> WETPU["Wet Pussy"]
+    PUSSY --> PCLS["Pussy Closeup"]
+    WETPU --> VWETPU["Very Wet Pussy"]
+    PCLS --> PVCLS["Pussy Very Closeup"]
+
+    DICK --> BIGDCK["Big Dick"]
+    DICK --> CONDOM["Condom"]
+    DICK --> TIEDP["Tied Penis"]
+    BIGDCK --> BBC["BBC ⚠️ also Ethnicity"]
+
+    FEET --> TOES["Toes"]
+
+    BODYTYPE --> PETITE["Petite"]
+    BODYTYPE --> SKINNY["Skinny"]
+    BODYTYPE --> FIT["Fit"]
+    BODYTYPE --> CURVY["Curvy"]
+    BODYTYPE --> WIDEHIP["Wide Hips"]
+    BODYTYPE --> FLATST["Flat Stomach"]
+    BODYTYPE --> PREG["Pregnant"]
+    BODYTYPE --> TAN["Tan"]
+    TAN --> TANL["Tan Lines"]
+</div>
+</div>
+
+<hr>
+
+<!-- ETHNICITY -->
+<h2 id="ethnicity">Axis 5: 🌍 Ethnicity / Race</h2>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    ETH["🌍 Ethnicity / Race"]
+    ETH --> ASIAN["Asian"]
+    ETH --> BLACK["Black"]
+    ETH --> WHITE["White"]
+    ETH --> LATINA["Latina"]
+    ETH --> INTER["Interracial"]
+    ASIAN --> ASIANW["Asian Woman"]
+    ASIAN --> FIL["Filipino"]
+    ASIAN --> JAP["Japanese"]
+    BLACK --> BBC2["BBC ⚠️ also Big Dick"]
+    WHITE --> PAWG2["PAWG"]
+    WHITE --> WHITM["White Man"]
+    WHITE --> WHITW["White Woman"]
+</div>
+</div>
+<p>⚠️ <strong>BBC</strong> appears in both Anatomy (Big Dick) and Ethnicity (Black). Consider keeping it as a standalone tag with <strong>aliases</strong> rather than multiple parents.</p>
+
+<hr>
+
+<!-- CONTENT STYLE -->
+<h2 id="content">Axis 6: 🎥 Content Style</h2>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    CONT["🎥 Content Style"]
+    CONT --> PROD["Production Type"]
+    CONT --> FORMAT["Format / Platform"]
+    CONT --> GENRE["Genre"]
+
+    PROD --> AMAT["Amateur"]
+    PROD --> HOME["Homemade"]
+    PROD --> HARD["Hardcore"]
+    PROD --> SOFT["Softcore"]
+    PROD --> EROT["Erotica"]
+    PROD --> ROUGH["Rough"]
+    PROD --> POV["POV"]
+    POV --> MPOV["Male POV"]
+
+    FORMAT --> VR["VR"]
+    FORMAT --> VERT["Vertical Video"]
+    FORMAT --> SPLIT["Split Screen"]
+    FORMAT --> WEB["Webcam"]
+    FORMAT --> COMP["Compilation"]
+    FORMAT --> ONLYF["OnlyFans"]
+    FORMAT --> JAV["JAV ⚠️ merge: Japanese Adult Video"]
+    FORMAT --> AI["AI Generated"]
+    FORMAT --> CENS["Censored"]
+
+    GENRE --> ANIM["Animated"]
+    GENRE --> RULE34["Rule 34"]
+    GENRE --> FURRY["Furry"]
+    GENRE --> FUT["Futanari"]
+    GENRE --> PMV["PMV"]
+    ANIM --> ANIM3D["3D Animated"]
+    ANIM --> ANTHRO["Anthro"]
+</div>
+</div>
+
+<hr>
+
+<!-- KINK -->
+<h2 id="kink">Axis 7: ⛓️ Kink & Fetish</h2>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    KINK["⛓️ Kink & Fetish"]
+    KINK --> BDSM["BDSM"]
+    KINK --> FETISH["Fetish"]
+    KINK --> POWER["Power Exchange"]
+
+    BDSM --> BOND["Bondage"]
+    BDSM --> PAIN["Pain"]
+    BOND --> ROPE["Rope Bondage"]
+    BOND --> METAL["Metal Bondage"]
+    BOND --> HCUFF["Handcuffed"]
+    BOND --> SJ["Straight Jacket"]
+    BOND --> MCHAST["Metal Chastity"]
+    PAIN --> SPANK["Spanking"]
+    PAIN --> SLAP["Slapping"]
+
+    POWER --> DOM["Domination"]
+    POWER --> SUB["Submissive"]
+    POWER --> FEMDOM["Femdom"]
+    POWER --> HUMIL["Humiliation"]
+
+    FETISH --> LATEX["Latex"]
+    FETISH --> PISS["Pissing"]
+    FETISH --> SPEC["Speculum"]
+    FETISH --> GAP["Gaping"]
+    FETISH --> PROL["Prolapse"]
+    FETISH --> GLORY["Gloryhole"]
+    FETISH --> GOON["Goon"]
+</div>
+</div>
+
+<hr>
+
+<!-- CLOTHING -->
+<h2 id="clothing">Axis 8: 👗 Clothing & Costume</h2>
+<div class="diagram-wrap">
+<div class="mermaid">
+graph TD
+    CLOTH["👗 Clothing & Costume"]
+    CLOTH --> LINGER["Lingerie"]
+    CLOTH --> COST["Costume"]
+    CLOTH --> DRESS["Dress"]
+    CLOTH --> SHORTS["Shorts"]
+    CLOTH --> SWIM["Swimwear"]
+    CLOTH --> STOCK["Stockings"]
+    CLOTH --> SKIRT["Skirt"]
+    CLOTH --> NONNUDE["Non-Nude"]
+    CLOTH --> UPSK["Upskirt"]
+    CLOTH --> PANT["Panties to the Side"]
+    COST --> COS["Cosplay"]
+    SHORTS --> BSHORTS["Booty Shorts"]
+    SWIM --> BIKINI["Bikini"]
+    SWIM --> SWIMSUIT["Swimsuit"]
+    STOCK --> FISH["Fishnet Stockings"]
+</div>
+</div>
+
+<hr>
+
+<!-- ADMIN -->
+<h2 id="admin">Axis 9: 🗂️ Administrative</h2>
+<blockquote>These tags should be <strong>excluded from all embedding similarity calculations</strong>. They are workflow markers, not content descriptors.</blockquote>
+<pre>Administrative
+├── Workflow
+│   ├── To Embed
+│   ├── To Script
+│   ├── Embedded
+│   ├── Missing Performer (Male)
+│   └── [Set Profile Image]
+├── Stashbox / Metadata
+│   ├── [Stashbox Performer Gallery]
+│   ├── [TPDB: Skip Marker]
+│   ├── [Timestamp: Skip Sync]
+│   └── [MiscTags: Skip]
+├── Awards
+│   ├── [AVN Award Winner]
+│   └── [Award Winner]
+├── Funscript Markers
+│   ├── Funscript
+│   ├── FS: Action / FS: Beat
+│   ├── Start / Free stroke
+│   ├── OG beat comes back
+│   ├── Funk Beat / Funk Beat comes back
+│   ├── Jiggle Fuck / Hip Sway
+│   └── [SIT: Multi-Script]
+├── Audio Markers
+│   ├── Mixed Audio
+│   └── Music Only
+├── Events
+│   ├── Event 2024
+│   └── Event 2025
+└── Internal Labels
+    ├── Custom Marker A
+    ├── Custom Marker B
+    └── HD Available</pre>
+
+<hr>
+
+<!-- CONFLICTS -->
+<h2 id="conflicts">Structural Conflicts to Fix</h2>
+<p>These 11 tags currently have multiple parents. Pick <strong>one</strong> — the most semantically specific one:</p>
+<table>
+  <thead><tr><th>Tag</th><th>Current parents</th><th>Proposed single parent</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Anal Sex</strong></td><td><code>Anal</code>, <code>Anal Penetration</code>, <code>Couple Sex</code></td><td>Partner Sex (Acts)</td></tr>
+    <tr><td><strong>Anal Creampie</strong></td><td><code>Anal</code>, <code>Anal Sex</code>, <code>Creampie</code></td><td>Internal (Outcomes)</td></tr>
+    <tr><td><strong>Creampie</strong></td><td><code>Anal Sex</code>, <code>Cum</code>, <code>Vaginal Sex</code></td><td>Internal (Outcomes)</td></tr>
+    <tr><td><strong>Cum</strong></td><td><code>Dick</code>, <code>Orgasm</code></td><td>Remove — subsumed by Cum Shot</td></tr>
+    <tr><td><strong>Cum in Mouth</strong></td><td><code>Cum</code>, <code>Oral Sex</code></td><td>Mouth → Cum Shot (Outcomes)</td></tr>
+    <tr><td><strong>Cum on Face</strong></td><td><code>Cum on Person</code>, <code>Orgasm</code></td><td>Facial (Outcomes) — or merge into Facial</td></tr>
+    <tr><td><strong>DAP</strong></td><td><code>Anal Sex</code>, <code>Double Penetration</code></td><td>Double Penetration (Acts → Group)</td></tr>
+    <tr><td><strong>DVP</strong></td><td><code>Double Penetration</code>, <code>Vaginal Sex</code></td><td>Double Penetration (Acts → Group)</td></tr>
+    <tr><td><strong>Vaginal Sex</strong></td><td><code>Couple Sex</code>, <code>Vaginal Penetration</code></td><td>Partner Sex (Acts)</td></tr>
+    <tr><td><strong>Ass Eating</strong></td><td><code>Anal</code>, <code>Oral Sex</code></td><td>Rimming (merge as alias)</td></tr>
+    <tr><td><strong>Ass Closeup</strong></td><td><code>Ass</code>, <code>Ass Worship</code>, <code>Close Up</code></td><td>Close Up (visual closeup tag)</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- DUPES -->
+<h2 id="dupes">Duplicate / Alias Candidates</h2>
+<table>
+  <thead><tr><th>Tags</th><th>Recommendation</th></tr></thead>
+  <tbody>
+    <tr><td><code>Cowgirl</code> + <code>Riding</code></td><td>Merge → <strong>Cowgirl</strong> (Riding as alias)</td></tr>
+    <tr><td><code>Reverse Cowgirl</code> + <code>Reverse Riding</code></td><td>Merge → <strong>Reverse Cowgirl</strong> (Reverse Riding as alias)</td></tr>
+    <tr><td><code>Pussy Eating</code> + <code>Pussy Licking</code> + <code>Cunnilingus</code></td><td>Merge → <strong>Cunnilingus</strong> (others as aliases)</td></tr>
+    <tr><td><code>Rimming</code> + <code>Ass Eating</code></td><td>Merge → <strong>Rimming</strong> (Ass Eating as alias)</td></tr>
+    <tr><td><code>JAV</code> + <code>Japanese Adult Video</code></td><td>Merge → <strong>JAV</strong> (Japanese Adult Video as alias)</td></tr>
+    <tr><td><code>Tease</code> + <code>Teasing</code></td><td>Merge → <strong>Tease</strong> (Teasing as alias)</td></tr>
+    <tr><td><code>Facial</code> + <code>Cum on Face</code></td><td>Decide: are these the same? If yes → merge into <strong>Facial</strong></td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- DECISIONS -->
+<h2 id="decisions">Tags Needing Your Decision</h2>
+<table>
+  <thead><tr><th>Tag</th><th>Issue</th><th>Options</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Ahegao</strong></td><td>Outcome expression or aesthetic/style?</td><td>→ Female Orgasm (Outcomes) OR → Content Style</td></tr>
+    <tr><td><strong>Kissing</strong></td><td>General interaction or Lesbian-specific?</td><td>→ Partner Sex (Acts) standalone OR → Lesbian subtag</td></tr>
+    <tr><td><strong>Roleplay</strong></td><td>Context/scenario — where?</td><td>→ Content Style → Genre OR new Scenario axis</td></tr>
+    <tr><td><strong>Schoolgirl / Nurse / Doctor / Massage</strong></td><td>Scenario/costume hybrid</td><td>→ Clothing (Costume subtree) OR new Scenario axis</td></tr>
+    <tr><td><strong>BBC</strong></td><td>Combination of Big Dick + Black — multi-dimensional</td><td>→ Keep standalone, add aliases to both</td></tr>
+    <tr><td><strong>Curvy</strong></td><td>Combination of Big Ass + Big Tits + Wide Hips</td><td>→ Keep standalone under Body Type</td></tr>
+    <tr><td><strong>Facial + Cum on Face</strong></td><td>Same thing or distinct?</td><td>→ Merge OR keep: Facial=intentional finish, Cum on Face=descriptive</td></tr>
+    <tr><td><strong>Outdoors / Beach / Pool / Gym / Classroom</strong></td><td>Location tags — add a Location axis?</td><td>→ New "Location" axis OR → Content Style</td></tr>
+    <tr><td><strong>Gloryhole</strong></td><td>Act (anonymous oral) or fetish/setting?</td><td>→ Fetish ✓ OR → Oral Sex subtype</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- HOMELESS -->
+<h2 id="homeless">Tags With No Obvious Home</h2>
+<ul>
+  <li><strong>Adorable, Playful, Tease, Eye Contact, Dirty Talk</strong> — mood/style descriptors; consider a "Mood" axis or leave unparented</li>
+  <li><strong>Dancing, Twerking</strong> — activity; could go under Solo (Acts) or Content Style</li>
+  <li><strong>Showering, Washing, Undressing</strong> — pre/post-sex activities; Solo (Acts) or standalone</li>
+  <li><strong>Massage, Massage Table</strong> — scenario; consider Location or Scenario axis</li>
+  <li><strong>Lube, Oil, Oiled</strong> — props/surface state; could be a "Props" category</li>
+  <li><strong>Vibrator, Dildo, Buttplug, Fucking Machine, Speculum, Sucking Toy/Dildo</strong> — Toys; could be its own axis under Kink or standalone</li>
+  <li><strong>Babes, Thot, Slut, Egirl, Goth</strong> — descriptor/aesthetic; your call</li>
+  <li><strong>Multiple Girls</strong> — group composition; consider a "Composition" axis</li>
+  <li><strong>Teen (18–22)</strong> — age range; under Body Type or new Performer Type axis</li>
+  <li><strong>Tribute, Goon, Hypno Video</strong> — specific fetish content; → Kink & Fetish</li>
+</ul>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#1e1e2e',
+      primaryColor: '#313244',
+      primaryTextColor: '#cdd6f4',
+      primaryBorderColor: '#89b4fa',
+      lineColor: '#6c7086',
+      secondaryColor: '#181825',
+      tertiaryColor: '#181825',
+      nodeBorder: '#89b4fa',
+      clusterBkg: '#181825',
+      titleColor: '#cdd6f4',
+      edgeLabelBackground: '#313244',
+      nodeTextColor: '#cdd6f4',
+    },
+    flowchart: { curve: 'basis', padding: 20 }
+  });
+</script>
+</body>
+</html>

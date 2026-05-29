@@ -1,0 +1,611 @@
+name: Stash Copilot
+description: AI-powered assistant for your Stash library - chat, insights, and vision analysis
+url: https://github.com/thrway1681/stash-copilot
+version: 0.1.0
+
+# Plugin settings (configurable via Stash UI)
+settings:
+  # ========== TEXT LLM SETTINGS ==========
+  text_llm_provider:
+    displayName: Text LLM Provider
+    description: Provider for text tasks (stats, chat, tag suggestions). Options - ollama, openai, anthropic, openrouter, google. Default is ollama.
+    type: STRING
+  text_llm_model:
+    displayName: Text LLM Model
+    description: Model for text generation (e.g., llama3.1, gpt-4o, claude-3-5-sonnet)
+    type: STRING
+  text_llm_base_url:
+    displayName: Text LLM Base URL
+    description: API base URL for text LLM. Default is http://localhost:11434 for Ollama.
+    type: STRING
+  text_llm_api_key:
+    displayName: Text LLM API Key
+    description: API key for cloud text LLM providers (OpenAI, Anthropic, OpenRouter). Leave empty for Ollama.
+    type: STRING
+
+  # ========== VISION LLM SETTINGS ==========
+  vision_llm_provider:
+    displayName: Vision LLM Provider
+    description: Provider for vision analysis. Options - ollama, openai, anthropic, openrouter, google. Leave empty to use Text LLM.
+    type: STRING
+  vision_llm_model:
+    displayName: Vision LLM Model
+    description: Model for vision analysis (must support images, e.g., llava, gemma-3, gpt-4o). Leave empty to use Text LLM model.
+    type: STRING
+  vision_llm_base_url:
+    displayName: Vision LLM Base URL
+    description: API base URL for vision LLM. Leave empty to use Text LLM base URL.
+    type: STRING
+  vision_llm_api_key:
+    displayName: Vision LLM API Key
+    description: API key for vision LLM. Leave empty to use Text LLM API key.
+    type: STRING
+
+  # ========== GENERAL SETTINGS ==========
+  excluded_tags:
+    displayName: Excluded Tags
+    description: Comma-separated list of tag names to exclude from AI analysis. Child tags of excluded parent tags are also excluded automatically (e.g., "private, ignore, skip")
+    type: STRING
+
+  # ========== VISION ANALYSIS SETTINGS ==========
+  vision_auto_analyze:
+    displayName: Auto-Analyze Scenes
+    description: Automatically analyze scenes when viewing (set to "false" to disable)
+    type: STRING
+  vision_frame_interval:
+    displayName: Frame Interval (seconds)
+    description: Extract 1 frame every N seconds for vision analysis (default 10)
+    type: STRING
+  vision_min_frames:
+    displayName: Minimum Frames
+    description: Minimum number of frames to extract (default 1)
+    type: STRING
+  vision_max_frames:
+    displayName: Maximum Frames (Hosted Only)
+    description: Maximum frames to extract for hosted providers (OpenAI, Anthropic, etc). Ignored for local providers like Ollama. Set to 0 for no limit. Default 0.
+    type: STRING
+  vision_debug:
+    displayName: Vision Debug Mode
+    description: Show detailed prompts, images, and token counts during vision analysis (default enabled)
+    type: STRING
+  vision_hosted_max_frames:
+    displayName: Hosted Provider Max Frames
+    description: Max frames before warning for hosted providers (OpenAI, Anthropic, etc.). Default 10.
+    type: STRING
+  embedding_model:
+    displayName: Text Embedding Model
+    description: Text embedding model for metadata (performers, tags). Requires Ollama. Options - nomic-embed-text (768d), mxbai-embed-large (1024d).
+    type: STRING
+  embed_visual_weight:
+    displayName: Visual Embedding Weight
+    description: Weight for visual component vs metadata in embeddings (0.0-1.0, default 0.7). Higher = more visual influence.
+    type: STRING
+  image_embedding_provider:
+    displayName: Image Embedding Provider
+    description: "Direct image embedding provider. Options: clip, openclip, siglip. Leave empty to use VLM text descriptions instead."
+    type: STRING
+  image_embedding_model:
+    displayName: Image Embedding Model
+    description: "Model for image embeddings. CLIP: clip-ViT-B-32 (512d), clip-ViT-L-14 (768d). OpenCLIP: ViT-B-32, ViT-L-14, ViT-H-14. SigLIP: google/siglip-base-patch16-224."
+    type: STRING
+  image_embedding_device:
+    displayName: Image Embedding Device
+    description: Device for image embedding models. Options - auto (recommended), cpu, cuda, mps.
+    type: STRING
+  frame_analysis_method:
+    displayName: Frame Selection Method
+    description: Algorithm for representative frame selection. Options - kmeans (default, cluster-based), maximin (greedy diversity), coverage (epsilon-ball).
+    type: STRING
+  frame_analysis_n_frames:
+    displayName: Representative Frame Count
+    description: Number of representative frames to select for embedding (default 8). Used when dynamic mode is disabled.
+    type: STRING
+  frame_analysis_dynamic:
+    displayName: Dynamic Frame Count
+    description: Automatically adjust representative frame count based on video duration (default true). Set to "false" to use fixed count.
+    type: STRING
+  frame_analysis_frames_per_minute:
+    displayName: Frames Per Minute
+    description: Number of representative frames to select per minute of video when dynamic mode is enabled (default 1.0).
+    type: STRING
+  frame_analysis_min_frames:
+    displayName: Dynamic Min Frames
+    description: Minimum representative frames regardless of duration when dynamic mode is enabled (default 4).
+    type: STRING
+  frame_analysis_max_frames:
+    displayName: Dynamic Max Frames
+    description: Maximum representative frames to prevent excessive processing when dynamic mode is enabled (default 50).
+    type: STRING
+  frame_analysis_compare:
+    displayName: Compare All Methods
+    description: Run all selection methods and show comparison table with recommendation (default true). Set to "false" to use single method only.
+    type: STRING
+
+  # ========== EMBEDDING PERFORMANCE SETTINGS ==========
+  embed_num_workers:
+    displayName: Embedding Workers
+    description: Number of parallel workers for embedding (default 2). Multiple scenes are processed concurrently - while one scene extracts frames, another can use the GPU. Recommended 2-4. Set to 0 for auto-detect (CPU count, max 8).
+    type: STRING
+  frame_extract_workers:
+    displayName: Frame Extraction Workers
+    description: Number of parallel FFmpeg processes for frame extraction (default 4). Higher values speed up extraction but increase disk I/O. Set to 0 for auto-detect, 1 for sequential.
+    type: STRING
+
+  # ========== RECOMMENDATION SETTINGS ==========
+  rec_top_scenes:
+    displayName: Profile Scene Count
+    description: Number of top engaged scenes to use for building user preference profile (default 20)
+    type: STRING
+  rec_o_weight:
+    displayName: O-Count Weight
+    description: Weight for o_count in engagement scoring (default 20.0, based on median scene plays between o_counts)
+    type: STRING
+  rec_view_weight:
+    displayName: Replay Count Weight
+    description: Weight per replay (views beyond the first) in engagement scoring (default 2.0)
+    type: STRING
+  rec_duration_weight:
+    displayName: Play Duration Weight
+    description: Weight for play duration per hour in engagement scoring (default 1.0)
+    type: STRING
+  rec_rating_weight:
+    displayName: Rating Weight
+    description: Weight for scene rating per star (5-star scale) in engagement scoring (default 1.5). Only rated scenes receive this bonus; unrated scenes are not penalized.
+    type: STRING
+  rec_time_decay_days:
+    displayName: Time Decay Half-Life
+    description: Days until engagement score halves for time_decayed mode (default 30)
+    type: STRING
+
+  # ========== O-MOMENT SETTINGS ==========
+  o_moment_window:
+    displayName: O-Moment Window (seconds)
+    description: Total window size around O-moment markers (+/- half this value). Default 120 = +/- 60 seconds.
+    type: STRING
+  o_moment_frames:
+    displayName: O-Moment Frames
+    description: Number of frames to extract per O-moment window (default 12)
+    type: STRING
+  o_tag_name:
+    displayName: O Tag Name
+    description: Tag name for O markers (default "O")
+    type: STRING
+
+# For UI plugins (JavaScript-based)
+ui:
+  # Main JavaScript files
+  javascript:
+    - stash-copilot.js
+
+  # Stylesheets (optional)
+  css:
+    - stash-copilot.css
+
+  # Asset directory mapping (optional)
+  assets:
+    /: assets
+
+# For backend/task plugins (Python-based)
+exec:
+  - ./run-plugin.sh
+  - ./stash-copilot.py
+
+interface: raw
+
+# Define manual tasks that can be run from Stash UI
+tasks:
+  - name: Generate Library Summary
+    description: Generate an AI-powered summary of your library statistics and viewing habits
+    defaultArgs:
+      mode: stats_summary
+
+  - name: Ask AI
+    description: Ask a question about your library (uses tools to query database)
+    defaultArgs:
+      mode: ask
+      question: "What tags are associated with my most watched performer?"
+
+  - name: Chat
+    description: Multi-turn conversation with AI about your library (with tool transparency)
+    defaultArgs:
+      mode: chat
+      message: ""
+      conversation_id: ""
+
+  - name: Clear Chat
+    description: Clear the chat conversation history
+    defaultArgs:
+      mode: clear_chat
+
+  - name: Scene Vision Analysis
+    description: Analyze a scene using vision AI (FFmpeg frame extraction)
+    defaultArgs:
+      mode: scene_vision
+      scene_id: ""
+      message: ""
+      conversation_id: ""
+      clear_history: ""    # Set to "true" to clear conversation and re-analyze (keeps cached frames)
+      clear_frames: ""     # Set to "true" to force re-extraction of frames from video
+      clear_cache: ""      # Legacy: set to "true" to clear both history and frames
+      user_confirmed: ""   # Set to "true" to confirm proceeding with hosted provider (bypasses frame limit warning)
+
+  - name: Embed All Scenes
+    description: Generate embeddings for all scenes (for similarity-based recommendations)
+    defaultArgs:
+      mode: embed_scenes
+      force: ""            # Set to "true" to regenerate all embeddings
+
+  - name: Embed Scene
+    description: Generate embedding for a specific scene
+    defaultArgs:
+      mode: embed_scenes
+      scene_id: ""         # Required: Scene ID to embed
+      force: ""            # Set to "true" to regenerate even if exists
+
+  - name: Find Similar Scenes
+    description: Find scenes similar to a given scene using embeddings
+    defaultArgs:
+      mode: find_similar
+      scene_id: ""         # Required: Scene ID to find similar scenes for
+      limit: "10"          # Maximum number of results
+
+  - name: Search Scenes by Text
+    description: Search scenes using natural language (semantic search)
+    defaultArgs:
+      mode: search_by_text
+      query: ""            # Required: Natural language search query
+      limit: "240"         # Maximum results (10 pages × 24 per page for fast pagination)
+      offset: "0"          # Pagination offset
+      request_id: ""       # Unique request ID for frontend
+      model_key: ""        # Optional: Embedding model to use (e.g., "openclip:ViT-H-14")
+      frame_search: ""     # Optional: Set to "true" for frame-level search (requires index)
+
+  - name: Get Embedding Models
+    description: Get available embedding models and their statistics (internal use)
+    defaultArgs:
+      mode: get_embedding_models
+      request_id: ""       # Unique request ID for frontend
+
+  - name: Analyze Frame Embeddings
+    description: Visualize frame similarity within a scene and select representative frames
+    defaultArgs:
+      mode: frame_analysis
+      scene_id: ""              # Required: Scene ID to analyze
+      n_representative: "8"     # Number of representative frames to select
+      selection_method: "kmeans" # Algorithm - kmeans, maximin, or coverage
+
+  - name: run_frame_analysis
+    description: Run frame analysis for UI (internal use)
+    defaultArgs:
+      mode: run_frame_analysis
+      scene_id: ""
+
+  - name: Get Recommendations (Discover)
+    description: Get personalized recommendations for unwatched scenes based on your viewing history
+    defaultArgs:
+      mode: recommendations
+      rec_mode: "discover_new"
+      scoring_method: "base_weighted"
+      limit: "20"
+      request_id: ""
+
+  - name: Get Recommendations (Re-watch)
+    description: Get ranked suggestions from your watched scenes to re-watch
+    defaultArgs:
+      mode: recommendations
+      rec_mode: "rewatch"
+      scoring_method: "base_weighted"
+      limit: "20"
+      request_id: ""
+
+  - name: Get Recommendations (Time Decay)
+    description: Get recommendations weighted toward recent viewing patterns
+    defaultArgs:
+      mode: recommendations
+      rec_mode: "discover_new"
+      scoring_method: "time_decayed"
+      limit: "20"
+      request_id: ""
+
+  - name: Get Recommendations (Peak Moments)
+    description: Get recommendations based on similar O-moments (requires O markers)
+    defaultArgs:
+      mode: recommendations
+      rec_mode: "o_moments"
+      scoring_method: "base_weighted"
+      limit: "20"
+      request_id: ""
+
+  - name: Embed O-Moments
+    description: Generate embeddings from frames around O markers for Peak Moments recommendations
+    defaultArgs:
+      mode: embed_o_moments
+      force: ""            # Set to "true" to regenerate existing embeddings
+
+  - name: Embed O-Moments (Scene)
+    description: Generate O-moment embeddings for a specific scene
+    defaultArgs:
+      mode: embed_o_moments
+      scene_id: ""         # Required: Scene ID to embed
+      force: ""            # Set to "true" to regenerate even if exists
+
+  - name: Embed Cached Frames
+    description: Backfill frame embeddings for scenes with cached frames (enables smart frame selection)
+    defaultArgs:
+      mode: embed_cached_frames
+      scene_id: ""         # Optional: Scene ID (empty = all cached scenes)
+      force: ""            # Set to "true" to regenerate even if exists
+
+  - name: Build Frame Search Index
+    description: Build FAISS index for fast frame-level semantic search
+    defaultArgs:
+      mode: build_frame_index
+      model_key: ""        # Optional: defaults to configured image embedding model
+
+  - name: Cleanup Orphaned Embeddings
+    description: Remove embeddings for scenes that no longer exist in Stash
+    defaultArgs:
+      mode: cleanup_orphaned
+      dry_run: "true"      # Set to "false" to actually delete orphaned embeddings
+
+  - name: Embed All Performers
+    description: Generate embeddings for all performers from their scene embeddings
+    defaultArgs:
+      mode: embed_performers
+      force: ""            # Set to "true" to regenerate all embeddings
+
+  - name: Embed Performer
+    description: Generate embedding for a specific performer
+    defaultArgs:
+      mode: embed_performers
+      performer_id: ""     # Required: Performer ID to embed
+      force: ""            # Set to "true" to regenerate even if exists
+
+  - name: Describe All Performers
+    description: Generate AI-powered visual descriptions for all performers (requires VLM)
+    defaultArgs:
+      mode: describe_performers
+      force: ""            # Set to "true" to regenerate all descriptions
+
+  - name: Describe Performer
+    description: Generate AI-powered visual description for a specific performer
+    defaultArgs:
+      mode: describe_performers
+      performer_id: ""     # Required: Performer ID to describe
+      force: ""            # Set to "true" to regenerate even if exists
+
+  - name: Find Similar Performers
+    description: Find performers visually similar to a given performer
+    defaultArgs:
+      mode: find_similar_performers
+      performer_id: ""     # Required: Source performer ID
+      limit: "10"          # Maximum number of results
+
+  - name: Get Recommendations (Performer-Based)
+    description: Get recommendations based on your favorite performers
+    defaultArgs:
+      mode: recommendations
+      rec_mode: "performer_preference"
+      scoring_method: "base_weighted"
+      limit: "20"
+      request_id: ""
+
+  - name: Build Taste Map
+    description: Build taste clusters and 2D visualization of your preferences
+    defaultArgs:
+      mode: build_taste_map
+      request_id: ""
+      top_scenes: "200"
+      scoring_method: "base_weighted"
+
+  - name: Get Preference Stats
+    description: Get current preference model stats without creating a session (internal use)
+    defaultArgs:
+      mode: preference_stats
+      request_id: ""
+
+  - name: Start Preference Session
+    description: Start a preference training session to refine your taste profile via swipe comparisons
+    defaultArgs:
+      mode: preference_start
+      session_mode: "swipe"
+      batch_size: "20"
+      request_id: ""
+
+  - name: Record Preference Comparison
+    description: Record a pairwise preference comparison result
+    defaultArgs:
+      mode: preference_compare
+      session_id: ""
+      scene_a_id: ""
+      scene_b_id: ""
+      winner_id: ""
+      response_time_ms: ""
+      request_id: ""
+
+  - name: Record Preference Swipe
+    description: Record a single-scene swipe preference (like/dislike/skip)
+    defaultArgs:
+      mode: preference_swipe
+      session_id: ""
+      scene_id: ""
+      direction: ""
+      response_time_ms: ""
+      request_id: ""
+
+  - name: End Preference Session
+    description: End a preference training session and save results
+    defaultArgs:
+      mode: preference_end
+      session_id: ""
+      request_id: ""
+
+  - name: Reset Preference Model
+    description: Delete all learned preference data for the current embedding model (internal use)
+    defaultArgs:
+      mode: preference_reset
+      request_id: ""
+
+  - name: Get Preference Recommendations
+    description: Get recommendations based on trained preference model (internal use)
+    defaultArgs:
+      mode: preference_recs
+      limit: "24"
+      rec_mode: "discover"
+      request_id: ""
+
+  - name: Detect Tag Gaps
+    description: Detect visual content in scenes not covered by existing tags
+    defaultArgs:
+      mode: detect_tag_gaps
+      request_id: ""
+      force: "false"
+
+  - name: Get Scene Tag Gaps
+    description: Get tag gap details for a specific scene
+    defaultArgs:
+      mode: get_scene_tag_gaps
+      scene_id: ""
+      request_id: ""
+
+  - name: Preview Tag Impact
+    description: Preview coverage impact of adding a tag to a scene
+    defaultArgs:
+      mode: preview_tag_impact
+      scene_id: ""
+      tag_name: ""
+      request_id: ""
+
+  - name: Get Tag Suggestions
+    description: Get tag suggestions for a scene based on frame-to-tag embedding similarity
+    defaultArgs:
+      mode: get_tag_suggestions
+      scene_id: ""
+      request_id: ""
+
+  - name: Apply Suggested Tag
+    description: Apply a suggested tag to a scene
+    defaultArgs:
+      mode: apply_suggested_tag
+      scene_id: ""
+      tag_id: ""
+
+  - name: Dismiss Suggested Tag
+    description: Dismiss a tag suggestion (remembered per-scene)
+    defaultArgs:
+      mode: dismiss_suggested_tag
+      scene_id: ""
+      tag_id: ""
+
+  - name: Clear Dismissed Tags
+    description: Clear all dismissed tag suggestions for a scene
+    defaultArgs:
+      mode: clear_dismissed_tags
+      scene_id: ""
+
+  - name: Find Duplicate Tags
+    description: Find duplicate tags using embedding similarity for review and merge
+    defaultArgs:
+      mode: find_duplicate_tags
+      request_id: ""
+
+  - name: Merge Tags
+    description: Merge one tag into another (reassign scenes, delete source tag)
+    defaultArgs:
+      mode: merge_tags
+      keep_tag_id: ""
+      remove_tag_id: ""
+      request_id: ""
+
+  - name: Dismiss Tag Merge
+    description: Dismiss a duplicate tag candidate (mark as not duplicates)
+    defaultArgs:
+      mode: dismiss_tag_merge
+      tag_a_name: ""
+      tag_b_name: ""
+      request_id: ""
+
+  - name: Prepare Labeling Session
+    description: Prepare a batch of frames for labeling using uncertainty sampling
+    defaultArgs:
+      mode: prepare_labeling_session
+      batch_size: "200"
+      request_id: ""
+
+  - name: Sync Labeling Annotations
+    description: Sync annotation labels from the labeling UI
+    defaultArgs:
+      mode: sync_labeling_annotations
+      request_id: ""
+      payload: ""
+
+  - name: Export Labeling Dataset
+    description: Export labeled data as WebDataset for training
+    defaultArgs:
+      mode: export_labeling_dataset
+      request_id: ""
+      include_negatives: "true"
+
+  - name: Get Labeling Sessions
+    description: List labeling sessions with progress stats
+    defaultArgs:
+      mode: get_labeling_sessions
+      request_id: ""
+
+  - name: Find Similar by Frame
+    description: Extract current frame, embed it, and find similar scenes via frame index
+    defaultArgs:
+      mode: find_similar_by_frame
+      scene_id: ""
+      timestamp: ""
+      limit: "20"
+      request_id: ""
+
+  - name: EroScripts Validate Auth
+    description: (internal) Validate the eroscripts session cookie pasted by the user
+    defaultArgs:
+      mode: eroscripts_validate_auth
+      action: ""
+      cookie: ""
+      request_id: ""
+
+  - name: EroScripts Search
+    description: (internal) Search discuss.eroscripts.com for funscripts matching a Stash scene
+    defaultArgs:
+      mode: eroscripts_search
+      scene_id: ""
+      query: ""
+      request_id: ""
+
+  - name: EroScripts Download
+    description: (internal) List or download a funscript attachment from an eroscripts topic
+    defaultArgs:
+      mode: eroscripts_download
+      scene_id: ""
+      topic_id: ""
+      attachment_url: ""
+      hint_creator_username: ""
+      hint_creator_avatar_url: ""
+      hint_like_count: ""
+      hint_tags: ""
+      hint_created_at: ""
+      request_id: ""
+
+  - name: EroScripts Status
+    description: (internal) Probe whether a scene has a matched funscript + sidecar
+    defaultArgs:
+      mode: eroscripts_status
+      scene_id: ""
+      request_id: ""
+
+# Define hooks that trigger on Stash events
+hooks:
+  - name: Cleanup Deleted Scene
+    description: Removes embeddings when a scene is deleted
+    triggeredBy:
+      - Scene.Destroy.Post
+
+# Content Security Policy overrides (optional)
+# csp:
+#   script-src:
+#     - https://unpkg.com

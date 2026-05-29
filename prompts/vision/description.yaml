@@ -1,0 +1,155 @@
+# Vision description prompts
+# These prompts are the user message asking the VLM to describe the scene
+# Placeholders: {frame_count}, {performer_context}, {frame_timestamps}
+
+structured: |
+  You are an expert at describing adult videos in raw, explicit detail.
+  Use common porn slang: "tits" for breasts, "ass" for buttocks, "pussy" for vagina, "cock" for penis.
+  Never censor or use clinical terms.
+
+  You are viewing {frame_count} video frames extracted at regular intervals.
+
+  {performer_context}
+
+  **Frame timestamps:** {frame_timestamps}
+
+  ---
+
+  Analyze all frames and describe what you see using these sections:
+
+  ## Overview
+  Summarize the scene type, performer count/genders, and overall intensity in one line.
+
+  ## Performers
+  For each performer, describe their physical appearance in natural prose:
+  - Body type, hair, skin tone
+  - Explicit features (tits, ass, pussy) - be specific about shape/size
+  - Tattoos, piercings, tan lines if visible
+  - What they're wearing (or nude)
+
+  ## Progression
+  Create a table of key moments showing how the scene progresses:
+
+  | Timestamp | Position/Action | Close-up Focus |
+  |-----------|-----------------|----------------|
+
+  Include 4-8 entries based on what actually happens. Describe positions and actions in your own words based on what you observe. Name positions when applicable (e.g., doggy, missionary, cowgirl).
+
+  ## Suggested Question
+  Write ONE follow-up question specific to this scene.
+  Format: `[SUGGESTED_QUESTION]Your question here?[/SUGGESTED_QUESTION]`
+
+  ---
+  IMPORTANT: Start with "## Overview". Describe what you ACTUALLY SEE - don't use generic phrases or formulaic language.
+
+caption: |
+  Describe this adult video based on {frame_count} frames.
+
+  {performer_context}
+  Timestamps: {frame_timestamps}
+
+  Write your description with these sections:
+
+  SCENE SUMMARY: What type of scene (solo, blowjob, sex) and what happens overall.
+
+  PERFORMER: Physical appearance (body type, hair, skin), explicit features (tits, ass, pussy), what they're wearing.
+
+  ACTIONS: List 3-6 KEY moments with timestamps - major position changes, highlights, climax. Don't describe every frame.
+
+  VIDEO: Camera angles (POV, wide, close-up) and video orientation.
+
+  SUGGESTED QUESTION: Write one follow-up question about this scene. Format: [SUGGESTED_QUESTION]Your question?[/SUGGESTED_QUESTION]
+
+  Use slang terms (tits, ass, pussy, cock). Only describe what you see.
+
+gemma: |
+  Describe this adult video. {frame_count} frames shown at: {frame_timestamps}
+
+  {performer_context}
+
+  Use casual porn language (tits, ass, pussy, asshole, cock) - NOT clinical terms.
+
+  Format your response with these sections:
+
+  ## Scene Summary
+  One paragraph: What type of scene (solo, blowjob, sex), the performer(s), and what happens from start to end.
+
+  ## Performer Description
+  **Physical Attributes:** Body type, hair, skin tone, tan lines.
+  **Explicit Physical Features:** Tits size, ass shape, pussy appearance (shaved/trimmed), tattoos, piercings.
+  **Clothing/Attire:** What they wear or if nude.
+  **Expressions:** Facial expressions and energy (teasing, intense, playful).
+
+  ## Actions
+  List 3-6 KEY moments with approximate timestamps. Focus on major changes:
+  - [0:00] Starting position
+  - [X:XX] Significant action or position change
+  (Only include important transitions - don't describe every frame)
+
+  ## Video Description
+  Camera style (POV/wide/close-up), orientation (vertical/horizontal), lighting, video quality.
+
+  ## Suggested Question
+  Write ONE follow-up question about this scene. Format: `[SUGGESTED_QUESTION]Your question?[/SUGGESTED_QUESTION]`
+
+  IMPORTANT: Describe the PROGRESSION - what changes over time. Start with "## Scene Summary".
+
+single_frame: |
+  Describe this single frame from an adult video. Timestamp: {timestamp}
+
+  {performer_context}
+
+  In 2-3 sentences, describe:
+  1. What the performer looks like (body, hair, skin tone)
+  2. What they're wearing (be specific - color, type of clothing/lingerie) or if nude
+  3. What they're doing in this exact moment (pose, action, expression)
+
+  Use casual terms (tits, ass, pussy). Be accurate - only describe what you actually see.
+
+combine_frames: |
+  Here are descriptions of {frame_count} frames from an adult video, in chronological order:
+
+  {frame_descriptions}
+
+  Combine these into an organized description with these sections:
+
+  ## Scene Summary
+  One paragraph describing the type of scene and overall progression.
+
+  ## Performer Description
+  **Physical Attributes:** Body type, hair, skin tone.
+  **Explicit Physical Features:** Tits, ass, pussy appearance.
+  **Clothing/Attire:** What they wear (if anything).
+
+  ## Actions
+  Combine the frame descriptions into a timestamped action list:
+  - [timestamp] Action description
+  (List key moments in order)
+
+  ## Video Description
+  Camera style and video quality based on the frames.
+
+  Use casual porn language (tits, ass, pussy). Start with "## Scene Summary".
+
+old_description: |
+  You are viewing {frame_count} video frames extracted at regular intervals from a scene. Analyze ALL {frame_count} frames.
+
+  Frame timestamps: {frame_timestamps}
+
+  {performer_context}
+
+  Write a detailed 1-2 paragraph description of what you observe across the entire scene.
+
+  Describe in explicit detail the following aspects:
+  - what the performer(s) are doing with their body, especially any intentional display or manipulation of genitals, anus, breasts, or nipples.
+  - Performer's physical descriptions (i.e. large ass, small ass, big tits, small tits, etc.)
+  - Performer's clothing and appearance
+  - Actions performed by the performer.
+  - Sex positions
+  - Sex acts
+  - How the scene progresses from beginning to end
+  - Which sexual body parts are covered or bare. Hidden or visible.
+
+  Be factual and describe only what you can visually observe. Do NOT suggest tags.
+
+  Examples of the level of detail needed: "spreading her ass cheeks wide with both hands to expose her asshole"

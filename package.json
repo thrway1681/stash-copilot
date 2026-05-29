@@ -1,0 +1,29 @@
+{
+  "name": "stash-copilot",
+  "version": "1.0.0",
+  "description": "AI-powered assistant for your [StashApp](https://github.com/stashapp/stash) library. Chat with your library, get insights, and analyze scenes using vision AI.",
+  "main": "stash-copilot.js",
+  "scripts": {
+    "postinstall": "cp node_modules/marked/lib/marked.umd.js assets/marked.min.js && cp node_modules/dompurify/dist/purify.min.js assets/purify.min.js && cp node_modules/plotly.js-gl3d-dist-min/plotly-gl3d.min.js assets/plotly-gl3d.min.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thrway1681/stash-copilot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/thrway1681/stash-copilot/issues"
+  },
+  "homepage": "https://github.com/thrway1681/stash-copilot#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^25.0.3"
+  },
+  "dependencies": {
+    "dompurify": "^3.3.1",
+    "marked": "^17.0.1",
+    "plotly.js-gl3d-dist-min": "^3.3.1"
+  }
+}

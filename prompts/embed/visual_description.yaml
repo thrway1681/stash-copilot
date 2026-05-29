@@ -1,0 +1,12 @@
+# Visual description prompt for scene embedding generation
+# Used by embed_scenes.py when generating embeddings without existing descriptions
+
+visual_description: |
+  Describe this video scene in detail. Focus on:
+  - Visual appearance and physical characteristics of people
+  - Actions and activities taking place
+  - Setting, environment, and atmosphere
+  - Camera angles and shot composition
+  - Mood and tone
+
+  Be descriptive and factual. Output 1-2 paragraphs.

@@ -1,0 +1,3581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caption Pipeline Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #080a10;
+  --bg: #0c0e16;
+  --surface: #12141f;
+  --surface-2: #1a1d2b;
+  --surface-3: #222538;
+  --border: rgba(255,255,255,0.06);
+  --border-active: rgba(96,165,250,0.25);
+  --text: #e8eaf0;
+  --text-2: #9ca3af;
+  --text-3: #5b6070;
+  --blue: #60a5fa;
+  --blue-dim: rgba(96,165,250,0.12);
+  --purple: #8b5cf6;
+  --purple-dim: rgba(139,92,246,0.10);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34,211,238,0.10);
+  --green: #34d399;
+  --green-dim: rgba(52,211,153,0.12);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251,191,36,0.10);
+  --red: #f87171;
+  --red-dim: rgba(248,113,113,0.10);
+  --gradient-primary: linear-gradient(135deg, #3b82f6, #6366f1, #8b5cf6);
+  --gradient-surface: linear-gradient(180deg, #12141f, #0f1119);
+  --glow-blue: 0 0 20px rgba(96,165,250,0.15), 0 0 60px rgba(96,165,250,0.05);
+  --glow-green: 0 0 12px rgba(52,211,153,0.2);
+  --glow-red: 0 0 12px rgba(248,113,113,0.2);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font-display: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+html { font-size: 15px; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-display);
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Background texture ─────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgba(96,165,250,0.04), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139,92,246,0.03), transparent);
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Scrollbar ──────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(96,165,250,0.35); }
+
+/* ── Layout ─────────────────────────────────── */
+.shell {
+  position: relative; z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1.5rem 3rem;
+}
+
+/* ── Header ─────────────────────────────────── */
+.header {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 1rem;
+  padding: 1rem 0 0.75rem;
+  background: linear-gradient(180deg, var(--bg-deep) 60%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: fadeSlideUp 0.35s ease-out;
+}
+
+.orb-wrap {
+  position: relative;
+  width: 36px; height: 36px;
+  flex-shrink: 0;
+}
+
+.orb {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--gradient-primary);
+  opacity: 0.85;
+}
+
+.orb.active {
+  animation: orbPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; box-shadow: 0 0 16px rgba(99,102,241,0.3); }
+  50% { transform: scale(1.12); opacity: 1; box-shadow: 0 0 28px rgba(99,102,241,0.5), 0 0 56px rgba(96,165,250,0.15); }
+}
+
+.orb-ring {
+  position: absolute; inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(96,165,250,0.15);
+  animation: orbRing 3s ease-in-out infinite;
+}
+
+.orb.active + .orb-ring {
+  border-color: rgba(96,165,250,0.3);
+}
+
+@keyframes orbRing {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 0; }
+}
+
+.header-text { flex: 1; }
+.header-text h1 {
+  font-size: 1.15rem; font-weight: 600; letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text), var(--blue));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header-meta {
+  display: flex; align-items: center; gap: 0.75rem;
+}
+
+.status-pill {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.25rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  font-size: 0.73rem; font-weight: 500;
+  color: var(--text-2);
+  transition: all 0.3s;
+}
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: all 0.3s;
+}
+
+.status-pill.active { border-color: rgba(52,211,153,0.3); color: var(--green); }
+.status-pill.active .status-dot {
+  background: var(--green);
+  box-shadow: var(--glow-green);
+  animation: dotPulse 2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.model-pill {
+  padding: 0.2rem 0.6rem;
+  background: var(--purple-dim);
+  border: 1px solid rgba(139,92,246,0.2);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem; font-weight: 500;
+  color: var(--purple);
+  letter-spacing: -0.01em;
+}
+
+/* ── Entrance animations ───────────────────── */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeSlideLeft {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(96,165,250,0); }
+  50% { box-shadow: 0 0 20px rgba(96,165,250,0.15), 0 0 40px rgba(96,165,250,0.05); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes shimmerSlide {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(96,165,250,0.1); }
+  50% { border-color: rgba(96,165,250,0.3); }
+}
+
+/* ── Metrics Grid ───────────────────────────── */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .metrics { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 520px) {
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
+.metric {
+  position: relative;
+  padding: 0.85rem 0.9rem 0.7rem;
+  background: var(--gradient-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s, transform 0.2s, box-shadow 0.3s;
+  animation: fadeSlideUp 0.5s ease-out both;
+}
+
+.metric:nth-child(1) { animation-delay: 0.05s; }
+.metric:nth-child(2) { animation-delay: 0.1s; }
+.metric:nth-child(3) { animation-delay: 0.15s; }
+.metric:nth-child(4) { animation-delay: 0.2s; }
+.metric:nth-child(5) { animation-delay: 0.25s; }
+.metric:nth-child(6) { animation-delay: 0.3s; }
+
+.metric:hover {
+  border-color: var(--border-active);
+  transform: translateY(-2px);
+  box-shadow: var(--glow-blue);
+}
+
+.metric-label {
+  font-size: 0.62rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-3);
+  margin-bottom: 0.2rem;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 1.25rem; font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.metric-value.updated {
+  animation: countUp 0.4s ease-out;
+}
+
+.metric-value .unit {
+  font-size: 0.7rem; font-weight: 500;
+  color: var(--text-3); margin-left: 0.15rem;
+}
+
+.metric-sub {
+  font-size: 0.65rem;
+  color: var(--text-3);
+  margin-top: 0.15rem;
+  font-family: var(--font-mono);
+}
+
+.metric-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2.5px;
+  background: rgba(255,255,255,0.03);
+}
+
+.metric-bar-fill {
+  height: 100%;
+  border-radius: 0 2px 2px 0;
+  background: var(--gradient-primary);
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 8px rgba(96,165,250,0.3);
+}
+
+/* Color variants */
+.metric[data-color="blue"] .metric-value { color: var(--blue); }
+.metric[data-color="green"] .metric-value { color: var(--green); }
+.metric[data-color="purple"] .metric-value { color: var(--purple); }
+.metric[data-color="cyan"] .metric-value { color: var(--cyan); }
+.metric[data-color="amber"] .metric-value { color: var(--amber); }
+.metric[data-color="red"] .metric-value { color: var(--red); }
+
+.metric[data-color="green"] .metric-bar-fill { background: linear-gradient(90deg, #34d399, #22d3ee); }
+.metric[data-color="purple"] .metric-bar-fill { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+.metric[data-color="cyan"] .metric-bar-fill { background: linear-gradient(90deg, #22d3ee, #60a5fa); }
+.metric[data-color="amber"] .metric-bar-fill { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.metric[data-color="red"] .metric-bar-fill { background: linear-gradient(90deg, #f87171, #ef4444); }
+
+/* ── Progress Bar ───────────────────────────── */
+.progress-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  animation: fadeSlideUp 0.5s ease-out both;
+  animation-delay: 0.32s;
+}
+
+.progress-track {
+  height: 8px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--gradient-primary);
+  box-shadow: 0 0 12px rgba(99,102,241,0.3);
+  transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+  animation: progressShimmer 2s ease-in-out infinite;
+}
+
+@keyframes progressShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.progress-info {
+  display: flex; gap: 1.5rem; align-items: baseline;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.progress-pct {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--blue);
+}
+
+.progress-info .sep { color: var(--text-3); opacity: 0.4; }
+
+.progress-errors {
+  color: var(--red);
+  display: flex; align-items: center; gap: 0.3rem;
+}
+
+/* ── Section header ─────────────────────────── */
+.section-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 1.25rem 0 0.65rem;
+  animation: fadeSlideUp 0.4s ease-out both;
+  animation-delay: 0.35s;
+}
+
+.section-title {
+  font-size: 0.82rem; font-weight: 600; color: var(--text-2);
+  letter-spacing: -0.01em;
+}
+
+.scene-count-control {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.68rem; color: var(--text-3);
+}
+
+.scene-count-control input[type="range"] {
+  width: 100px; height: 4px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+/* ── Scene Cards ────────────────────────────── */
+.scenes {
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+
+.scene-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s, transform 0.2s, box-shadow 0.3s;
+  animation: cardSlideIn 0.35s ease-out both;
+}
+
+.scene-card:hover {
+  border-color: var(--border-active);
+  box-shadow: var(--glow-blue);
+}
+
+@keyframes cardSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Card Header ─────────────────────────────── */
+.scene-card-head {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.scene-id {
+  font-family: var(--font-mono);
+  font-size: 0.78rem; font-weight: 600;
+  color: var(--blue);
+  white-space: nowrap;
+}
+
+.scene-meta {
+  display: flex; gap: 0.5rem; flex: 1;
+  font-size: 0.68rem; color: var(--text-3);
+  font-family: var(--font-mono);
+  align-items: center;
+}
+
+.scene-meta .tag {
+  padding: 0.1rem 0.45rem;
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.scene-meta .tag-frames { color: var(--cyan); }
+.scene-meta .tag-time { color: var(--text-3); }
+.scene-meta .tag-active {
+  color: var(--amber);
+  animation: activePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes activePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.scene-chevron {
+  font-size: 0.65rem;
+  color: var(--text-3);
+  transition: transform 0.2s;
+}
+
+.scene-card.expanded .scene-chevron { transform: rotate(90deg); }
+
+/* ── Progress Bar ────────────────────────────── */
+.scene-progress {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0 0.85rem 0.4rem;
+}
+
+.scene-progress-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.scene-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--gradient-primary);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.scene-progress-fill.has-errors {
+  background: linear-gradient(90deg, var(--green) 0%, var(--green) var(--ok-pct), var(--red) var(--ok-pct), var(--red) 100%);
+}
+
+.scene-progress-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  min-width: 5.5rem;
+  text-align: right;
+}
+
+.scene-progress-label .err { color: var(--red); }
+
+/* ── In-Progress Card ────────────────────────── */
+.scene-card.in-progress {
+  border-color: rgba(255,176,0,0.3);
+  animation: cardSlideIn 0.35s ease-out both, borderGlowAmber 2s ease-in-out infinite;
+}
+
+.scene-card.in-progress .scene-id { color: var(--amber); }
+
+.scene-card.in-progress .scene-progress-fill {
+  position: relative;
+}
+
+.scene-card.in-progress .scene-progress-fill::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 50%, transparent 100%);
+  animation: progressShimmer 2s ease-in-out infinite;
+}
+
+@keyframes borderGlowAmber {
+  0%, 100% { border-color: rgba(255,176,0,0.15); box-shadow: 0 0 0 rgba(251,191,36,0); }
+  50% { border-color: rgba(255,176,0,0.35); box-shadow: 0 0 15px rgba(251,191,36,0.08); }
+}
+
+/* ── Filmstrip ───────────────────────────────── */
+.scene-filmstrip {
+  display: flex;
+  gap: 6px;
+  padding: 0 0.85rem 0.5rem;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(96,165,250,0.2) transparent;
+}
+
+.scene-filmstrip::-webkit-scrollbar { height: 4px; }
+.scene-filmstrip::-webkit-scrollbar-track { background: transparent; }
+.scene-filmstrip::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.2); border-radius: 2px; }
+
+/* ── Minimap row (cover thumb + minimap) ──────── */
+.minimap-row {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0 0.85rem 0.5rem;
+  align-items: flex-start;
+}
+
+.scene-cover-thumb {
+  flex-shrink: 0;
+  width: 80px; height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.scene-cover-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ── Minimap (default for active scenes) ─────── */
+.scene-minimap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 12px);
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  overflow: hidden;
+}
+
+.minimap-cell {
+  width: 12px; height: 7px;
+  border-radius: 1.5px;
+  background: rgba(255,255,255,0.06);
+  transition: background-color 0.6s ease, box-shadow 1.5s ease;
+}
+
+.minimap-cell.ok {
+  background: rgba(52,211,153,0.6);
+}
+
+.minimap-cell.error {
+  background: rgba(248,113,113,0.6);
+}
+
+.minimap-cell.just-done {
+  box-shadow: 0 0 4px rgba(52,211,153,0.5);
+}
+
+.minimap-cell.just-error {
+  box-shadow: 0 0 4px rgba(248,113,113,0.5);
+}
+
+/* ── Expand toggle ───────────────────────────── */
+.minimap-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-3);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.minimap-expand-btn:hover {
+  color: var(--blue);
+}
+
+.minimap-expand-btn .expand-arrow {
+  transition: transform 0.3s ease;
+  font-size: 0.5rem;
+}
+
+.minimap-expand-btn.expanded .expand-arrow {
+  transform: rotate(180deg);
+}
+
+/* ── Expanded thumbnail grid ─────────────────── */
+.scene-thumb-grid {
+  display: none;
+  grid-template-columns: repeat(auto-fill, 56px);
+  gap: 3px;
+  padding: 0 0.85rem 0.5rem;
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(96,165,250,0.2) transparent;
+}
+
+.scene-thumb-grid.visible {
+  display: grid;
+  animation: fadeSlideUp 0.3s ease-out;
+}
+
+.scene-thumb-grid::-webkit-scrollbar { width: 4px; }
+.scene-thumb-grid::-webkit-scrollbar-track { background: transparent; }
+.scene-thumb-grid::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.2); border-radius: 2px; }
+
+.thumb-cell {
+  position: relative;
+  width: 56px; height: 32px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  /* Pending state: dim and desaturated */
+  opacity: 0.3;
+  filter: saturate(0.2) brightness(0.5);
+  transition: opacity 0.6s ease, filter 0.6s ease, border-color 0.6s ease, box-shadow 1.5s ease;
+}
+
+.thumb-cell.ok {
+  opacity: 1;
+  filter: none;
+}
+
+.thumb-cell.error {
+  opacity: 0.8;
+  filter: saturate(0.6);
+  border-color: rgba(248,113,113,0.3);
+}
+
+.thumb-cell.just-done {
+  border-color: rgba(52,211,153,0.5);
+  box-shadow: 0 0 8px rgba(52,211,153,0.25);
+}
+
+.thumb-cell:hover {
+  border-color: var(--blue);
+  transform: scale(1.08);
+  box-shadow: 0 2px 8px rgba(96,165,250,0.2);
+  z-index: 2;
+  opacity: 1;
+  filter: none;
+}
+
+.thumb-cell img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.scene-filmstrip-frame {
+  position: relative;
+  flex-shrink: 0;
+  width: 72px; height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.6s ease, transform 0.25s, box-shadow 0.6s ease, opacity 0.6s ease, filter 0.6s ease;
+}
+
+/* Pending frames in active cards: dimmed and desaturated */
+.scene-card.in-progress .scene-filmstrip-frame.pending {
+  opacity: 0.35;
+  filter: saturate(0.2) brightness(0.6);
+}
+
+.scene-card.in-progress .scene-filmstrip-frame.ok,
+.scene-card.in-progress .scene-filmstrip-frame.error {
+  opacity: 1;
+  filter: none;
+}
+
+.scene-filmstrip-frame:hover {
+  border-color: var(--blue);
+  transform: scale(1.06) translateY(-2px);
+  box-shadow: 0 4px 16px rgba(96,165,250,0.2);
+  z-index: 2;
+}
+
+.scene-filmstrip-frame img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Frame status overlay */
+.frame-status {
+  position: absolute;
+  top: 3px; right: 3px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  backdrop-filter: blur(4px);
+}
+
+.frame-status.ok {
+  background: rgba(52,211,153,0.85);
+  color: white;
+}
+
+.frame-status.pending {
+  background: rgba(251,191,36,0.85);
+  color: white;
+  animation: spinnerPulse 1s ease-in-out infinite;
+}
+
+.frame-status.error {
+  background: rgba(248,113,113,0.85);
+  color: white;
+}
+
+@keyframes spinnerPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* Slide-in animation for new frames */
+.scene-filmstrip-frame.new {
+  animation: frameSlideIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes frameSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(30px) scale(0.9);
+    box-shadow: 0 0 20px rgba(251,191,36,0.3);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    box-shadow: none;
+  }
+}
+
+/* Glow on frame that just got captioned */
+.scene-filmstrip-frame.just-captioned {
+  animation: frameCaptionedGlow 1.5s ease-out forwards;
+}
+
+@keyframes frameCaptionedGlow {
+  0% { border-color: rgba(52,211,153,0.5); box-shadow: 0 0 12px rgba(52,211,153,0.25); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
+/* Glow on frame that just errored */
+.scene-filmstrip-frame.just-error {
+  animation: frameErrorGlow 1.5s ease-out forwards;
+}
+
+@keyframes frameErrorGlow {
+  0% { border-color: rgba(248,113,113,0.5); box-shadow: 0 0 12px rgba(248,113,113,0.25); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
+.scene-filmstrip-overflow {
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  min-width: 40px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem; font-weight: 600;
+  color: var(--text-3);
+}
+
+@keyframes captionFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Completed Card (Collapsed) ──────────────── */
+/* Filmstrip + caption preview always visible; only hide progress bar */
+.scene-card.completed .scene-progress {
+  display: none;
+}
+
+.scene-card.completed.expanded .scene-progress {
+  display: flex;
+}
+
+/* Completed status pill in header */
+.scene-status-pill {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem; font-weight: 600;
+}
+
+.scene-status-pill.ok {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.scene-status-pill.has-errors {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+/* ── Expanded Detail Grid ────────────────────── */
+.scene-detail {
+  display: none;
+  padding: 0 0.85rem 0.75rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.4rem;
+}
+
+.scene-card.expanded .scene-detail { display: block; }
+
+.scene-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.frame-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+  animation: scaleIn 0.3s ease-out both;
+}
+
+.frame-item:hover {
+  border-color: var(--border-active);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3), var(--glow-blue);
+}
+
+.frame-item img {
+  width: 100%; aspect-ratio: 16/9;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.frame-item:hover img { transform: scale(1.03); }
+
+.frame-item .frame-cap {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.68rem; line-height: 1.4;
+  color: var(--text-2);
+}
+
+.frame-item .frame-cap.error { color: var(--red); }
+
+.frame-item .frame-name {
+  padding: 0.15rem 0.5rem 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-3);
+}
+
+/* ── Loading / Empty states ─────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-3);
+  font-size: 0.82rem;
+}
+
+.empty-state .empty-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.4;
+}
+
+/* ── Lightbox ───────────────────────────────── */
+.lightbox {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  z-index: 100;
+  align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+
+.lightbox.open { display: flex; animation: lightboxFadeIn 0.2s ease-out; }
+
+@keyframes lightboxFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.lightbox-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 90vw;
+  max-height: 95vh;
+  animation: lightboxZoomIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lightbox-content img {
+  max-width: 90vw;
+  max-height: 80vh;
+  border-radius: var(--radius);
+  box-shadow: 0 4px 40px rgba(0,0,0,0.5), 0 0 80px rgba(96,165,250,0.08);
+  object-fit: contain;
+}
+
+/* Square off bottom corners when caption is visible */
+.lightbox-content:has(.lightbox-caption:not(:empty)) img {
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.lightbox-caption {
+  width: 100%;
+  max-width: 90vw;
+  padding: 0.65rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text);
+  max-height: 12vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 40px rgba(0,0,0,0.5);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.lightbox-caption:empty {
+  display: none;
+}
+
+@keyframes lightboxZoomIn {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ── Controls Panel ─────────────────────────── */
+.controls {
+  margin-top: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  animation: fadeSlideUp 0.4s ease-out both;
+  animation-delay: 0.4s;
+}
+
+.controls.runner-active {
+  box-shadow: 0 0 20px rgba(52,211,153,0.08);
+}
+
+.controls.runner-active { border-color: rgba(52,211,153,0.25); }
+
+.controls-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer; user-select: none;
+  font-size: 0.75rem; font-weight: 500;
+  color: var(--text-2);
+}
+
+.controls-toggle:hover { color: var(--text); }
+
+.controls-chevron {
+  font-size: 0.6rem; color: var(--text-3);
+  transition: transform 0.2s;
+}
+
+.controls.open .controls-chevron { transform: rotate(90deg); }
+
+.controls-body {
+  display: none;
+  padding: 0 0.85rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.controls.open .controls-body { display: block; }
+
+.ctrl-row {
+  display: flex; gap: 0.5rem; flex-wrap: wrap;
+  margin-top: 0.6rem;
+  align-items: flex-end;
+}
+
+.ctrl-field {
+  display: flex; flex-direction: column; gap: 0.2rem;
+}
+
+.ctrl-field label {
+  font-size: 0.6rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.ctrl-field input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.55rem;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  width: 100px;
+  transition: border-color 0.2s;
+}
+
+.ctrl-field input:focus { outline: none; border-color: var(--blue); }
+
+.ctrl-field input.wide { width: 240px; }
+
+.ctrl-actions {
+  display: flex; gap: 0.4rem;
+  margin-left: auto;
+}
+
+.btn-launch, .btn-stop {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border: none; border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: 0.72rem; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-launch {
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.25);
+}
+
+.btn-launch:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99,102,241,0.4);
+}
+
+.btn-launch:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 1px 4px rgba(99,102,241,0.2);
+  transition-duration: 0.05s;
+}
+
+.btn-launch:disabled {
+  opacity: 0.4; cursor: not-allowed; transform: none;
+}
+
+.btn-stop {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(248,113,113,0.2);
+}
+
+.btn-stop:hover:not(:disabled) {
+  background: rgba(248,113,113,0.2);
+  transform: translateY(-1px);
+}
+.btn-stop:active:not(:disabled) { transform: translateY(0) scale(0.97); transition-duration: 0.05s; }
+.btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.btn-retry {
+  background: var(--amber-dim);
+  color: var(--amber);
+  border: 1px solid rgba(251,191,36,0.2);
+}
+
+.btn-retry:hover:not(:disabled) {
+  background: rgba(251,191,36,0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(251,191,36,0.15);
+}
+.btn-retry:active:not(:disabled) { transform: translateY(0) scale(0.97); transition-duration: 0.05s; }
+.btn-retry:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.btn-icon { font-size: 0.8rem; }
+
+/* ── Batch Jobs ────────────────────────────── */
+.batch-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.batch-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.batch-discount {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  font-weight: 600;
+}
+.batch-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.btn-batch {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border: none;
+  padding: 0.5rem 1.2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: opacity 0.2s;
+}
+.btn-batch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-batch:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.batch-status-summary {
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+.batch-jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.batch-job-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.8rem;
+}
+.batch-job-card .job-header {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+}
+.batch-job-card .job-name { color: var(--text); font-weight: 600; }
+.batch-job-card .job-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%;
+  font-size: 0.72rem; color: var(--text-3); font-family: var(--font-mono);
+}
+.batch-job-card .job-meta span { white-space: nowrap; }
+.batch-job-card .job-stats {
+  width: 100%; font-size: 0.72rem; color: var(--green);
+  font-family: var(--font-mono); margin-top: 2px;
+}
+.batch-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.batch-badge.pending { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.batch-badge.running { background: rgba(59, 130, 246, 0.15); color: #3b82f6; animation: pulse 2s infinite; }
+.batch-badge.succeeded { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.batch-badge.failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.batch-badge.collected { background: rgba(16, 185, 129, 0.25); color: #10b981; }
+.batch-badge.cancelled { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.btn-cancel-job {
+  background: transparent; border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444;
+  border-radius: 6px; padding: 2px 8px; font-size: 0.7rem; cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-cancel-job:hover { background: rgba(239, 68, 68, 0.15); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Log viewer */
+.log-section {
+  margin-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.log-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.3rem;
+}
+
+.log-title {
+  font-size: 0.62rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+.log-output {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-output .log-error { color: var(--red); }
+.log-output .log-info { color: var(--text-3); }
+
+/* ── Error banner ───────────────────────────── */
+/* ── Errors Panel ──────────────────────────── */
+.errors-panel {
+  margin-top: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  animation: fadeSlideUp 0.4s ease-out both;
+  animation-delay: 0.45s;
+}
+
+.errors-panel.has-errors { border-color: rgba(248,113,113,0.2); }
+
+.errors-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer; user-select: none;
+  font-size: 0.75rem; font-weight: 500;
+  color: var(--text-2);
+}
+
+.errors-toggle:hover { color: var(--text); }
+
+.errors-toggle-left {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+
+.errors-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 18px;
+  padding: 0 0.4rem;
+  background: var(--red-dim);
+  border: 1px solid rgba(248,113,113,0.25);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem; font-weight: 700;
+  color: var(--red);
+}
+
+.errors-badge.zero {
+  background: var(--green-dim);
+  border-color: rgba(52,211,153,0.25);
+  color: var(--green);
+}
+
+.errors-chevron {
+  font-size: 0.6rem; color: var(--text-3);
+  transition: transform 0.2s;
+}
+
+.errors-panel.open .errors-chevron { transform: rotate(90deg); }
+
+.errors-body {
+  display: none;
+  border-top: 1px solid var(--border);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.errors-panel.open .errors-body { display: block; }
+
+.errors-list {
+  display: flex; flex-direction: column;
+}
+
+.scanning-dots::after {
+  content: '';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+@keyframes dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
+.error-row {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.45rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.error-row:last-child { border-bottom: none; }
+.error-row:hover { background: rgba(248,113,113,0.04); }
+
+.error-thumb {
+  width: 64px; height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.error-thumb:hover { border-color: var(--red); }
+
+.error-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-filename {
+  font-family: var(--font-mono);
+  font-size: 0.68rem; font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.error-message {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--red);
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.errors-summary {
+  display: flex; gap: 1rem;
+  padding: 0.4rem 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-3);
+  background: rgba(0,0,0,0.15);
+  border-bottom: 1px solid var(--border);
+}
+
+.errors-summary .err-type { color: var(--red); font-weight: 600; }
+
+.error-banner {
+  display: none;
+  padding: 0.5rem 1rem;
+  background: var(--red-dim);
+  border: 1px solid rgba(248,113,113,0.2);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem; color: var(--red);
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+}
+
+.error-banner.show { display: block; }
+
+/* ── Unified Scenes Section ────────────────── */
+.scenes-section {
+  margin-top: 1rem;
+  animation: fadeSlideUp 0.35s ease-out both;
+}
+
+.section-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.scenes-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.divider-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ── Caption Preview (below filmstrip) ────── */
+.scene-caption-preview {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.3rem 0.85rem 0.5rem;
+  overflow: hidden;
+}
+
+.scene-caption-preview .caption-label {
+  color: var(--text-3);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.scene-caption-preview .caption-text {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.3s;
+}
+
+.scene-caption-preview .caption-text.fade-in {
+  animation: captionFadeIn 0.5s ease-out;
+}
+
+/* ── Frame Hover Tooltip ──────────────────── */
+.frame-tooltip {
+  position: fixed;
+  max-width: 320px;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--text-2);
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+.frame-tooltip.visible {
+  opacity: 1;
+}
+
+.active-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 18px;
+  padding: 0 0.4rem;
+  margin-left: 0.5rem;
+  background: var(--amber-dim);
+  border: 1px solid rgba(251,191,36,0.25);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem; font-weight: 700;
+  color: var(--amber);
+}
+
+.active-scenes {
+  border: 1px solid rgba(251,191,36,0.12);
+  border-radius: var(--radius);
+  background: rgba(251,191,36,0.02);
+  padding: 0.5rem;
+  animation: activeSectionPulse 4s ease-in-out infinite;
+}
+
+@keyframes activeSectionPulse {
+  0%, 100% { border-color: rgba(251,191,36,0.10); box-shadow: none; }
+  50% { border-color: rgba(251,191,36,0.20); box-shadow: 0 0 20px rgba(251,191,36,0.04); }
+}
+
+/* ── Just-completed highlight ─────────────── */
+.scene-card.just-completed {
+  border-color: rgba(74, 222, 128, 0.4);
+  animation: cardSlideIn 0.35s ease-out both, justCompletedGlow 3s ease-out forwards;
+}
+
+@keyframes justCompletedGlow {
+  0% { box-shadow: 0 0 20px rgba(74, 222, 128, 0.15); border-color: rgba(74, 222, 128, 0.4); }
+  100% { box-shadow: none; border-color: rgba(255,255,255,0.06); }
+}
+
+/* ── Caption Showcase ───────────────────────── */
+.showcase-section {
+  margin-top: 1rem;
+  animation: fadeSlideUp 0.4s ease-out both;
+  animation-delay: 0.15s;
+}
+
+.showcase-section .section-head {
+  margin-bottom: 0.5rem;
+}
+
+.showcase-stage {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.showcase-stage:hover {
+  border-color: var(--border-active);
+  box-shadow: var(--glow-blue);
+}
+
+.showcase-image-wrap {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 */
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+.showcase-img {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  transition: opacity 0.7s ease;
+}
+
+.showcase-img.layer-a { z-index: 2; }
+.showcase-img.layer-b { z-index: 1; }
+.showcase-img.hidden { opacity: 0; }
+.showcase-img.visible { opacity: 1; }
+
+.showcase-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 50%;
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.25s, background 0.2s;
+  backdrop-filter: blur(4px);
+}
+
+.showcase-stage:hover .showcase-nav { opacity: 1; }
+.showcase-nav:hover { background: rgba(0,0,0,0.7); }
+.showcase-nav.prev { left: 0.75rem; }
+.showcase-nav.next { right: 0.75rem; }
+
+.showcase-caption-area {
+  padding: 0.75rem 1rem;
+  min-height: 3.5rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text);
+  border-top: 1px solid var(--border);
+  transition: opacity 0.4s ease;
+}
+
+.showcase-caption-area.fading { opacity: 0; }
+
+.showcase-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.68rem;
+  color: var(--text-3);
+}
+
+.showcase-scene-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--blue);
+  background: var(--blue-dim);
+  padding: 0.15rem 0.5rem;
+  border-radius: 100px;
+  border: 1px solid rgba(96,165,250,0.15);
+}
+
+.showcase-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.showcase-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.3;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.showcase-dot.active {
+  background: var(--blue);
+  opacity: 1;
+  box-shadow: 0 0 6px rgba(96,165,250,0.4);
+}
+
+.showcase-counter {
+  font-family: var(--font-mono);
+}
+
+/* ── Footer ─────────────────────────────────── */
+.footer {
+  margin-top: 2rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.65rem; color: var(--text-3);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.footer .last-poll { opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- Header -->
+  <header class="header">
+    <div class="orb-wrap">
+      <div class="orb" id="orb"></div>
+      <div class="orb-ring"></div>
+    </div>
+    <div class="header-text">
+      <h1>Caption Pipeline</h1>
+    </div>
+    <div class="header-meta">
+      <div class="status-pill" id="statusPill">
+        <span class="status-dot"></span>
+        <span id="statusLabel">Idle</span>
+      </div>
+      <div class="model-pill" id="modelPill">---</div>
+    </div>
+  </header>
+
+  <!-- Error banner -->
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- Controls -->
+  <div class="controls" id="controlsPanel">
+    <div class="controls-toggle" onclick="window.__toggleControls()">
+      <span>Pipeline Controls</span>
+      <span class="controls-chevron">&#9656;</span>
+    </div>
+    <div class="controls-body">
+      <div class="ctrl-row">
+        <div class="ctrl-field">
+          <label>Gemini API Key</label>
+          <input type="password" id="ctrlApiKey" class="wide" placeholder="AIza...">
+        </div>
+        <div class="ctrl-field">
+          <label>OpenRouter Key</label>
+          <input type="password" id="ctrlOpenRouterKey" class="wide" placeholder="sk-or-... (for fallback)">
+        </div>
+        <div class="ctrl-field">
+          <label>Model</label>
+          <input type="text" id="ctrlModel" value="gemini-3-flash-preview" style="width:180px">
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-field">
+          <label>Limit (scenes)</label>
+          <input type="number" id="ctrlLimit" placeholder="all" min="1">
+        </div>
+        <div class="ctrl-field">
+          <label>Max Cost ($)</label>
+          <input type="number" id="ctrlMaxCost" placeholder="no cap" min="0.01" step="0.50">
+        </div>
+        <div class="ctrl-field">
+          <label>Workers</label>
+          <input type="number" id="ctrlWorkers" value="10" min="1" max="50">
+        </div>
+        <div class="ctrl-field">
+          <label>Max Frames</label>
+          <input type="number" id="ctrlMaxFrames" value="20" min="1" max="2048">
+        </div>
+        <div class="ctrl-field">
+          <label>Temperature</label>
+          <input type="number" id="ctrlTemp" value="1.0" min="0" max="2" step="0.1">
+        </div>
+        <div class="ctrl-field" style="flex-direction:row; align-items:center; gap:8px; margin-top:6px">
+          <input type="checkbox" id="ctrlSkipGemini">
+          <label for="ctrlSkipGemini" style="font-size:.85rem; opacity:.8; cursor:pointer">Skip Gemini fallback (go straight to OpenRouter)</label>
+        </div>
+        <div class="ctrl-actions">
+          <button class="btn-launch" id="btnLaunch" onclick="window.__launch()">
+            <span class="btn-icon">&#9654;</span> Launch
+          </button>
+          <button class="btn-launch btn-retry" id="btnRetry" onclick="window.__retryErrors()">
+            <span class="btn-icon">&#8635;</span> Retry Errors
+          </button>
+          <button class="btn-stop" id="btnStop" onclick="window.__stop()" disabled>
+            <span class="btn-icon">&#9632;</span> Stop
+          </button>
+        </div>
+      </div>
+      <div class="log-section">
+        <div class="log-header">
+          <span class="log-title">Runner Output</span>
+          <span id="logPid" style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-3)"></span>
+        </div>
+        <div class="log-output" id="logOutput">No output yet.</div>
+      </div>
+      <!-- Batch Jobs Section -->
+      <div class="batch-section" id="batchSection">
+        <h3>Batch Jobs <span class="batch-discount">50% off</span></h3>
+        <div class="batch-controls">
+          <label style="color:var(--text-2);font-size:0.75rem;display:flex;align-items:center;gap:6px;">
+            Scenes
+            <input type="number" id="batchSceneLimit" value="10" min="0" step="5"
+              style="width:60px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 6px;color:var(--text);font-size:0.75rem;font-family:var(--font-mono);"
+              title="0 = all pending scenes">
+          </label>
+          <button class="btn btn-batch" id="btnSubmitBatch" onclick="submitBatch()">
+            Submit Batch
+          </button>
+          <span class="batch-status-summary" id="batchSummary"></span>
+        </div>
+        <div class="batch-jobs-list" id="batchJobsList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Metrics -->
+  <div class="metrics" id="metricsGrid">
+    <div class="metric" data-color="blue" id="metricCost">
+      <div class="metric-label">Cost</div>
+      <div class="metric-value">$<span id="valCost">0.00</span></div>
+      <div class="metric-sub" id="subCost">no cap</div>
+      <div class="metric-bar"><div class="metric-bar-fill" id="barCost" style="width:0%"></div></div>
+    </div>
+    <div class="metric" data-color="green" id="metricScenes">
+      <div class="metric-label">Scenes</div>
+      <div class="metric-value"><span id="valScenes">0</span></div>
+      <div class="metric-sub" id="subScenes">of 0</div>
+      <div class="metric-bar"><div class="metric-bar-fill" id="barScenes" style="width:0%"></div></div>
+    </div>
+    <div class="metric" data-color="cyan" id="metricFrames">
+      <div class="metric-label">Frames</div>
+      <div class="metric-value"><span id="valFrames">0</span></div>
+      <div class="metric-sub" id="subFrames">of 0</div>
+      <div class="metric-bar"><div class="metric-bar-fill" id="barFrames" style="width:0%"></div></div>
+    </div>
+    <div class="metric" data-color="purple" id="metricRPM">
+      <div class="metric-label">RPD Used</div>
+      <div class="metric-value"><span id="valRPD">0</span></div>
+      <div class="metric-sub" id="subRPD">lim 9,500</div>
+      <div class="metric-bar"><div class="metric-bar-fill" id="barRPD" style="width:0%"></div></div>
+    </div>
+    <div class="metric" data-color="amber" id="metricTPM">
+      <div class="metric-label">Input Tokens</div>
+      <div class="metric-value"><span id="valInTok">0</span></div>
+      <div class="metric-sub" id="subInTok">&nbsp;</div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width:0%"></div></div>
+    </div>
+    <div class="metric" data-color="red" id="metricErrors">
+      <div class="metric-label">API Errors</div>
+      <div class="metric-value"><span id="valErrors">0</span></div>
+      <div class="metric-sub" id="subErrors">&nbsp;</div>
+      <div class="metric-bar"><div class="metric-bar-fill" id="barErrors" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="progress-section">
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+    <div class="progress-info">
+      <span class="progress-pct" id="progressPct">0.00%</span>
+      <span class="sep">&middot;</span>
+      <span id="progressEta">ETA: ---</span>
+      <span class="sep">&middot;</span>
+      <span id="progressRate">--- frames/min</span>
+      <span class="sep" id="errorSep" style="display:none">&middot;</span>
+      <span class="progress-errors" id="progressErrors" style="display:none"></span>
+    </div>
+  </div>
+
+  <!-- Errors Panel -->
+  <div class="errors-panel" id="errorsPanel">
+    <div class="errors-toggle" onclick="window.__toggleErrors()">
+      <div class="errors-toggle-left">
+        <span>Errored Frames</span>
+        <span class="errors-badge zero" id="errorsBadge">0</span>
+      </div>
+      <span class="errors-chevron">&#9656;</span>
+    </div>
+    <div class="errors-body">
+      <div class="errors-summary" id="errorsSummary"></div>
+      <div class="errors-list" id="errorsList">
+        <div class="empty-state" style="padding:1.5rem">
+          <div style="color:var(--text-3);font-size:0.75rem">No errors</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Caption Showcase -->
+  <div class="showcase-section" id="showcaseSection" style="display:none">
+    <div class="section-head">
+      <span class="section-title">Caption Showcase</span>
+    </div>
+    <div class="showcase-stage">
+      <div class="showcase-image-wrap">
+        <img class="showcase-img layer-a visible" id="showcaseImgA" src="" alt="">
+        <img class="showcase-img layer-b hidden" id="showcaseImgB" src="" alt="">
+        <button class="showcase-nav prev" onclick="window.__showcasePrev()">&#9664;</button>
+        <button class="showcase-nav next" onclick="window.__showcaseNext()">&#9654;</button>
+      </div>
+      <div class="showcase-caption-area" id="showcaseCaption"></div>
+      <div class="showcase-footer">
+        <span class="showcase-scene-tag" id="showcaseSceneTag"></span>
+        <div class="showcase-dots" id="showcaseDots"></div>
+        <span class="showcase-counter" id="showcaseCounter"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unified Scenes Section -->
+  <div class="scenes-section" id="scenesSection">
+    <div class="section-head">
+      <div class="section-title-group">
+        <span class="section-title">Scenes</span>
+        <span class="active-count" id="activeCount" style="display:none"></span>
+      </div>
+      <div class="scene-count-control">
+        <span id="sceneCountLabel">50 scenes</span>
+        <input type="range" min="10" max="200" step="10" value="50" id="sceneSlider">
+      </div>
+    </div>
+
+    <div class="scenes active-scenes" id="activeContainer" style="display:none"></div>
+
+    <div class="scenes-divider" id="scenesDivider" style="display:none">
+      <span class="divider-line"></span>
+      <span class="divider-label">Completed</span>
+      <span class="divider-line"></span>
+    </div>
+
+    <div class="scenes" id="scenesContainer">
+      <div class="empty-state">
+        <div class="empty-icon">&#9678;</div>
+        <div>Waiting for data&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>Caption Pipeline Dashboard</span>
+    <span class="last-poll"> &middot; Last poll: <span id="lastPoll">---</span></span>
+  </div>
+</div>
+
+<!-- Frame hover tooltip -->
+<div class="frame-tooltip" id="frameTooltip"></div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox">
+  <div class="lightbox-content">
+    <img id="lightboxImg" src="" alt="">
+    <div class="lightbox-caption" id="lightboxCaption"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ── State ──────────────────────────────────────
+  let statusData = null;
+  let activeData = [];         // in-progress scenes
+  let completedData = [];      // completed scenes
+  let prevActiveIds = new Set();   // track active→completed transitions
+  let justCompletedIds = new Set(); // scenes that just finished (green glow)
+  let expandedScene = null;
+  let sceneFramesCache = {};
+  let pollStartTime = null;
+  let initialFrames = null;
+  let errorCount = 0;        // Fast count from /api/error-count (lightweight)
+  let errorsPageSize = 100;  // How many errors to load per page
+
+  let sceneFrameEvents = {};   // scene_id -> [{frame, status, caption}, ...] (last 16 per scene)
+
+  // Showcase state
+  let showcaseFrames = [];
+  let showcaseIndex = 0;
+  let showcaseTimer = null;
+  let showcaseActiveLayer = 'a'; // 'a' or 'b' — which img layer is visible
+
+  // WebSocket state
+  let ws = null;
+  let wsConnected = false;
+  let wsBackoff = 1000;      // Reconnect backoff (ms), doubles up to 30s
+  let wsReconnectTimer = null;
+  let pollTimers = {};        // interval IDs for HTTP polling
+
+  // ── DOM refs ───────────────────────────────────
+  const $ = (sel) => document.querySelector(sel);
+  const orb = $('#orb');
+  const statusPill = $('#statusPill');
+  const statusLabel = $('#statusLabel');
+  const modelPill = $('#modelPill');
+  const errorBanner = $('#errorBanner');
+  const scenesContainer = $('#scenesContainer');
+  const activeContainer = $('#activeContainer');
+  const activeCountEl = $('#activeCount');
+  const scenesDivider = $('#scenesDivider');
+  const lightbox = $('#lightbox');
+  const lightboxImg = $('#lightboxImg');
+  const sceneSlider = $('#sceneSlider');
+  const sceneCountLabel = $('#sceneCountLabel');
+
+  // ── Formatting helpers ─────────────────────────
+  function fmt(n) {
+    if (n == null) return '0';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+    if (n >= 10_000) return (n / 1_000).toFixed(1) + 'K';
+    return n.toLocaleString();
+  }
+
+  function fmtCost(n) {
+    if (n == null) return '0.00';
+    return n.toFixed(2);
+  }
+
+  function pct(a, b) {
+    if (!b) return 0;
+    return Math.min(100, (a / b) * 100);
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+
+  // ── API Fetch ──────────────────────────────────
+  async function fetchJSON(url) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  }
+
+  // ── WebSocket ─────────────────────────────────
+  function connectWS() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+    ws.onopen = () => {
+      wsConnected = true;
+      wsBackoff = 1000;
+      stopPolling();
+      errorBanner.classList.remove('show');
+    };
+
+    ws.onmessage = (evt) => {
+      try { dispatchWS(JSON.parse(evt.data)); }
+      catch (_) {}
+    };
+
+    ws.onclose = () => {
+      wsConnected = false;
+      ws = null;
+      startPolling();
+      // Exponential backoff reconnect
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        connectWS();
+      }, wsBackoff);
+      wsBackoff = Math.min(wsBackoff * 2, 30000);
+    };
+
+    ws.onerror = () => {
+      // onclose fires after onerror, so reconnect is handled there
+    };
+  }
+
+  function wsSend(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+      return true;
+    }
+    return false;
+  }
+
+  function dispatchWS(msg) {
+    const t = msg.type;
+    const d = msg.data;
+
+    if (t === 'init') {
+      // Full state snapshot — split channels
+      statusData = d.status;
+      errorCount = d.error_count;
+      renderStatus(statusData);
+      activeData = (d.active_scenes && d.active_scenes.scenes) || [];
+      completedData = (d.completed_scenes && d.completed_scenes.scenes) || [];
+      prevActiveIds = new Set(activeData.map(s => s.scene_id));
+      renderActiveScenes();
+      renderCompletedScenes();
+      updateRunnerUI(d.runner);
+      updateLogUI((d.log && d.log.lines) || []);
+      updateErrorsBadge();
+      loadShowcase();
+      // Seed frame events from initial snapshot
+      const initFrameEvents = (d.frame_events && d.frame_events.events) || [];
+      initFrameEvents.forEach(evt => {
+        const sid = evt.scene_id;
+        if (!sid) return;
+        if (!sceneFrameEvents[sid]) sceneFrameEvents[sid] = [];
+        sceneFrameEvents[sid].push(evt);
+        animateFrameIn(sid, evt);
+      });
+    } else if (t === 'status') {
+      statusData = d;
+      renderStatus(d);
+    } else if (t === 'error_count') {
+      errorCount = d.count || 0;
+      updateErrorsBadge();
+      setMetric('valErrors', fmt(errorCount));
+    } else if (t === 'active_scenes') {
+      const newActive = (d && d.scenes) || [];
+      // Detect transitions: scenes that were active but are no longer
+      const newActiveIds = new Set(newActive.map(s => s.scene_id));
+      const justFinished = [...prevActiveIds].filter(id => !newActiveIds.has(id));
+      if (justFinished.length) {
+        justFinished.forEach(id => justCompletedIds.add(id));
+      }
+      prevActiveIds = newActiveIds;
+      activeData = newActive;
+      renderActiveScenes();
+    } else if (t === 'completed_scenes') {
+      completedData = (d && d.scenes) || [];
+      renderCompletedScenes();
+    } else if (t === 'runner') {
+      updateRunnerUI(d);
+    } else if (t === 'log') {
+      updateLogUI((d && d.lines) || []);
+    } else if (t === 'errors') {
+      handleErrorsResponse(d);
+    } else if (t === 'scene_frames') {
+      const sid = d.scene_id;
+      sceneFramesCache[sid] = d.frames || [];
+      if (expandedScene === sid) {
+        const container = document.getElementById('detail-' + sid);
+        if (container) renderDetail(container, d.frames || []);
+        const strip = document.getElementById('filmstrip-' + sid);
+        if (strip && !strip.children.length) {
+          populateCompletedFilmstrip(strip, d.frames || []);
+        }
+      }
+    } else if (t === 'frame_events') {
+      const events = (d && d.events) || [];
+      events.forEach(evt => {
+        const sid = evt.scene_id;
+        if (!sid) return;
+        if (!sceneFrameEvents[sid]) sceneFrameEvents[sid] = [];
+        sceneFrameEvents[sid].push(evt);
+        animateFrameIn(sid, evt);
+      });
+    }
+    $('#lastPoll').textContent = new Date().toLocaleTimeString();
+  }
+
+  function updateErrorsBadge() {
+    const badge = $('#errorsBadge');
+    badge.textContent = errorCount || 0;
+    badge.classList.toggle('zero', errorCount === 0);
+    $('#errorsPanel').classList.toggle('has-errors', errorCount > 0);
+  }
+
+  // ── Polling control ───────────────────────────
+  function startPolling() {
+    if (wsConnected) return;  // WS active, no polling needed
+    if (pollTimers.status) return;  // Already polling
+    pollStatus();
+    pollScenes();
+    pollTimers.status = setInterval(pollStatus, 2000);
+    pollTimers.scenes = setInterval(pollScenes, 5000);
+    pollTimers.errors = setInterval(() => {
+      if (!errorsPollTimer && errorsPanel.classList.contains('open')) pollErrors();
+    }, 15000);
+  }
+
+  function stopPolling() {
+    Object.keys(pollTimers).forEach(k => {
+      clearInterval(pollTimers[k]);
+      delete pollTimers[k];
+    });
+  }
+
+  // ── Status polling ─────────────────────────────
+  async function pollStatus() {
+    try {
+      const [status, ec] = await Promise.all([
+        fetchJSON('/api/status'),
+        fetchJSON('/api/error-count'),
+      ]);
+      statusData = status;
+      errorCount = ec.count || 0;
+      renderStatus(statusData);
+      errorBanner.classList.remove('show');
+    } catch (e) {
+      errorBanner.textContent = 'Connection lost: ' + e.message;
+      errorBanner.classList.add('show');
+    }
+    $('#lastPoll').textContent = new Date().toLocaleTimeString();
+  }
+
+  // Animate metric value changes with a brief flash
+  function setMetric(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const prev = el.textContent;
+    el.textContent = value;
+    if (prev !== value && prev !== '0') {
+      el.classList.remove('updated');
+      void el.offsetWidth; // force reflow to restart animation
+      el.classList.add('updated');
+      el.addEventListener('animationend', () => el.classList.remove('updated'), { once: true });
+    }
+  }
+
+  function renderStatus(d) {
+    const b = d.budget;
+    const p = d.progress;
+
+    // Runner active
+    const active = d.runner_active;
+    orb.classList.toggle('active', active);
+    statusPill.classList.toggle('active', active);
+    statusLabel.textContent = active ? 'Running' : 'Idle';
+    modelPill.textContent = d.pricing?.model || '---';
+
+    // Metrics
+    setMetric('valCost', fmtCost(b.total_cost));
+    if (b.max_cost) {
+      $('#subCost').textContent = 'of $' + fmtCost(b.max_cost);
+      $('#barCost').style.width = pct(b.total_cost, b.max_cost) + '%';
+    } else {
+      $('#subCost').textContent = 'no cap';
+      $('#barCost').style.width = '0%';
+    }
+
+    setMetric('valScenes', fmt(p.completed_scenes));
+    $('#subScenes').textContent = 'of ' + fmt(p.total_scenes);
+    $('#barScenes').style.width = pct(p.completed_scenes, p.total_scenes) + '%';
+
+    setMetric('valFrames', fmt(p.total_frames_captioned));
+    $('#subFrames').textContent = 'of ' + fmt(p.estimated_total_frames);
+    $('#barFrames').style.width = pct(p.total_frames_captioned, p.estimated_total_frames) + '%';
+
+    setMetric('valRPD', fmt(b.rpd_count));
+    const rpdLim = d.rate_limits?.rpd_limit || 9500;
+    $('#subRPD').textContent = 'lim ' + fmt(rpdLim);
+    $('#barRPD').style.width = pct(b.rpd_count, rpdLim) + '%';
+
+    setMetric('valInTok', fmt(b.total_input_tokens));
+    $('#subInTok').textContent = fmt(b.total_output_tokens) + ' out';
+
+    // Active errors from fast /api/error-count (reads only file headers, not content)
+    setMetric('valErrors', fmt(errorCount));
+    const errSub = errorCount > 0
+      ? errorCount + ' file' + (errorCount > 1 ? 's' : '') + ' on disk'
+      : (b.total_errors > 0 ? fmt(b.total_errors) + ' total (all fixed)' : '');
+    $('#subErrors').textContent = errSub;
+    if (b.total_calls) {
+      $('#barErrors').style.width = Math.min(100, (errorCount / b.total_calls) * 100) + '%';
+    }
+
+    // Progress bar
+    const framePct = p.estimated_total_frames
+      ? (p.total_frames_captioned / p.estimated_total_frames) * 100
+      : 0;
+    $('#progressFill').style.width = Math.min(100, framePct) + '%';
+    $('#progressPct').textContent = framePct.toFixed(2) + '%';
+
+    // ETA calc
+    if (active && p.total_frames_captioned > 0) {
+      if (!pollStartTime) {
+        pollStartTime = Date.now();
+        initialFrames = p.total_frames_captioned;
+      }
+      const elapsed = (Date.now() - pollStartTime) / 1000;
+      const done = p.total_frames_captioned - (initialFrames || 0);
+      if (done > 0 && elapsed > 10) {
+        const rate = done / (elapsed / 60);
+        const remaining = p.estimated_total_frames - p.total_frames_captioned;
+        const etaMin = remaining / rate;
+        $('#progressRate').textContent = rate.toFixed(1) + ' frames/min';
+        if (etaMin < 60) {
+          $('#progressEta').textContent = 'ETA: ' + Math.ceil(etaMin) + 'm';
+        } else {
+          const h = Math.floor(etaMin / 60);
+          const m = Math.ceil(etaMin % 60);
+          $('#progressEta').textContent = 'ETA: ' + h + 'h ' + m + 'm';
+        }
+      }
+    } else {
+      pollStartTime = null;
+      initialFrames = null;
+      $('#progressEta').textContent = 'ETA: ---';
+      $('#progressRate').textContent = '--- frames/min';
+    }
+
+    // Errors badge and progress bar driven by fast /api/error-count
+    if (errorCount > 0) {
+      $('#errorSep').style.display = '';
+      $('#progressErrors').style.display = '';
+      $('#progressErrors').textContent = errorCount + ' error' + (errorCount > 1 ? 's' : '');
+    } else {
+      $('#errorSep').style.display = 'none';
+      $('#progressErrors').style.display = 'none';
+    }
+  }
+
+  // ── Scenes polling ─────────────────────────────
+  async function pollScenes() {
+    try {
+      const n = sceneSlider.value;
+      const data = await fetchJSON('/api/scenes?n=' + n);
+      const all = data.scenes || [];
+      // Split combined HTTP response into active/completed
+      activeData = all.filter(s => s.in_progress);
+      completedData = all.filter(s => !s.in_progress);
+      // Detect transitions for just-completed highlights
+      const newActiveIds = new Set(activeData.map(s => s.scene_id));
+      const justFinished = [...prevActiveIds].filter(id => !newActiveIds.has(id));
+      if (justFinished.length) {
+        justFinished.forEach(id => justCompletedIds.add(id));
+      }
+      prevActiveIds = newActiveIds;
+      renderActiveScenes();
+      renderCompletedScenes();
+    } catch (_) {}
+  }
+
+  function getLastGoodCaption(sampleFrames) {
+    if (!sampleFrames || !sampleFrames.length) return '';
+    for (let i = sampleFrames.length - 1; i >= 0; i--) {
+      const item = sampleFrames[i];
+      const cap = typeof item === 'string' ? '' : (item.caption || '');
+      if (cap && !cap.startsWith('[ERROR')) return cap;
+    }
+    return '';
+  }
+
+  function buildFilmstripHTML(sampleFrames, frameCount, isNew) {
+    const items = (sampleFrames || []).slice(0, 16);
+
+    // Horizontal filmstrip mode (completed cards only)
+    const frames = items.map((item, i) => {
+      const fname = typeof item === 'string' ? item : item.frame;
+      const caption = typeof item === 'string' ? '' : (item.caption || '');
+      const isError = caption.startsWith('[ERROR');
+      const statusClass = caption ? (isError ? 'error' : 'ok') : 'ok';
+      const statusIcon = isError ? '\u2717' : '\u2713';
+      const captionAttr = caption ? ` data-caption="${escHTML(caption)}"` : '';
+      return `<div class="scene-filmstrip-frame${isNew ? ' new' : ''}" data-frame="${escHTML(fname)}"${captionAttr} style="${isNew ? 'animation-delay:' + (i * 60) + 'ms' : ''}">
+        <img src="/assets/lora_dataset/images/${encodeURIComponent(fname)}" alt="${escHTML(fname)}" loading="lazy"
+             onclick="event.stopPropagation(); window.__lightbox('/assets/lora_dataset/images/${encodeURIComponent(fname)}', this.parentElement.dataset.caption)">
+        <span class="frame-status ${statusClass}">${statusIcon}</span>
+      </div>`;
+    }).join('');
+    const overflow = frameCount > 16
+      ? `<span class="scene-filmstrip-overflow">+${frameCount - 16}</span>`
+      : '';
+    return frames + overflow;
+  }
+
+  function buildSceneCardHTML(s, i) {
+    const isExpanded = expandedScene === s.scene_id;
+    const isInProgress = !!s.in_progress;
+
+    // Progress bar calculations
+    const errCount = s.error_count || 0;
+    const captionedCount = s.captioned_count || 0;
+    const total = s.frame_count || 1;
+    const pctVal = (captionedCount + errCount) / total * 100;
+    const hasErrors = errCount > 0;
+    const okPct = total ? captionedCount / (captionedCount + errCount) * 100 : 100;
+
+    const progressHTML = `<div class="scene-progress">
+      <div class="scene-progress-track">
+        <div class="scene-progress-fill${hasErrors ? ' has-errors' : ''}" style="width:${pctVal.toFixed(1)}%${hasErrors ? ';--ok-pct:' + okPct.toFixed(1) + '%' : ''}"></div>
+      </div>
+      <div class="scene-progress-label">${captionedCount}/${total}${errCount ? ' <span class="err">' + errCount + ' err</span>' : ''}</div>
+    </div>`;
+
+    // Filmstrip HTML — completed cards use horizontal strip
+    const filmstripHTML = buildFilmstripHTML(s.sample_frames, s.frame_count, false);
+
+    // Card classes
+    const cardClasses = ['scene-card'];
+    if (isExpanded) cardClasses.push('expanded');
+    if (isInProgress) {
+      cardClasses.push('in-progress');
+    } else {
+      cardClasses.push('completed');
+    }
+
+    // Caption preview: last non-error caption from sample_frames
+    const lastCaption = getLastGoodCaption(s.sample_frames);
+
+    if (isInProgress) {
+      // ── Active card with filmstrip ──
+      const activeTag = s.retrying
+        ? `<span class="tag tag-active" style="--tag-accent:var(--accent-amber,#f59e0b)">retrying\u2026</span>`
+        : `<span class="tag tag-active">captioning\u2026</span>`;
+
+      // Build filmstrip frames from frame_statuses
+      const statuses = s.frame_statuses || [];
+      const filmstripFrames = statuses.map(fs => {
+        const imgSrc = '/assets/lora_dataset/images/' + encodeURIComponent(fs.frame);
+        const caption = fs.caption || '';
+        const captionAttr = caption ? ` data-caption="${escHTML(caption)}"` : '';
+        return `<div class="scene-filmstrip-frame ${fs.status}" data-frame="${escHTML(fs.frame)}"${captionAttr}>
+          <img src="${imgSrc}" alt="${escHTML(fs.frame)}" loading="lazy"
+               onclick="event.stopPropagation(); window.__lightbox('${imgSrc}', this.parentElement.dataset.caption || '')">
+          <span class="frame-status ${fs.status}">${fs.status === 'ok' ? '\u2713' : fs.status === 'error' ? '\u2717' : '\u22ef'}</span>
+        </div>`;
+      }).join('');
+
+      const latestCaption = s.latest_caption || '';
+
+      return `<div class="${cardClasses.join(' ')}" data-scene="${s.scene_id}" style="animation-delay:${Math.min(i * 30, 300)}ms">
+        <div class="scene-card-head" onclick="window.__toggleScene(${s.scene_id})">
+          <span class="scene-id">Scene ${s.scene_id}</span>
+          <div class="scene-meta">
+            <span class="tag tag-frames">${s.frame_count} frames</span>
+            ${activeTag}
+          </div>
+          <span class="scene-chevron">&#9656;</span>
+        </div>
+        ${progressHTML}
+        <div class="scene-filmstrip" id="filmstrip-${s.scene_id}">${filmstripFrames}</div>
+        <div class="scene-caption-preview" id="caption-${s.scene_id}">
+          <span class="caption-label">Latest</span>
+          <span class="caption-text">${escHTML(latestCaption)}</span>
+        </div>
+        <div class="scene-detail" id="detail-${s.scene_id}"></div>
+      </div>`;
+    } else {
+      // ── Completed card ──
+      const okCount = s.frame_count - errCount;
+      const statusPill = hasErrors
+        ? `<span class="scene-status-pill ok">${okCount} ok</span> <span class="scene-status-pill err">${errCount} err</span>`
+        : `<span class="scene-status-pill ok">${s.frame_count} ok</span>`;
+
+      return `<div class="${cardClasses.join(' ')}" data-scene="${s.scene_id}" style="animation-delay:${Math.min(i * 30, 300)}ms">
+        <div class="scene-card-head" onclick="window.__toggleScene(${s.scene_id})">
+          <span class="scene-id">Scene ${s.scene_id}</span>
+          <div class="scene-meta">
+            <span class="tag tag-frames">${s.frame_count} frames</span>
+            ${statusPill}
+            <span class="tag tag-time">${timeAgo(s.captioned_at)}</span>
+          </div>
+          <span class="scene-chevron">&#9656;</span>
+        </div>
+        ${progressHTML}
+        <div class="scene-filmstrip" id="filmstrip-${s.scene_id}">${filmstripHTML}</div>
+        <div class="scene-caption-preview" id="caption-${s.scene_id}">
+          <span class="caption-label">Caption</span>
+          <span class="caption-text">${escHTML(lastCaption)}</span>
+        </div>
+        <div class="scene-detail" id="detail-${s.scene_id}"></div>
+      </div>`;
+    }
+  }
+
+  // ── Active scenes (top of unified section) ───
+  function renderActiveScenes() {
+    const hasActive = activeData.length > 0;
+    const hasCompleted = completedData.length > 0;
+
+    activeContainer.style.display = hasActive ? '' : 'none';
+    activeCountEl.style.display = hasActive ? '' : 'none';
+    scenesDivider.style.display = (hasActive && hasCompleted) ? '' : 'none';
+
+    if (!hasActive) return;
+    activeCountEl.textContent = activeData.length + ' scene' + (activeData.length !== 1 ? 's' : '');
+
+    // Check if scene list changed (by comparing scene IDs)
+    const incomingIds = activeData.map(s => String(s.scene_id));
+    const existingCards = activeContainer.querySelectorAll('.scene-card[data-scene]');
+    const existingIds = Array.from(existingCards).map(c => c.dataset.scene);
+    const listChanged = incomingIds.length !== existingIds.length
+      || incomingIds.some((id, i) => id !== existingIds[i]);
+
+    if (listChanged) {
+      // Full rebuild
+      activeContainer.innerHTML = activeData.map((s, i) => buildSceneCardHTML(s, i)).join('');
+      // Trigger latest caption from cached events
+      activeData.forEach(s => {
+        const captions = (sceneFrameEvents[s.scene_id] || []).map(e => e.caption).filter(Boolean);
+        if (captions.length) updateLatestCaption(s.scene_id, captions);
+      });
+    } else {
+      // In-place update: progress bars only (minimap updates come from frame_events)
+      activeData.forEach(s => {
+        const card = activeContainer.querySelector(`.scene-card[data-scene="${s.scene_id}"]`);
+        if (!card) return;
+        updateCardProgress(card, s);
+      });
+    }
+  }
+
+  // ── Completed scenes (below divider) ────────────
+  function renderCompletedScenes() {
+    const hasActive = activeData.length > 0;
+    const hasCompleted = completedData.length > 0;
+    scenesDivider.style.display = (hasActive && hasCompleted) ? '' : 'none';
+
+    completedData.sort((a, b) => a.scene_id - b.scene_id);
+    if (!completedData.length) {
+      scenesContainer.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">&#9678;</div>
+        <div>No scenes captioned yet</div>
+      </div>`;
+      return;
+    }
+
+    // Build a set of incoming scene IDs (in order)
+    const incomingIds = completedData.map(s => String(s.scene_id));
+    const existingCards = scenesContainer.querySelectorAll('.scene-card[data-scene]');
+    const existingMap = new Map();
+    existingCards.forEach(card => existingMap.set(card.dataset.scene, card));
+
+    // If the scene list changed (new scenes added, order changed), do a full rebuild.
+    // Otherwise, just update the mutable parts in-place.
+    const existingIds = Array.from(existingMap.keys());
+    const listChanged = incomingIds.length !== existingIds.length
+      || incomingIds.some((id, i) => id !== existingIds[i]);
+
+    if (listChanged) {
+      // Full rebuild — but preserve expanded detail panels
+      const preservedDetails = {};
+      if (expandedScene != null) {
+        const detailEl = document.getElementById('detail-' + expandedScene);
+        if (detailEl && detailEl.innerHTML) {
+          preservedDetails[expandedScene] = detailEl.innerHTML;
+        }
+      }
+
+      scenesContainer.innerHTML = completedData.map((s, i) => {
+        let html = buildSceneCardHTML(s, i);
+        // Apply just-completed highlight for scenes that transitioned
+        if (justCompletedIds.has(s.scene_id)) {
+          html = html.replace('class="scene-card', 'class="scene-card just-completed');
+        }
+        return html;
+      }).join('');
+
+      // Schedule removal of just-completed class after 3s
+      if (justCompletedIds.size > 0) {
+        const idsToRemove = new Set(justCompletedIds);
+        setTimeout(() => {
+          idsToRemove.forEach(id => {
+            justCompletedIds.delete(id);
+            const card = scenesContainer.querySelector(`.scene-card[data-scene="${id}"]`);
+            if (card) card.classList.remove('just-completed');
+          });
+        }, 3000);
+      }
+
+      // Restore expanded detail
+      if (expandedScene != null && preservedDetails[expandedScene]) {
+        const detailEl = document.getElementById('detail-' + expandedScene);
+        if (detailEl) detailEl.innerHTML = preservedDetails[expandedScene];
+      }
+    } else {
+      // In-place update: touch mutable fields (time, progress, status pills)
+      completedData.forEach((s, i) => {
+        const card = existingMap.get(String(s.scene_id));
+        if (!card) return;
+
+        // Update time tag
+        const timeTag = card.querySelector('.tag-time');
+        if (timeTag) timeTag.textContent = timeAgo(s.captioned_at);
+
+        // Update frame count tag
+        const framesTag = card.querySelector('.tag-frames');
+        if (framesTag) framesTag.textContent = s.frame_count + ' frames';
+
+        // Update status pills
+        const errCount = s.error_count || 0;
+        const okCount = s.frame_count - errCount;
+        const hasErrors = errCount > 0;
+        const meta = card.querySelector('.scene-meta');
+        if (meta) {
+          const oldPills = meta.querySelectorAll('.scene-status-pill');
+          oldPills.forEach(p => p.remove());
+          // Insert pills before the time tag
+          const timeTg = meta.querySelector('.tag-time');
+          if (hasErrors) {
+            const okPill = document.createElement('span');
+            okPill.className = 'scene-status-pill ok';
+            okPill.textContent = okCount + ' ok';
+            const errPill = document.createElement('span');
+            errPill.className = 'scene-status-pill err';
+            errPill.textContent = errCount + ' err';
+            if (timeTg) {
+              meta.insertBefore(errPill, timeTg);
+              meta.insertBefore(okPill, errPill);
+            } else {
+              meta.appendChild(okPill);
+              meta.appendChild(errPill);
+            }
+          } else {
+            const okPill = document.createElement('span');
+            okPill.className = 'scene-status-pill ok';
+            okPill.textContent = s.frame_count + ' ok';
+            if (timeTg) meta.insertBefore(okPill, timeTg);
+            else meta.appendChild(okPill);
+          }
+        }
+
+        // Update progress bar
+        const okPct = s.frame_count ? (okCount / s.frame_count * 100) : 100;
+        const captionedCount = s.captioned_count || s.frame_count;
+        const total = s.frame_count || 1;
+        const pctVal = (captionedCount + errCount) / total * 100;
+        const fillStyle = `width:${pctVal.toFixed(1)}%${hasErrors ? ';--ok-pct:' + (total ? captionedCount / (captionedCount + errCount) * 100 : 100).toFixed(1) + '%' : ''}`;
+        const progressLabel = `${captionedCount}/${total}${errCount ? ' <span class="err">' + errCount + ' err</span>' : ''}`;
+
+        const fill = card.querySelector('.scene-progress-fill');
+        if (fill) {
+          fill.classList.toggle('has-errors', hasErrors);
+          fill.style.cssText = fillStyle;
+        }
+
+        const label = card.querySelector('.scene-progress-label');
+        if (label) label.innerHTML = progressLabel;
+      });
+    }
+  }
+
+  // ── Frame animation helpers ────────────────────
+
+  function updateLatestCaption(sceneId, captions) {
+    const captionEl = document.querySelector(`#caption-${sceneId} .caption-text`);
+    if (!captionEl) return;
+    // Show last non-error caption
+    const lastGood = [...captions].reverse().find(c => c && !c.startsWith('[ERROR'));
+    const text = lastGood || captions[captions.length - 1] || '';
+    if (captionEl.textContent !== text) {
+      captionEl.textContent = text;
+      captionEl._originalText = text; // Store for tooltip hover revert
+      captionEl.classList.remove('fade-in');
+      void captionEl.offsetWidth; // force reflow to restart animation
+      captionEl.classList.add('fade-in');
+      captionEl.addEventListener('animationend', () => captionEl.classList.remove('fade-in'), { once: true });
+    }
+  }
+
+  function updateCardProgress(card, s) {
+    const errCount = s.error_count || 0;
+    const captionedCount = s.captioned_count || 0;
+    const total = s.frame_count || 1;
+    const pctVal = (captionedCount + errCount) / total * 100;
+    const hasErrors = errCount > 0;
+
+    const fill = card.querySelector('.scene-progress-fill');
+    if (fill) {
+      fill.classList.toggle('has-errors', hasErrors);
+      const okPct = (captionedCount + errCount) > 0 ? captionedCount / (captionedCount + errCount) * 100 : 100;
+      fill.style.width = pctVal.toFixed(1) + '%';
+      if (hasErrors) {
+        fill.style.setProperty('--ok-pct', okPct.toFixed(1) + '%');
+      } else {
+        fill.style.removeProperty('--ok-pct');
+      }
+    }
+
+    const label = card.querySelector('.scene-progress-label');
+    if (label) {
+      label.innerHTML = captionedCount + '/' + total + (errCount ? ' <span class="err">' + errCount + ' err</span>' : '');
+    }
+
+    const framesTag = card.querySelector('.tag-frames');
+    if (framesTag) framesTag.textContent = s.frame_count + ' frames';
+  }
+
+  /** Build the inner HTML for a single filmstrip frame element. */
+  function _buildFrameContent(frameName, status, caption) {
+    const statusIcon = status === 'ok' ? '\u2713' : status === 'error' ? '\u2717' : '\u22ef';
+    const statusClass = status === 'ok' ? 'ok' : status === 'error' ? 'error' : 'pending';
+    const imgSrc = '/assets/lora_dataset/images/' + encodeURIComponent(frameName);
+    return { imgSrc, statusIcon, statusClass };
+  }
+
+  function animateFrameIn(sceneId, evt) {
+    const frameName = evt.frame;
+    if (!frameName) return;
+    const status = (evt.status || 'OK').toLowerCase();
+    const caption = evt.caption || '';
+    const escapedFrame = CSS.escape(frameName);
+
+    // ── Update filmstrip frame (used by both active and completed cards) ──
+    const strip = document.getElementById('filmstrip-' + sceneId);
+    if (strip) {
+      const frame = strip.querySelector(`.scene-filmstrip-frame[data-frame="${escapedFrame}"]`);
+      if (frame) {
+        // Update the frame's status class (pending → ok/error)
+        frame.className = 'scene-filmstrip-frame ' + status;
+        if (caption) frame.dataset.caption = caption;
+        frame.title = caption;
+
+        // Update status icon
+        const statusEl = frame.querySelector('.frame-status');
+        if (statusEl) {
+          statusEl.className = 'frame-status ' + status;
+          statusEl.textContent = status === 'ok' ? '\u2713' : status === 'error' ? '\u2717' : '\u22ef';
+        }
+
+        // Glow animation for newly completed frames
+        const glowClass = status === 'error' ? 'just-error' : 'just-captioned';
+        frame.classList.add(glowClass);
+        setTimeout(() => frame.classList.remove(glowClass), 1500);
+
+        // Scroll the newly completed frame into view
+        frame.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+    }
+
+    // ── Update latest caption ──
+    if (caption && !caption.startsWith('[ERROR')) {
+      updateLatestCaption(sceneId, [caption]);
+    }
+
+    // ── Update progress bar from filmstrip frame statuses ──
+    const card = document.querySelector(`.scene-card[data-scene="${sceneId}"]`);
+    if (card && strip) {
+      const okCount = strip.querySelectorAll('.scene-filmstrip-frame.ok').length;
+      const errCount = strip.querySelectorAll('.scene-filmstrip-frame.error').length;
+      const total = strip.querySelectorAll('.scene-filmstrip-frame').length;
+      const pctVal = total ? (okCount + errCount) / total * 100 : 0;
+      const hasErrors = errCount > 0;
+
+      const fill = card.querySelector('.scene-progress-fill');
+      if (fill) {
+        fill.classList.toggle('has-errors', hasErrors);
+        fill.style.width = pctVal.toFixed(1) + '%';
+        if (hasErrors) {
+          const okPct = (okCount + errCount) > 0 ? okCount / (okCount + errCount) * 100 : 100;
+          fill.style.setProperty('--ok-pct', okPct.toFixed(1) + '%');
+        } else {
+          fill.style.removeProperty('--ok-pct');
+        }
+      }
+
+      const label = card.querySelector('.scene-progress-label');
+      if (label) {
+        label.innerHTML = okCount + '/' + total + (errCount ? ' <span class="err">' + errCount + ' err</span>' : '');
+      }
+    }
+  }
+
+  function escHTML(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // ── Scene expand/collapse ──────────────────────
+  window.__toggleScene = function(sceneId) {
+    if (expandedScene === sceneId) {
+      expandedScene = null;
+    } else {
+      expandedScene = sceneId;
+      loadSceneDetail(sceneId);
+    }
+    // Toggle class on cards
+    document.querySelectorAll('.scene-card').forEach(c => {
+      const id = parseInt(c.dataset.scene);
+      c.classList.toggle('expanded', id === expandedScene);
+    });
+  };
+
+  window.__toggleGrid = function(sceneId) {
+    const grid = document.getElementById('thumbgrid-' + sceneId);
+    const btn = document.getElementById('expand-btn-' + sceneId);
+    if (!grid || !btn) return;
+    const isVisible = grid.classList.contains('visible');
+    grid.classList.toggle('visible', !isVisible);
+    btn.classList.toggle('expanded', !isVisible);
+    btn.querySelector('.expand-arrow').textContent = isVisible ? '\u25BC' : '\u25B2';
+    const label = btn.childNodes[btn.childNodes.length - 1];
+    if (label) label.textContent = isVisible ? ' Show thumbnails' : ' Hide thumbnails';
+  };
+
+  async function loadSceneDetail(sceneId) {
+    const container = document.getElementById('detail-' + sceneId);
+    const strip = document.getElementById('filmstrip-' + sceneId);
+
+    if (sceneFramesCache[sceneId]) {
+      if (container) renderDetail(container, sceneFramesCache[sceneId]);
+      if (strip && !strip.children.length) {
+        populateCompletedFilmstrip(strip, sceneFramesCache[sceneId]);
+      }
+      return;
+    }
+
+    if (container) container.innerHTML = '<div style="padding:0.5rem;color:var(--text-3);font-size:0.72rem">Loading frames&hellip;</div>';
+
+    // Prefer WebSocket when connected
+    if (wsSend({type: 'get_scene_frames', scene_id: sceneId})) {
+      return;  // Response handled in dispatchWS → scene_frames
+    }
+
+    // HTTP fallback
+    try {
+      const data = await fetchJSON('/api/scene/' + sceneId + '/frames');
+      sceneFramesCache[sceneId] = data.frames || [];
+      if (container) renderDetail(container, data.frames || []);
+      if (strip) populateCompletedFilmstrip(strip, data.frames || []);
+    } catch (e) {
+      if (container) container.innerHTML = '<div style="padding:0.5rem;color:var(--red);font-size:0.72rem">Failed to load: ' + escHTML(e.message) + '</div>';
+    }
+  }
+
+  function renderDetail(container, frames) {
+    if (!frames.length) {
+      container.innerHTML = '<div style="padding:0.5rem;color:var(--text-3);font-size:0.72rem">No frames found</div>';
+      return;
+    }
+
+    const html = '<div class="scene-detail-grid">' + frames.map(f => {
+      const isErr = f.caption && f.caption.startsWith('[ERROR');
+      return `<div class="frame-item" data-caption="${escHTML(f.caption || '')}">
+        <img src="/assets/lora_dataset/images/${encodeURIComponent(f.image_name)}" alt="${escHTML(f.image_name)}" loading="lazy"
+             onclick="window.__lightbox('/assets/lora_dataset/images/${encodeURIComponent(f.image_name)}', this.parentElement.dataset.caption)" style="cursor:zoom-in">
+        <div class="frame-cap${isErr ? ' error' : ''}">${escHTML(f.caption || '(no caption)')}</div>
+        <div class="frame-name">${escHTML(f.image_name)}</div>
+      </div>`;
+    }).join('') + '</div>';
+
+    container.innerHTML = html;
+  }
+
+  function populateCompletedFilmstrip(strip, frames) {
+    // Show up to 16 evenly-spaced frames from the full set
+    let sample;
+    if (frames.length <= 16) {
+      sample = frames;
+    } else {
+      const step = frames.length / 16;
+      sample = Array.from({length: 16}, (_, i) => frames[Math.floor(i * step)]);
+    }
+    strip.innerHTML = sample.map(f => {
+      const isErr = f.caption && f.caption.startsWith('[ERROR');
+      const captionAttr = f.caption ? ` data-caption="${escHTML(f.caption)}"` : '';
+      return `<div class="scene-filmstrip-frame" data-frame="${escHTML(f.image_name)}"${captionAttr} title="${escHTML(f.caption || '')}">
+        <img src="/assets/lora_dataset/images/${encodeURIComponent(f.image_name)}" alt="${escHTML(f.image_name)}" loading="lazy"
+             onclick="event.stopPropagation(); window.__lightbox('/assets/lora_dataset/images/${encodeURIComponent(f.image_name)}', this.parentElement.dataset.caption)">
+        <span class="frame-status ${isErr ? 'error' : 'ok'}">${isErr ? '\u2717' : '\u2713'}</span>
+      </div>`;
+    }).join('') + (frames.length > 16 ? `<span class="scene-filmstrip-overflow">+${frames.length - 16}</span>` : '');
+  }
+
+  // ── Lightbox ───────────────────────────────────
+  const lightboxCaption = $('#lightboxCaption');
+
+  window.__lightbox = function(src, caption) {
+    lightboxImg.src = src;
+    lightboxCaption.textContent = caption || '';
+    lightbox.classList.add('open');
+  };
+
+  function closeLightbox() {
+    lightbox.classList.remove('open');
+    lightboxImg.src = '';
+    lightboxCaption.textContent = '';
+  }
+
+  lightbox.addEventListener('click', closeLightbox);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lightbox.classList.contains('open')) {
+      closeLightbox();
+    }
+  });
+
+  // ── Controls ──────────────────────────────────
+  const controlsPanel = $('#controlsPanel');
+  const logOutput = $('#logOutput');
+  const btnLaunch = $('#btnLaunch');
+  const btnRetry = $('#btnRetry');
+  const btnStop = $('#btnStop');
+  const logPid = $('#logPid');
+  let logPolling = false;
+  let prevLogLen = 0;
+
+  // Track which keys the server loaded from .env
+  let envKeys = { gemini: false, openrouter: false };
+  (async () => {
+    try {
+      const d = await fetchJSON('/api/env-keys');
+      envKeys = d;
+      if (d.gemini) $('#ctrlApiKey').placeholder = 'loaded from .env';
+      if (d.openrouter) $('#ctrlOpenRouterKey').placeholder = 'loaded from .env';
+    } catch (_) {}
+  })();
+
+  // Restore settings from localStorage
+  const savedKey = localStorage.getItem('caption_api_key');
+  if (savedKey) $('#ctrlApiKey').value = savedKey;
+  const savedOrKey = localStorage.getItem('caption_openrouter_key');
+  if (savedOrKey) $('#ctrlOpenRouterKey').value = savedOrKey;
+  if (localStorage.getItem('caption_skip_gemini') === 'true') $('#ctrlSkipGemini').checked = true;
+
+  // Extracted UI update helpers (shared by WS dispatch and HTTP polling)
+  function updateLogUI(lines) {
+    if (lines.length !== prevLogLen) {
+      prevLogLen = lines.length;
+      logOutput.innerHTML = lines.map(l => {
+        if (l.includes('ERROR')) return `<span class="log-error">${escHTML(l)}</span>`;
+        if (l.startsWith('[dashboard]')) return `<span class="log-info">${escHTML(l)}</span>`;
+        return escHTML(l);
+      }).join('\n') || 'No output yet.';
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
+  }
+
+  function updateRunnerUI(data) {
+    const running = data.running;
+    btnLaunch.disabled = running;
+    btnRetry.disabled = running;
+    btnStop.disabled = !running;
+    controlsPanel.classList.toggle('runner-active', running);
+    if (running && data.pid) {
+      logPid.textContent = 'PID ' + data.pid;
+      btnLaunch.innerHTML = '<span class="btn-icon">&#9654;</span> Running\u2026';
+    } else {
+      logPid.textContent = data.exit_code != null ? 'exited (' + data.exit_code + ')' : '';
+      btnLaunch.innerHTML = '<span class="btn-icon">&#9654;</span> Launch';
+      btnRetry.innerHTML = '<span class="btn-icon">&#8635;</span> Retry Errors';
+      stopFastErrorPolling();
+      pollErrors();
+    }
+  }
+
+  window.__toggleControls = function() {
+    controlsPanel.classList.toggle('open');
+    if (controlsPanel.classList.contains('open') && !logPolling && !wsConnected) {
+      logPolling = true;
+      pollLog();
+      pollRunnerState();
+    }
+  };
+
+  async function pollLog() {
+    if (!controlsPanel.classList.contains('open') || wsConnected) {
+      logPolling = false;
+      return;
+    }
+    try {
+      const data = await fetchJSON('/api/log?n=200');
+      updateLogUI(data.lines || []);
+    } catch (_) {}
+    setTimeout(pollLog, 1500);
+  }
+
+  async function pollRunnerState() {
+    if (!controlsPanel.classList.contains('open') || wsConnected) return;
+    try {
+      const data = await fetchJSON('/api/runner');
+      updateRunnerUI(data);
+    } catch (_) {}
+    setTimeout(pollRunnerState, 2000);
+  }
+
+  window.__launch = async function() {
+    const apiKey = $('#ctrlApiKey').value.trim();
+    const orKey = $('#ctrlOpenRouterKey').value.trim();
+    let modelVal = $('#ctrlModel').value.trim() || 'gemini-3-flash-preview';
+    const skipGemini = $('#ctrlSkipGemini').checked;
+
+    // When skip-gemini is checked and model is direct Gemini, auto-promote
+    // to OpenRouter equivalent so no Gemini key is needed at all.
+    if (skipGemini && !modelVal.includes('/')) {
+      modelVal = 'google/' + modelVal;
+    }
+    const isOR = modelVal.includes('/');
+
+    if (isOR && !orKey && !envKeys.openrouter) {
+      alert('OpenRouter key is required');
+      $('#ctrlOpenRouterKey').focus();
+      return;
+    }
+    if (!isOR && !apiKey && !envKeys.gemini) {
+      alert('Gemini API key is required');
+      $('#ctrlApiKey').focus();
+      return;
+    }
+    if (apiKey) localStorage.setItem('caption_api_key', apiKey);
+    if (orKey) localStorage.setItem('caption_openrouter_key', orKey);
+    localStorage.setItem('caption_skip_gemini', $('#ctrlSkipGemini').checked);
+
+    const body = {
+      api_key: apiKey,
+      openrouter_key: orKey,
+      skip_gemini_fallback: skipGemini,
+      model: modelVal,
+      workers: parseInt($('#ctrlWorkers').value) || 10,
+      max_frames: parseInt($('#ctrlMaxFrames').value) || 20,
+      temperature: parseFloat($('#ctrlTemp').value) || 1.0,
+    };
+
+    const limit = $('#ctrlLimit').value.trim();
+    if (limit) body.limit = parseInt(limit);
+
+    const maxCost = $('#ctrlMaxCost').value.trim();
+    if (maxCost) body.max_cost = parseFloat(maxCost);
+
+    btnLaunch.disabled = true;
+    btnLaunch.innerHTML = '<span class="btn-icon">&#9654;</span> Launching\u2026';
+
+    try {
+      const resp = await fetch('/api/launch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (data.error) {
+        alert('Launch failed: ' + data.error);
+        btnLaunch.disabled = false;
+        btnLaunch.innerHTML = '<span class="btn-icon">&#9654;</span> Launch';
+      } else {
+        btnStop.disabled = false;
+        logPid.textContent = 'PID ' + data.pid;
+        prevLogLen = 0;
+      }
+    } catch (e) {
+      alert('Launch error: ' + e.message);
+      btnLaunch.disabled = false;
+      btnLaunch.innerHTML = '<span class="btn-icon">&#9654;</span> Launch';
+    }
+  };
+
+  window.__stop = async function() {
+    btnStop.disabled = true;
+    btnStop.innerHTML = '<span class="btn-icon">&#9632;</span> Stopping\u2026';
+    try {
+      await fetch('/api/stop', {method: 'POST'});
+    } catch (_) {}
+    setTimeout(() => {
+      btnStop.innerHTML = '<span class="btn-icon">&#9632;</span> Stop';
+    }, 2000);
+  };
+
+  window.__retryErrors = async function() {
+    const apiKey = $('#ctrlApiKey').value.trim();
+    const orKey = $('#ctrlOpenRouterKey').value.trim();
+    let modelVal = $('#ctrlModel').value.trim() || 'gemini-3-flash-preview';
+    const skipGemini = $('#ctrlSkipGemini').checked;
+
+    // Auto-promote to OpenRouter when skip-gemini is checked
+    if (skipGemini && !modelVal.includes('/')) {
+      modelVal = 'google/' + modelVal;
+    }
+    const isOR = modelVal.includes('/');
+
+    if (isOR && !orKey && !envKeys.openrouter) {
+      alert('OpenRouter key is required');
+      $('#ctrlOpenRouterKey').focus();
+      return;
+    }
+    if (!isOR && !apiKey && !envKeys.gemini) {
+      alert('Gemini API key is required');
+      $('#ctrlApiKey').focus();
+      return;
+    }
+    if (apiKey) localStorage.setItem('caption_api_key', apiKey);
+    if (orKey) localStorage.setItem('caption_openrouter_key', orKey);
+    localStorage.setItem('caption_skip_gemini', $('#ctrlSkipGemini').checked);
+
+    const body = {
+      api_key: apiKey,
+      openrouter_key: orKey,
+      skip_gemini_fallback: skipGemini,
+      model: modelVal,
+      workers: parseInt($('#ctrlWorkers').value) || 10,
+      temperature: parseFloat($('#ctrlTemp').value) || 1.0,
+      retry_errors: true,
+    };
+
+    const maxCost = $('#ctrlMaxCost').value.trim();
+    if (maxCost) body.max_cost = parseFloat(maxCost);
+
+    btnRetry.disabled = true;
+    btnLaunch.disabled = true;
+    btnRetry.innerHTML = '<span class="btn-icon">&#8635;</span> Retrying\u2026';
+
+    try {
+      const resp = await fetch('/api/launch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (data.error) {
+        alert('Retry launch failed: ' + data.error);
+        btnRetry.disabled = false;
+        btnLaunch.disabled = false;
+        btnRetry.innerHTML = '<span class="btn-icon">&#8635;</span> Retry Errors';
+      } else {
+        btnStop.disabled = false;
+        logPid.textContent = 'PID ' + data.pid;
+        prevLogLen = 0;
+        startFastErrorPolling();
+      }
+    } catch (e) {
+      alert('Retry error: ' + e.message);
+      btnRetry.disabled = false;
+      btnLaunch.disabled = false;
+      btnRetry.innerHTML = '<span class="btn-icon">&#8635;</span> Retry Errors';
+    }
+  };
+
+  // ── Errors Panel ────────────────────────────────
+  const errorsPanel = $('#errorsPanel');
+  const errorsBadge = $('#errorsBadge');
+  const errorsSummary = $('#errorsSummary');
+  const errorsList = $('#errorsList');
+  let errorsData = [];
+  let errorsTotal = 0;
+  let errorsLoaded = false;
+  let errorsPollTimer = null;
+
+  window.__toggleErrors = function() {
+    errorsPanel.classList.toggle('open');
+    if (errorsPanel.classList.contains('open') && !errorsLoaded) {
+      loadErrors(0);
+    }
+  };
+
+  let errorsScanTimer = null;
+  let pendingErrorsOffset = null;  // Track pending WS errors request
+
+  async function loadErrors(offset) {
+    // Prefer WebSocket when connected
+    if (wsSend({type: 'get_errors', limit: errorsPageSize, offset: offset})) {
+      pendingErrorsOffset = offset;
+      return;
+    }
+    // HTTP fallback
+    try {
+      const data = await fetchJSON('/api/errors?limit=' + errorsPageSize + '&offset=' + offset);
+      handleErrorsResponse(data, offset);
+    } catch (_) {}
+  }
+
+  function handleErrorsResponse(data, offset) {
+    // offset may come from pendingErrorsOffset for WS path
+    if (offset === undefined) offset = pendingErrorsOffset || 0;
+    pendingErrorsOffset = null;
+
+    if (data.scanning && (!data.errors || !data.errors.length)) {
+      // Background scan in progress
+      errorsTotal = data.total || 0;
+      renderErrorsScanning();
+      if (!errorsScanTimer) {
+        errorsScanTimer = setInterval(() => loadErrors(0), 2000);
+      }
+      return;
+    }
+    // Scan complete
+    if (errorsScanTimer) { clearInterval(errorsScanTimer); errorsScanTimer = null; }
+    if (offset === 0) {
+      errorsData = data.errors || [];
+    } else {
+      errorsData = errorsData.concat(data.errors || []);
+    }
+    errorsTotal = data.total || 0;
+    renderErrors();
+    errorsLoaded = true;
+  }
+
+  // Lightweight refresh: only re-fetch count + first page
+  async function pollErrors() {
+    try {
+      const data = await fetchJSON('/api/errors?limit=' + errorsPageSize + '&offset=0');
+      if (data.scanning && !data.errors.length) return; // still scanning, skip
+      errorsData = data.errors || [];
+      errorsTotal = data.total || 0;
+      renderErrors();
+      errorsLoaded = true;
+    } catch (_) {}
+  }
+
+  function renderErrorsScanning() {
+    errorsBadge.textContent = '...';
+    errorsList.innerHTML = `<div class="empty-state" style="padding:1.5rem">
+      <div style="color:var(--text-3);font-size:0.75rem">
+        Scanning ${fmt(errorsTotal)} files for errors<span class="scanning-dots"></span>
+      </div>
+      <div style="color:var(--text-4);font-size:0.65rem;margin-top:0.3rem">This may take a few seconds on first load</div>
+    </div>`;
+  }
+
+  function startFastErrorPolling() {
+    stopFastErrorPolling();
+    pollErrors();
+    errorsPollTimer = setInterval(pollErrors, 5000);
+  }
+
+  function stopFastErrorPolling() {
+    if (errorsPollTimer) { clearInterval(errorsPollTimer); errorsPollTimer = null; }
+  }
+
+  function renderErrors() {
+    errorsBadge.textContent = errorCount || errorsTotal;
+    errorsBadge.classList.toggle('zero', errorsTotal === 0);
+    errorsPanel.classList.toggle('has-errors', errorsTotal > 0);
+
+    if (!errorsTotal) {
+      errorsSummary.style.display = 'none';
+      errorsList.innerHTML = `<div class="empty-state" style="padding:1.5rem">
+        <div style="color:var(--green);font-size:0.75rem">No errors — all frames captioned successfully</div>
+      </div>`;
+      return;
+    }
+
+    // Group by error type (from loaded page)
+    const types = {};
+    errorsData.forEach(e => {
+      const match = e.error.match(/\[ERROR:\s*(.+?)]/);
+      const type = match ? match[1] : 'Unknown';
+      types[type] = (types[type] || 0) + 1;
+    });
+
+    errorsSummary.style.display = '';
+    const typeHtml = Object.entries(types)
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, n]) => `<span><span class="err-type">${n}</span> ${escHTML(type)}</span>`)
+      .join('');
+    const totalNote = errorsData.length < errorsTotal
+      ? `<span style="opacity:0.6;margin-left:0.5rem">(showing ${errorsData.length} of ${errorsTotal})</span>`
+      : '';
+    errorsSummary.innerHTML = typeHtml + totalNote;
+
+    let html = errorsData.map(e => {
+      const imgSrc = '/assets/lora_dataset/images/' + encodeURIComponent(e.image_name);
+      return `<div class="error-row">
+        <img class="error-thumb" src="${imgSrc}" alt="${escHTML(e.image_name)}" loading="lazy"
+             onclick="window.__lightbox('${imgSrc}', this.nextElementSibling.querySelector('.error-message').textContent)">
+        <div class="error-info">
+          <div class="error-filename">${escHTML(e.image_name)}</div>
+          <div class="error-message">${escHTML(e.error)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // "Load more" button if there are more errors
+    if (errorsData.length < errorsTotal) {
+      const remaining = errorsTotal - errorsData.length;
+      html += `<div style="text-align:center;padding:0.75rem">
+        <button onclick="window.__loadMoreErrors()" style="
+          background:var(--surface-2);border:1px solid var(--border);color:var(--text-2);
+          padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;font-size:0.72rem;
+        ">Load ${Math.min(remaining, errorsPageSize)} more (${remaining} remaining)</button>
+      </div>`;
+    }
+
+    errorsList.innerHTML = html;
+  }
+
+  window.__loadMoreErrors = function() {
+    loadErrors(errorsData.length);
+  };
+
+  // ── Caption Showcase ───────────────────────────
+  const showcaseSection = $('#showcaseSection');
+  const showcaseImgA = $('#showcaseImgA');
+  const showcaseImgB = $('#showcaseImgB');
+  const showcaseCaption = $('#showcaseCaption');
+  const showcaseSceneTag = $('#showcaseSceneTag');
+  const showcaseDots = $('#showcaseDots');
+  const showcaseCounter = $('#showcaseCounter');
+
+  async function loadShowcase() {
+    showcaseSection.style.display = 'none';
+    return; // TODO: re-enable showcase when ready
+    try {
+      const data = await fetchJSON('/api/showcase?n=20');
+      const frames = data.frames || [];
+      if (!frames.length) {
+        showcaseSection.style.display = 'none';
+        return;
+      }
+      showcaseFrames = frames;
+      showcaseIndex = 0;
+      showcaseSection.style.display = '';
+
+      // Build dot indicators
+      showcaseDots.innerHTML = frames.map((_, i) =>
+        `<span class="showcase-dot${i === 0 ? ' active' : ''}" onclick="window.__showcaseGoto(${i})"></span>`
+      ).join('');
+
+      renderShowcaseFrame(0);
+      startShowcaseTimer();
+    } catch (_) {
+      showcaseSection.style.display = 'none';
+    }
+  }
+
+  function renderShowcaseFrame(idx) {
+    if (!showcaseFrames.length) return;
+    const frame = showcaseFrames[idx];
+    const imgUrl = '/assets/lora_dataset/images/' + frame.image;
+
+    // Two-layer crossfade: load image on hidden layer, then swap visibility
+    const visibleImg = showcaseActiveLayer === 'a' ? showcaseImgA : showcaseImgB;
+    const hiddenImg = showcaseActiveLayer === 'a' ? showcaseImgB : showcaseImgA;
+
+    const applySwap = () => {
+      hiddenImg.classList.remove('hidden');
+      hiddenImg.classList.add('visible');
+      visibleImg.classList.remove('visible');
+      visibleImg.classList.add('hidden');
+      showcaseActiveLayer = showcaseActiveLayer === 'a' ? 'b' : 'a';
+    };
+
+    hiddenImg.src = imgUrl;
+    // Handle browser-cached images (onload may not fire)
+    if (hiddenImg.complete && hiddenImg.naturalWidth > 0) {
+      applySwap();
+    } else {
+      hiddenImg.onload = () => { applySwap(); hiddenImg.onload = null; };
+    }
+
+    // Fade caption
+    showcaseCaption.classList.add('fading');
+    setTimeout(() => {
+      showcaseCaption.textContent = frame.caption;
+      showcaseCaption.classList.remove('fading');
+    }, 300);
+
+    // Update scene tag
+    showcaseSceneTag.textContent = 'Scene ' + frame.scene_id;
+
+    // Update dots
+    const dots = showcaseDots.querySelectorAll('.showcase-dot');
+    dots.forEach((dot, i) => dot.classList.toggle('active', i === idx));
+
+    // Update counter
+    showcaseCounter.textContent = (idx + 1) + ' / ' + showcaseFrames.length;
+  }
+
+  function startShowcaseTimer() {
+    if (showcaseTimer) clearInterval(showcaseTimer);
+    showcaseTimer = setInterval(() => {
+      if (!showcaseFrames.length) return;
+      showcaseIndex = (showcaseIndex + 1) % showcaseFrames.length;
+      renderShowcaseFrame(showcaseIndex);
+    }, 6000);
+  }
+
+  window.__showcasePrev = function() {
+    if (!showcaseFrames.length) return;
+    showcaseIndex = (showcaseIndex - 1 + showcaseFrames.length) % showcaseFrames.length;
+    renderShowcaseFrame(showcaseIndex);
+    startShowcaseTimer(); // reset timer on manual nav
+  };
+
+  window.__showcaseNext = function() {
+    if (!showcaseFrames.length) return;
+    showcaseIndex = (showcaseIndex + 1) % showcaseFrames.length;
+    renderShowcaseFrame(showcaseIndex);
+    startShowcaseTimer();
+  };
+
+  window.__showcaseGoto = function(idx) {
+    if (idx < 0 || idx >= showcaseFrames.length) return;
+    showcaseIndex = idx;
+    renderShowcaseFrame(showcaseIndex);
+    startShowcaseTimer();
+  };
+
+  // ── Frame hover tooltip ─────────────────────────
+  const frameTooltip = $('#frameTooltip');
+  let tooltipHoverTarget = null;   // currently hovered frame element
+  let tooltipOriginalCaption = {}; // sid -> original caption text (for revert on leave)
+
+  document.addEventListener('mouseenter', (e) => {
+    const el = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+    if (!el) return;
+    const frame = el.closest('.scene-filmstrip-frame[data-caption]');
+    if (!frame) return;
+    const caption = frame.dataset.caption;
+    if (!caption) return;
+
+    tooltipHoverTarget = frame;
+
+    // Show tooltip above the frame
+    frameTooltip.textContent = caption;
+    frameTooltip.classList.add('visible');
+    const rect = frame.getBoundingClientRect();
+    let left = rect.left + rect.width / 2 - 160; // center tooltip (max-width 320)
+    let top = rect.top - 8;
+
+    // Keep in viewport
+    left = Math.max(8, Math.min(left, window.innerWidth - 328));
+    if (top < 60) top = rect.bottom + 8; // flip below if too close to top
+
+    frameTooltip.style.left = left + 'px';
+    frameTooltip.style.top = top + 'px';
+    frameTooltip.style.transform = 'translateY(-100%)';
+    if (top === rect.bottom + 8) frameTooltip.style.transform = 'none';
+
+    // Update card's caption preview to show this frame's caption
+    const card = frame.closest('.scene-card[data-scene]');
+    if (card) {
+      const sid = card.dataset.scene;
+      const captionTextEl = document.querySelector(`#caption-${sid} .caption-text`);
+      if (captionTextEl) {
+        if (!tooltipOriginalCaption[sid]) {
+          tooltipOriginalCaption[sid] = captionTextEl._originalText || captionTextEl.textContent;
+        }
+        captionTextEl.textContent = caption;
+      }
+    }
+  }, true);
+
+  document.addEventListener('mouseleave', (e) => {
+    const el = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+    if (!el) return;
+    const frame = el.closest('.scene-filmstrip-frame[data-caption]');
+    if (!frame || frame !== tooltipHoverTarget) return;
+
+    tooltipHoverTarget = null;
+    frameTooltip.classList.remove('visible');
+
+    // Revert card's caption preview
+    const card = frame.closest('.scene-card[data-scene]');
+    if (card) {
+      const sid = card.dataset.scene;
+      const captionTextEl = document.querySelector(`#caption-${sid} .caption-text`);
+      if (captionTextEl && tooltipOriginalCaption[sid] !== undefined) {
+        captionTextEl.textContent = tooltipOriginalCaption[sid];
+        delete tooltipOriginalCaption[sid];
+      }
+    }
+  }, true);
+
+  // ── Batch API ──────────────────────────────────
+
+  window.submitBatch = async function() {
+    const btn = $('#btnSubmitBatch');
+    btn.disabled = true;
+    btn.textContent = 'Preparing...';
+
+    try {
+      const resp = await fetch('/api/batch/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          model: $('#ctrlModel').value,
+          max_frames: parseInt($('#ctrlMaxFrames').value) || 20,
+          temperature: parseFloat($('#ctrlTemp').value) || 1.0,
+          scene_limit: parseInt($('#batchSceneLimit').value) || 0,
+        }),
+      });
+      const data = await resp.json();
+      if (data.error) {
+        btn.textContent = 'Error: ' + data.error;
+        setTimeout(() => { btn.textContent = 'Submit Batch'; btn.disabled = false; }, 3000);
+        return;
+      }
+      btn.textContent = `Submitted ${data.jobs_created} jobs`;
+      setTimeout(() => { btn.textContent = 'Submit Batch'; btn.disabled = false; }, 3000);
+      pollBatchStatus();
+    } catch (e) {
+      btn.textContent = 'Submit Batch';
+      btn.disabled = false;
+    }
+  }
+
+  window.cancelBatchJob = async function(jobName) {
+    try {
+      const resp = await fetch('/api/batch/cancel', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ job_name: jobName }),
+      });
+      const data = await resp.json();
+      if (data.error) { console.error('Cancel failed:', data.error); }
+      pollBatchStatus();
+    } catch (e) { console.error('Cancel error:', e); }
+  }
+
+  async function pollBatchStatus() {
+    try {
+      const resp = await fetch('/api/batch/status');
+      const data = await resp.json();
+      renderBatchJobs(data);
+    } catch (e) { /* silent */ }
+  }
+
+  function timeAgo(isoStr) {
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ${mins % 60}m ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  function renderBatchJobs(data) {
+    const list = $('#batchJobsList');
+    const summary = $('#batchSummary');
+    const jobs = data.jobs || [];
+
+    if (!jobs.length) {
+      list.innerHTML = '';
+      summary.textContent = '';
+      return;
+    }
+
+    const collected = jobs.filter(j => j.collected).length;
+    const active = jobs.filter(j => ['BATCH_STATE_PENDING', 'BATCH_STATE_RUNNING'].includes(j.state)).length;
+    summary.textContent = `${collected}/${jobs.length} collected \u00b7 ${data.total_collected.toLocaleString()} captions \u00b7 ${data.total_errors} errors`;
+
+    list.innerHTML = jobs.map(j => {
+      const stateClass = j.collected ? 'collected' :
+        j.state.includes('SUCCEEDED') ? 'succeeded' :
+        j.state.includes('RUNNING') ? 'running' :
+        j.state.includes('FAILED') ? 'failed' :
+        j.state.includes('CANCELLED') ? 'cancelled' : 'pending';
+      const stateLabel = j.collected ? 'Collected' :
+        j.state.replace('BATCH_STATE_', '').toLowerCase();
+      const canCancel = !j.collected && ['BATCH_STATE_PENDING', 'BATCH_STATE_RUNNING'].includes(j.state);
+      const cancelBtn = canCancel
+        ? `<button class="btn-cancel-job" onclick="cancelBatchJob('${j.name}')">Cancel</button>`
+        : '';
+
+      // Time since submission
+      const ago = j.submitted_at ? timeAgo(j.submitted_at) : '';
+
+      // Scene count
+      const sceneCount = j.scene_ids ? j.scene_ids.length : 0;
+      const sceneLabel = sceneCount === 1 ? '1 scene' : `${sceneCount} scenes`;
+
+      // Scene IDs (show first few, truncate)
+      const sceneIds = j.scene_ids || [];
+      const scenePreview = sceneIds.length <= 5
+        ? sceneIds.join(', ')
+        : sceneIds.slice(0, 5).join(', ') + ` +${sceneIds.length - 5} more`;
+
+      // Stats row (only when collected)
+      const statsRow = j.stats
+        ? `<div class="job-stats">${j.stats.captions_written} captions written \u00b7 ${j.stats.scenes_completed} scenes done \u00b7 ${j.stats.errors} errors</div>`
+        : '';
+
+      return `<div class="batch-job-card">
+        <div class="job-header">
+          <span class="job-name">${j.display_name}</span>
+          <span class="batch-badge ${stateClass}">${stateLabel}</span>
+          ${cancelBtn}
+        </div>
+        <div class="job-meta">
+          <span>${j.frame_count.toLocaleString()} frames</span>
+          <span>${sceneLabel}</span>
+          <span>scenes: ${scenePreview}</span>
+          ${ago ? `<span>${ago}</span>` : ''}
+        </div>
+        ${statsRow}
+      </div>`;
+    }).join('');
+
+    $('#btnSubmitBatch').disabled = active > 0;
+  }
+
+  // ── Slider ──────────────────────────────────────
+  sceneSlider.addEventListener('input', () => {
+    sceneCountLabel.textContent = sceneSlider.value + ' scenes';
+  });
+
+  sceneSlider.addEventListener('change', () => {
+    sceneFramesCache = {};
+    pollScenes();
+  });
+
+  // ── Startup ────────────────────────────────────
+  // Connect WebSocket in parallel with HTTP polling.
+  // When WS connects, polling stops. If WS disconnects, polling resumes.
+  connectWS();
+  startPolling();
+
+  // Initial batch status check + auto-poll every 30s
+  pollBatchStatus();
+  setInterval(pollBatchStatus, 30000);
+
+  // Refresh showcase every 60s
+  setInterval(loadShowcase, 60000);
+})();
+</script>
+
+</body>
+</html>
