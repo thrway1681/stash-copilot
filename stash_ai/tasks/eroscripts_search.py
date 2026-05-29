@@ -15,8 +15,6 @@ import time
 from dataclasses import asdict
 from typing import Any, TypedDict
 
-from ..stash_client import StashClient
-
 from ..eroscripts import auth as auth_store
 from ..eroscripts.client import EroScriptsClient, SearchResult
 from ..eroscripts.query_builder import (
@@ -25,7 +23,7 @@ from ..eroscripts.query_builder import (
     default_initial_query,
     with_category,
 )
-
+from ..stash_client import StashClient
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _RESULTS_DIR = os.path.join(_PLUGIN_ROOT, "assets", "eroscripts")
@@ -34,7 +32,7 @@ _MAX_RESULTS = 25
 
 
 class SearchTaskResult(TypedDict, total=False):
-    status: str               # "complete" or "error"
+    status: str  # "complete" or "error"
     results: list[dict]
     queries_run: list[str]
     suggested_query: str
@@ -62,9 +60,14 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
     explicit_query = (args.get("query") or "").strip()
 
     result: SearchTaskResult = {
-        "status": "error", "results": [], "queries_run": [],
-        "suggested_query": "", "auth_required": False, "rate_limited": False,
-        "error": None, "request_id": request_id,
+        "status": "error",
+        "results": [],
+        "queries_run": [],
+        "suggested_query": "",
+        "auth_required": False,
+        "rate_limited": False,
+        "error": None,
+        "request_id": request_id,
     }
 
     try:
@@ -77,8 +80,7 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
             return
 
         scene_inputs = _scene_query_inputs(stash, scene_id, log) if scene_id else None
-        suggested = explicit_query or (default_initial_query(scene_inputs)
-                                       if scene_inputs else "")
+        suggested = explicit_query or (default_initial_query(scene_inputs) if scene_inputs else "")
         result["suggested_query"] = suggested
 
         if explicit_query:
@@ -90,8 +92,9 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
 
         if not queries:
             result["status"] = "complete"
-            result["error"] = ("Couldn't build a search query — the scene has "
-                               "no title or filename to derive from.")
+            result["error"] = (
+                "Couldn't build a search query — the scene has no title or filename to derive from."
+            )
             _write_result(request_id, result)
             return
 
@@ -121,13 +124,15 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
                 if item.topic_id not in merged:
                     merged[item.topic_id] = item
 
-        ranked = sorted(merged.values(),
-                        key=lambda r: (r.like_count, r.topic_id), reverse=True)
+        ranked = sorted(merged.values(), key=lambda r: (r.like_count, r.topic_id), reverse=True)
         result["results"] = [_serialize_result(r) for r in ranked[:_MAX_RESULTS]]
         result["status"] = "complete"
-        log(f"Eroscripts search returned {len(ranked)} merged results "
-            f"across {len(queries)} queries", "info")
-    except Exception as e:  # noqa: BLE001 — task entry: surface to frontend
+        log(
+            f"Eroscripts search returned {len(ranked)} merged results "
+            f"across {len(queries)} queries",
+            "info",
+        )
+    except Exception as e:
         log(f"EroScripts search task crashed: {e}", "error")
         result["status"] = "error"
         result["error"] = f"Internal error: {e}"
@@ -139,7 +144,7 @@ def _scene_query_inputs(stash: StashClient, scene_id: str, log: Any) -> QueryInp
     """Look up scene title, file basename, studio, performer via stashapi."""
     try:
         scene = stash.find_scene(int(scene_id))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log(f"find_scene({scene_id}) failed: {e}", "warning")
         return None
     if not scene:
@@ -151,8 +156,7 @@ def _scene_query_inputs(stash: StashClient, scene_id: str, log: Any) -> QueryInp
         filename = files[0].get("basename") or files[0].get("path")
     studio = (scene.get("studio") or {}).get("name") if scene.get("studio") else None
     performers = [p.get("name") for p in (scene.get("performers") or []) if p.get("name")]
-    return QueryInputs(title=title, filename=filename, studio=studio,
-                       performers=performers)
+    return QueryInputs(title=title, filename=filename, studio=studio, performers=performers)
 
 
 def _serialize_result(r: SearchResult) -> dict:

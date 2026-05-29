@@ -49,7 +49,7 @@ class GoogleProvider(BaseLLMProvider):
         # Strip OpenRouter-style "google/" prefix from model name
         # so users can share the same model name across providers
         if self.model.startswith("google/"):
-            self.model = self.model[len("google/"):]
+            self.model = self.model[len("google/") :]
 
         if not self.api_key:
             raise ValueError(
@@ -109,20 +109,16 @@ class GoogleProvider(BaseLLMProvider):
         candidates = result.get("candidates")
         if not candidates:
             stash_log.warning(
-                f"[Google] Unexpected response (no candidates): "
-                f"{json.dumps(result)[:500]}"
+                f"[Google] Unexpected response (no candidates): {json.dumps(result)[:500]}"
             )
             raise RuntimeError(
-                f"Gemini returned unexpected response (no candidates). "
-                f"Keys: {list(result.keys())}"
+                f"Gemini returned unexpected response (no candidates). Keys: {list(result.keys())}"
             )
 
         # Generation stopped by safety filters
         finish_reason = candidates[0].get("finishReason", "")
         if finish_reason == "SAFETY":
-            raise RuntimeError(
-                "Gemini stopped generation due to safety filters"
-            )
+            raise RuntimeError("Gemini stopped generation due to safety filters")
 
         return candidates[0]
 
@@ -189,9 +185,7 @@ class GoogleProvider(BaseLLMProvider):
 
         # Add system instruction if provided
         if "system" in kwargs:
-            payload["systemInstruction"] = {
-                "parts": [{"text": kwargs["system"]}]
-            }
+            payload["systemInstruction"] = {"parts": [{"text": kwargs["system"]}]}
 
         # Debug logging
         from ..model_caps import is_debug_logging_enabled
@@ -229,9 +223,7 @@ class GoogleProvider(BaseLLMProvider):
                 error_detail = error_json.get("error", {}).get("message", "")
             except (json.JSONDecodeError, ValueError, KeyError, AttributeError):
                 pass
-            raise RuntimeError(
-                f"Gemini API error: {e}. {error_detail}"
-            ) from e
+            raise RuntimeError(f"Gemini API error: {e}. {error_detail}") from e
         except requests.exceptions.Timeout as e:
             raise RuntimeError(
                 "Gemini request timed out. Try a smaller prompt or fewer images."
@@ -272,9 +264,7 @@ class GoogleProvider(BaseLLMProvider):
         }
 
         if "system" in kwargs:
-            payload["systemInstruction"] = {
-                "parts": [{"text": kwargs["system"]}]
-            }
+            payload["systemInstruction"] = {"parts": [{"text": kwargs["system"]}]}
 
         try:
             response = self._session.post(
@@ -300,16 +290,10 @@ class GoogleProvider(BaseLLMProvider):
                                 err = data["error"]
                                 if isinstance(err, dict):
                                     err = err.get("message", str(err))
-                                raise RuntimeError(
-                                    f"Gemini stream error: {err}"
-                                )
+                                raise RuntimeError(f"Gemini stream error: {err}")
                             candidates = data.get("candidates", [])
                             if candidates:
-                                for part in (
-                                    candidates[0]
-                                    .get("content", {})
-                                    .get("parts", [])
-                                ):
+                                for part in candidates[0].get("content", {}).get("parts", []):
                                     text = part.get("text")
                                     if text:
                                         yield text
@@ -457,9 +441,7 @@ class GoogleProvider(BaseLLMProvider):
         }
 
         if system_instruction:
-            payload["systemInstruction"] = {
-                "parts": [{"text": system_instruction}]
-            }
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
         if tools and self.supports_tools:
             payload["tools"] = [
@@ -533,9 +515,7 @@ class GoogleProvider(BaseLLMProvider):
                 error_detail = error_json.get("error", {}).get("message", "")
             except (json.JSONDecodeError, ValueError, KeyError, AttributeError):
                 pass
-            raise RuntimeError(
-                f"Gemini API error: {e}. {error_detail}"
-            ) from e
+            raise RuntimeError(f"Gemini API error: {e}. {error_detail}") from e
 
     def health_check(self) -> bool:
         """Check if Gemini API is accessible and model exists."""

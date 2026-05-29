@@ -13,8 +13,6 @@ Exception Hierarchy:
     └── TaskError (task execution failures)
 """
 
-from typing import Optional
-
 
 class StashCopilotError(Exception):
     """Base exception for all plugin errors.
@@ -23,7 +21,7 @@ class StashCopilotError(Exception):
     to allow catching all plugin-specific errors with a single except clause.
     """
 
-    def __init__(self, message: str, details: Optional[str] = None) -> None:
+    def __init__(self, message: str, details: str | None = None) -> None:
         """Initialize the exception.
 
         Args:
@@ -54,9 +52,9 @@ class LLMError(StashCopilotError):
     def __init__(
         self,
         message: str,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        details: Optional[str] = None,
+        provider: str | None = None,
+        model: str | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the LLM error.
 
@@ -94,10 +92,10 @@ class VisionError(LLMError):
     def __init__(
         self,
         message: str,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        image_count: Optional[int] = None,
-        details: Optional[str] = None,
+        provider: str | None = None,
+        model: str | None = None,
+        image_count: int | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the vision error.
 
@@ -125,9 +123,9 @@ class EmbeddingError(StashCopilotError):
     def __init__(
         self,
         message: str,
-        model_key: Optional[str] = None,
-        scene_id: Optional[int] = None,
-        details: Optional[str] = None,
+        model_key: str | None = None,
+        scene_id: int | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the embedding error.
 
@@ -155,9 +153,9 @@ class StorageError(StashCopilotError):
     def __init__(
         self,
         message: str,
-        operation: Optional[str] = None,
-        table: Optional[str] = None,
-        details: Optional[str] = None,
+        operation: str | None = None,
+        table: str | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the storage error.
 
@@ -185,10 +183,10 @@ class ConfigurationError(StashCopilotError):
     def __init__(
         self,
         message: str,
-        setting: Optional[str] = None,
-        expected: Optional[str] = None,
-        actual: Optional[str] = None,
-        details: Optional[str] = None,
+        setting: str | None = None,
+        expected: str | None = None,
+        actual: str | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the configuration error.
 
@@ -220,9 +218,9 @@ class EroScriptsError(StashCopilotError):
     def __init__(
         self,
         message: str,
-        status_code: Optional[int] = None,
-        operation: Optional[str] = None,
-        details: Optional[str] = None,
+        status_code: int | None = None,
+        operation: str | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the eroscripts error.
 
@@ -250,9 +248,9 @@ class TaskError(StashCopilotError):
     def __init__(
         self,
         message: str,
-        task_name: Optional[str] = None,
-        scene_id: Optional[int] = None,
-        details: Optional[str] = None,
+        task_name: str | None = None,
+        scene_id: int | None = None,
+        details: str | None = None,
     ) -> None:
         """Initialize the task error.
 

@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional, TypedDict
-
+from typing import TypedDict
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIDECAR_DIR = os.path.join(_PLUGIN_ROOT, "assets", "eroscripts_metadata")
@@ -24,11 +23,11 @@ class SidecarMetadata(TypedDict, total=False):
     eroscripts_topic_id: int
     eroscripts_thread_url: str
     eroscripts_thread_title: str
-    eroscripts_creator_username: Optional[str]
-    eroscripts_creator_avatar_url: Optional[str]
+    eroscripts_creator_username: str | None
+    eroscripts_creator_avatar_url: str | None
     eroscripts_like_count: int
     eroscripts_tags: list[str]
-    eroscripts_post_created_at: Optional[str]
+    eroscripts_post_created_at: str | None
     funscript_filename: str
     funscript_path: str
     funscript_sha256: str
@@ -41,7 +40,7 @@ def sidecar_path(scene_id: int | str) -> str:
     return os.path.join(SIDECAR_DIR, f"{scene_id}.json")
 
 
-def read(scene_id: int | str) -> Optional[SidecarMetadata]:
+def read(scene_id: int | str) -> SidecarMetadata | None:
     path = sidecar_path(scene_id)
     if not os.path.isfile(path):
         return None

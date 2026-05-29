@@ -3771,9 +3771,7 @@ class EmbeddingStorage:
                 (status,),
             )
         else:
-            cursor.execute(
-                "SELECT * FROM labeling_sessions ORDER BY created_at DESC"
-            )
+            cursor.execute("SELECT * FROM labeling_sessions ORDER BY created_at DESC")
 
         rows = cursor.fetchall()
         conn.close()
@@ -3843,9 +3841,7 @@ class EmbeddingStorage:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM frame_annotations WHERE label = 'confirmed'"
-        )
+        cursor.execute("SELECT * FROM frame_annotations WHERE label = 'confirmed'")
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows]

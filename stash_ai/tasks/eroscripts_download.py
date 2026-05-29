@@ -15,13 +15,9 @@ import os
 import time
 from typing import Any, TypedDict
 
-from ..stash_client import StashClient
-
-from ..eroscripts import auth as auth_store
-from ..eroscripts import download as download_mod
-from ..eroscripts import metadata as metadata_mod
+from ..eroscripts import auth as auth_store, download as download_mod, metadata as metadata_mod
 from ..eroscripts.client import EroScriptsClient, TopicAttachment
-
+from ..stash_client import StashClient
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _RESULTS_DIR = os.path.join(_PLUGIN_ROOT, "assets", "eroscripts")
@@ -29,8 +25,8 @@ _RESULT_TTL_SECONDS = 3600
 
 
 class DownloadResult(TypedDict, total=False):
-    status: str               # "complete" or "error"
-    phase: str                # "list" or "download"
+    status: str  # "complete" or "error"
+    phase: str  # "list" or "download"
     auth_required: bool
     error: str | None
     request_id: str
@@ -58,8 +54,11 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
     attachment_url = (args.get("attachment_url") or "").strip()
 
     result: DownloadResult = {
-        "status": "error", "phase": "list", "auth_required": False,
-        "error": None, "request_id": request_id,
+        "status": "error",
+        "phase": "list",
+        "auth_required": False,
+        "error": None,
+        "request_id": request_id,
     }
 
     try:
@@ -94,15 +93,18 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
         if not attachment_url:
             # Phase 1: just list attachments back to the JS so it can decide
             # auto-pick (1) vs dropdown (2+) vs surface external-only (0).
-            result.update({
-                "status": "complete",
-                "phase": "list",
-                "topic_title": topic_resp.title or "",
-                "attachments": [{"filename": a.filename, "url": a.url,
-                                 "size_bytes": a.size_bytes}
-                                for a in attachments],
-                "external_links": external,
-            })
+            result.update(
+                {
+                    "status": "complete",
+                    "phase": "list",
+                    "topic_title": topic_resp.title or "",
+                    "attachments": [
+                        {"filename": a.filename, "url": a.url, "size_bytes": a.size_bytes}
+                        for a in attachments
+                    ],
+                    "external_links": external,
+                }
+            )
             _write_result(request_id, result)
             return
 
@@ -158,14 +160,14 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
             )
             metadata_mod.write(int(scene_id), sidecar)
             sidecar_path = metadata_mod.sidecar_path(int(scene_id))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log(f"Sidecar write failed (continuing): {e}", "warning")
             sidecar_path = None
 
         # Append the eroscripts URL to scene.urls (idempotent).
         try:
             _append_scene_url(stash, scene_id, _build_thread_url(topic_id), log)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log(f"scene.urls update failed (continuing): {e}", "warning")
 
         # Trigger a targeted Stash rescan of the video's directory so Stash
@@ -177,26 +179,31 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
         if not outcome.was_duplicate:
             try:
                 _trigger_targeted_scan(stash, video_path, log)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 log(f"Stash scan trigger failed (continuing): {e}", "warning")
 
-        result.update({
-            "status": "complete",
-            "phase": "download",
-            "saved_path": outcome.saved_path,
-            "saved_filename": outcome.saved_filename,
-            "suffix_applied": outcome.suffix_applied,
-            "was_duplicate": outcome.was_duplicate,
-            "sha256": outcome.sha256,
-            "sidecar_path": sidecar_path,
-            "topic_title": topic_resp.title or "",
-        })
+        result.update(
+            {
+                "status": "complete",
+                "phase": "download",
+                "saved_path": outcome.saved_path,
+                "saved_filename": outcome.saved_filename,
+                "suffix_applied": outcome.suffix_applied,
+                "was_duplicate": outcome.was_duplicate,
+                "sha256": outcome.sha256,
+                "sidecar_path": sidecar_path,
+                "topic_title": topic_resp.title or "",
+            }
+        )
         if outcome.was_duplicate:
-            log(f"EroScripts: duplicate funscript ({outcome.saved_filename}) "
-                f"already on disk for scene {scene_id}", "info")
+            log(
+                f"EroScripts: duplicate funscript ({outcome.saved_filename}) "
+                f"already on disk for scene {scene_id}",
+                "info",
+            )
         else:
             log(f"EroScripts: saved {outcome.saved_filename} for scene {scene_id}", "info")
-    except Exception as e:  # noqa: BLE001 — task entry: surface to frontend
+    except Exception as e:
         log(f"EroScripts download task crashed: {e}", "error")
         result["status"] = "error"
         result["error"] = f"Internal error: {e}"
@@ -207,9 +214,7 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
 # ============================================================ helpers
 
 
-def _scene_video_target(
-    stash: StashClient, scene_id: str, log: Any
-) -> tuple[str, str, str] | None:
+def _scene_video_target(stash: StashClient, scene_id: str, log: Any) -> tuple[str, str, str] | None:
     """Return ``(video_directory, basename_without_extension, video_path)``.
 
     Uses ``scene.files[0]`` per the Q6 multi-file decision (download once,
@@ -219,7 +224,7 @@ def _scene_video_target(
     """
     try:
         scene = stash.find_scene(int(scene_id))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log(f"find_scene({scene_id}) failed: {e}", "warning")
         return None
     if not scene:
@@ -236,8 +241,9 @@ def _scene_video_target(
     return video_dir, base_no_ext, path
 
 
-def _match_attachment(attachments: list[TopicAttachment],
-                      attachment_url: str) -> TopicAttachment | None:
+def _match_attachment(
+    attachments: list[TopicAttachment], attachment_url: str
+) -> TopicAttachment | None:
     for a in attachments:
         if a.url == attachment_url:
             return a
@@ -324,12 +330,10 @@ def _trigger_targeted_scan(stash: StashClient, video_path: str, log: Any) -> Non
         "scanGenerateClipPreviews": False,
     }
     job_id = stash.metadata_scan(paths=[video_path], flags=flags)
-    log(f"Triggered Stash scan of {video_path} (job {job_id}) "
-        f"to detect the new funscript", "info")
+    log(f"Triggered Stash scan of {video_path} (job {job_id}) to detect the new funscript", "info")
 
 
-def _append_scene_url(stash: StashClient, scene_id: str,
-                      url: str, log: Any) -> None:
+def _append_scene_url(stash: StashClient, scene_id: str, url: str, log: Any) -> None:
     """Idempotently append a URL to ``scene.urls`` via stashapi."""
     if not url:
         return

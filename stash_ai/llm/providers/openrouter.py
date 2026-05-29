@@ -99,8 +99,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 f"[OpenRouter] Unexpected response (no choices): {json.dumps(result)[:500]}"
             )
             raise RuntimeError(
-                f"OpenRouter returned unexpected response (no choices). "
-                f"Keys: {list(result.keys())}"
+                f"OpenRouter returned unexpected response (no choices). Keys: {list(result.keys())}"
             )
 
         return result["choices"][0]
@@ -285,9 +284,7 @@ class OpenRouterProvider(BaseLLMProvider):
                                     err = data["error"]
                                     if isinstance(err, dict):
                                         err = err.get("message", str(err))
-                                    raise RuntimeError(
-                                        f"OpenRouter stream error: {err}"
-                                    )
+                                    raise RuntimeError(f"OpenRouter stream error: {err}")
                                 continue
                             delta = data["choices"][0].get("delta", {})
                             content = delta.get("content")

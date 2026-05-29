@@ -18,7 +18,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .defaults import (
     EmbeddingDefaults,
@@ -29,7 +29,6 @@ from .defaults import (
     RecommendationDefaults,
     VisionDefaults,
 )
-
 
 # =============================================================================
 # Parsing Helpers
@@ -132,7 +131,7 @@ class LLMProviderConfig:
     provider: str = LLMDefaults.PROVIDER
     model: str = LLMDefaults.MODEL
     base_url: str = LLMDefaults.BASE_URL
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     @classmethod
     def from_plugin_settings(
@@ -228,18 +227,14 @@ class RecommendationSettings:
     time_decay_days: int = RecommendationDefaults.TIME_DECAY_DAYS
 
     @classmethod
-    def from_plugin_settings(
-        cls, settings: dict[str, Any]
-    ) -> "RecommendationSettings":
+    def from_plugin_settings(cls, settings: dict[str, Any]) -> "RecommendationSettings":
         """Create RecommendationSettings from raw plugin settings dict."""
         return cls(
             top_scenes_for_profile=_parse_int(
                 settings.get("rec_top_scenes"),
                 RecommendationDefaults.TOP_SCENES_FOR_PROFILE,
             ),
-            o_weight=_parse_float(
-                settings.get("rec_o_weight"), RecommendationDefaults.O_WEIGHT
-            ),
+            o_weight=_parse_float(settings.get("rec_o_weight"), RecommendationDefaults.O_WEIGHT),
             view_weight=_parse_float(
                 settings.get("rec_view_weight"), RecommendationDefaults.VIEW_WEIGHT
             ),
@@ -287,12 +282,8 @@ class VisionSettings:
             frame_interval=_parse_int(
                 settings.get("vision_frame_interval"), VisionDefaults.FRAME_INTERVAL
             ),
-            min_frames=_parse_int(
-                settings.get("vision_min_frames"), VisionDefaults.MIN_FRAMES
-            ),
-            max_frames=_parse_int(
-                settings.get("vision_max_frames"), VisionDefaults.MAX_FRAMES
-            ),
+            min_frames=_parse_int(settings.get("vision_min_frames"), VisionDefaults.MIN_FRAMES),
+            max_frames=_parse_int(settings.get("vision_max_frames"), VisionDefaults.MAX_FRAMES),
             hosted_max_frames=_parse_int(
                 settings.get("vision_hosted_max_frames"),
                 VisionDefaults.HOSTED_MAX_FRAMES,
@@ -326,12 +317,8 @@ class FrameSettings:
         """Create FrameSettings from raw plugin settings dict."""
         return cls(
             method=settings.get("frame_analysis_method") or FrameDefaults.METHOD,
-            dynamic=_parse_bool(
-                settings.get("frame_analysis_dynamic"), FrameDefaults.DYNAMIC
-            ),
-            n_frames=_parse_int(
-                settings.get("frame_analysis_n_frames"), FrameDefaults.N_FRAMES
-            ),
+            dynamic=_parse_bool(settings.get("frame_analysis_dynamic"), FrameDefaults.DYNAMIC),
+            n_frames=_parse_int(settings.get("frame_analysis_n_frames"), FrameDefaults.N_FRAMES),
             frames_per_minute=_parse_float(
                 settings.get("frame_analysis_frames_per_minute"),
                 FrameDefaults.FRAMES_PER_MINUTE,
@@ -419,11 +406,9 @@ class PluginConfig:
     """
 
     text_llm: LLMProviderConfig = field(default_factory=LLMProviderConfig)
-    vision_llm: Optional[LLMProviderConfig] = None
+    vision_llm: LLMProviderConfig | None = None
     embedding: EmbeddingSettings = field(default_factory=EmbeddingSettings)
-    recommendations: RecommendationSettings = field(
-        default_factory=RecommendationSettings
-    )
+    recommendations: RecommendationSettings = field(default_factory=RecommendationSettings)
     vision: VisionSettings = field(default_factory=VisionSettings)
     frames: FrameSettings = field(default_factory=FrameSettings)
     o_moments: OMomentSettings = field(default_factory=OMomentSettings)
@@ -445,9 +430,7 @@ class PluginConfig:
         # Vision LLM inherits from text LLM if not explicitly configured
         raw_vision = LLMProviderConfig.from_plugin_settings(settings, "vision_llm")
         vision_llm = (
-            raw_vision.with_fallback(text_llm)
-            if settings.get("vision_llm_provider")
-            else None
+            raw_vision.with_fallback(text_llm) if settings.get("vision_llm_provider") else None
         )
 
         return cls(

@@ -1,7 +1,7 @@
 """Database query tools for Stash using direct SQLite access."""
 
-import sqlite3
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any
 

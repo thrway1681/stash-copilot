@@ -14,8 +14,6 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Optional
-
 
 _MAX_SUFFIX = 99
 
@@ -25,19 +23,19 @@ class SaveOutcome:
     """Result of placing a downloaded funscript next to a scene file."""
 
     saved: bool
-    saved_path: Optional[str]      # absolute path of the funscript on disk
-    saved_filename: Optional[str]  # basename only (e.g. "myscene-1.funscript")
+    saved_path: str | None  # absolute path of the funscript on disk
+    saved_filename: str | None  # basename only (e.g. "myscene-1.funscript")
     sha256: str
-    suffix_applied: Optional[int]  # 0 = primary, 1 = -1, ..., None on dup
-    was_duplicate: bool            # bytes matched an existing file
-    error: Optional[str] = None
+    suffix_applied: int | None  # 0 = primary, 1 = -1, ..., None on dup
+    was_duplicate: bool  # bytes matched an existing file
+    error: str | None = None
 
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def sha256_path(path: str) -> Optional[str]:
+def sha256_path(path: str) -> str | None:
     try:
         with open(path, "rb") as f:
             h = hashlib.sha256()
@@ -48,7 +46,7 @@ def sha256_path(path: str) -> Optional[str]:
         return None
 
 
-def is_valid_funscript(content: bytes) -> tuple[bool, Optional[str]]:
+def is_valid_funscript(content: bytes) -> tuple[bool, str | None]:
     """Best-effort content sanity. Cheap protection against eroscripts threads
     where the linked file has the right extension on something else.
     """
@@ -91,8 +89,12 @@ def save_funscript(
 
     if not os.path.isdir(video_directory):
         return SaveOutcome(
-            saved=False, saved_path=None, saved_filename=None, sha256=new_sha,
-            suffix_applied=None, was_duplicate=False,
+            saved=False,
+            saved_path=None,
+            saved_filename=None,
+            sha256=new_sha,
+            suffix_applied=None,
+            was_duplicate=False,
             error=f"Video directory does not exist: {video_directory}",
         )
 
@@ -100,8 +102,12 @@ def save_funscript(
         existing_sha = sha256_path(primary_path)
         if existing_sha == new_sha:
             return SaveOutcome(
-                saved=False, saved_path=primary_path, saved_filename=primary_name,
-                sha256=new_sha, suffix_applied=None, was_duplicate=True,
+                saved=False,
+                saved_path=primary_path,
+                saved_filename=primary_name,
+                sha256=new_sha,
+                suffix_applied=None,
+                was_duplicate=True,
             )
         for suffix in range(1, _MAX_SUFFIX + 1):
             candidate_name = f"{video_basename_no_ext}-{suffix}.funscript"
@@ -110,15 +116,24 @@ def save_funscript(
                 return _write(content, candidate_path, candidate_name, new_sha, suffix)
             if sha256_path(candidate_path) == new_sha:
                 return SaveOutcome(
-                    saved=False, saved_path=candidate_path,
-                    saved_filename=candidate_name, sha256=new_sha,
-                    suffix_applied=suffix, was_duplicate=True,
+                    saved=False,
+                    saved_path=candidate_path,
+                    saved_filename=candidate_name,
+                    sha256=new_sha,
+                    suffix_applied=suffix,
+                    was_duplicate=True,
                 )
         return SaveOutcome(
-            saved=False, saved_path=None, saved_filename=None, sha256=new_sha,
-            suffix_applied=None, was_duplicate=False,
-            error=(f"Refusing to save: {_MAX_SUFFIX} suffix variants already exist for "
-                   f"{video_basename_no_ext}.funscript"),
+            saved=False,
+            saved_path=None,
+            saved_filename=None,
+            sha256=new_sha,
+            suffix_applied=None,
+            was_duplicate=False,
+            error=(
+                f"Refusing to save: {_MAX_SUFFIX} suffix variants already exist for "
+                f"{video_basename_no_ext}.funscript"
+            ),
         )
 
     return _write(content, primary_path, primary_name, new_sha, 0)
@@ -130,17 +145,29 @@ def _write(content: bytes, path: str, name: str, sha: str, suffix: int) -> SaveO
             f.write(content)
     except PermissionError as e:
         return SaveOutcome(
-            saved=False, saved_path=None, saved_filename=None, sha256=sha,
-            suffix_applied=None, was_duplicate=False,
+            saved=False,
+            saved_path=None,
+            saved_filename=None,
+            sha256=sha,
+            suffix_applied=None,
+            was_duplicate=False,
             error=f"Permission denied writing {path}: {e}",
         )
     except OSError as e:
         return SaveOutcome(
-            saved=False, saved_path=None, saved_filename=None, sha256=sha,
-            suffix_applied=None, was_duplicate=False,
+            saved=False,
+            saved_path=None,
+            saved_filename=None,
+            sha256=sha,
+            suffix_applied=None,
+            was_duplicate=False,
             error=f"Could not write {path}: {e}",
         )
     return SaveOutcome(
-        saved=True, saved_path=path, saved_filename=name, sha256=sha,
-        suffix_applied=suffix, was_duplicate=False,
+        saved=True,
+        saved_path=path,
+        saved_filename=name,
+        sha256=sha,
+        suffix_applied=suffix,
+        was_duplicate=False,
     )

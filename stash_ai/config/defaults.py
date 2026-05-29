@@ -15,10 +15,10 @@ Categories:
 
 from typing import Final
 
-
 # =============================================================================
 # LLM Provider Defaults
 # =============================================================================
+
 
 class LLMDefaults:
     """Default values for LLM providers."""
@@ -32,6 +32,7 @@ class LLMDefaults:
 # Embedding Defaults
 # =============================================================================
 
+
 class EmbeddingDefaults:
     """Default values for image embedding."""
 
@@ -44,6 +45,7 @@ class EmbeddingDefaults:
 # =============================================================================
 # Recommendation Defaults
 # =============================================================================
+
 
 class RecommendationDefaults:
     """Default values for recommendation engine.
@@ -67,6 +69,7 @@ class RecommendationDefaults:
 # Vision Analysis Defaults
 # =============================================================================
 
+
 class VisionDefaults:
     """Default values for vision analysis."""
 
@@ -81,6 +84,7 @@ class VisionDefaults:
 # =============================================================================
 # Frame Analysis Defaults
 # =============================================================================
+
 
 class FrameDefaults:
     """Default values for frame extraction and analysis."""
@@ -97,6 +101,7 @@ class FrameDefaults:
 # O-Moment Defaults
 # =============================================================================
 
+
 class OMomentDefaults:
     """Default values for O-moment embedding extraction."""
 
@@ -109,6 +114,7 @@ class OMomentDefaults:
 # Performance Defaults
 # =============================================================================
 
+
 class PerformanceDefaults:
     """Default values for performance tuning."""
 
@@ -119,6 +125,7 @@ class PerformanceDefaults:
 # =============================================================================
 # Frontend Config Keys
 # =============================================================================
+
 
 class FrontendConfigKeys:
     """localStorage keys for frontend state persistence."""

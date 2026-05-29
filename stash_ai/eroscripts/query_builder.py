@@ -14,25 +14,65 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
-
 
 CATEGORY_FILTER = "#free-scripts"
 
 
 _NOISE_TOKENS = {
     # Resolution / quality tags
-    "1080p", "1080", "720p", "720", "2160p", "2160", "4k", "uhd",
-    "8k", "480p", "540p", "hd", "fhd", "qhd",
+    "1080p",
+    "1080",
+    "720p",
+    "720",
+    "2160p",
+    "2160",
+    "4k",
+    "uhd",
+    "8k",
+    "480p",
+    "540p",
+    "hd",
+    "fhd",
+    "qhd",
     # Codec / container
-    "x264", "x265", "h264", "h265", "hevc", "av1", "xvid",
-    "webdl", "web", "webrip", "bluray", "brrip", "dvdrip", "dl",
-    "mp4", "mkv", "avi", "mov", "wmv", "m4v",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "hevc",
+    "av1",
+    "xvid",
+    "webdl",
+    "web",
+    "webrip",
+    "bluray",
+    "brrip",
+    "dvdrip",
+    "dl",
+    "mp4",
+    "mkv",
+    "avi",
+    "mov",
+    "wmv",
+    "m4v",
     # Source / generic
-    "xxx", "porn", "rip", "internal", "ddp", "ddp51", "aac",
-    "10bit", "8bit", "hdr", "sdr", "dolby",
+    "xxx",
+    "porn",
+    "rip",
+    "internal",
+    "ddp",
+    "ddp51",
+    "aac",
+    "10bit",
+    "8bit",
+    "hdr",
+    "sdr",
+    "dolby",
     # Release groups commonly seen in scene names
-    "rarbg", "yify", "yts", "etrg",
+    "rarbg",
+    "yify",
+    "yts",
+    "etrg",
 }
 
 _TOKEN_SPLIT = re.compile(r"[._\-\s]+")
@@ -66,10 +106,10 @@ def filename_to_query_terms(filename: str) -> str:
 class QueryInputs:
     """Stash scene fields used to construct queries."""
 
-    title: Optional[str]
-    filename: Optional[str]
-    studio: Optional[str] = None
-    performers: Optional[list[str]] = None
+    title: str | None
+    filename: str | None
+    studio: str | None = None
+    performers: list[str] | None = None
 
 
 def with_category(query: str) -> str:

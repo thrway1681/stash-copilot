@@ -131,15 +131,9 @@ def get_text_llm_settings(
     """
     args = args or {}
 
-    provider = (
-        args.get("text_llm_provider")
-        or plugin_settings.get("text_llm_provider")
-        or "ollama"
-    )
+    provider = args.get("text_llm_provider") or plugin_settings.get("text_llm_provider") or "ollama"
 
-    model = (
-        args.get("text_llm_model") or plugin_settings.get("text_llm_model") or "llama3.1"
-    )
+    model = args.get("text_llm_model") or plugin_settings.get("text_llm_model") or "llama3.1"
 
     base_url = (
         args.get("text_llm_base_url")

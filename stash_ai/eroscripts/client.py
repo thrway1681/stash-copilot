@@ -16,11 +16,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Optional
 from urllib.parse import urljoin
 
 import requests
-
 
 BASE_URL = "https://discuss.eroscripts.com"
 USER_AGENT = "Stash-Copilot/0.1 (eroscripts integration)"
@@ -32,9 +30,9 @@ class SessionInfo:
     """Result of ``validate_session``."""
 
     valid: bool
-    username: Optional[str] = None
-    error: Optional[str] = None
-    status_code: Optional[int] = None
+    username: str | None = None
+    error: str | None = None
+    status_code: int | None = None
 
 
 @dataclass
@@ -51,13 +49,13 @@ class SearchResult:
     slug: str
     url: str
     excerpt: str
-    creator_username: Optional[str]
-    creator_avatar_template: Optional[str]
+    creator_username: str | None
+    creator_avatar_template: str | None
     like_count: int
-    created_at: Optional[str]
+    created_at: str | None
     tags: list[str]
     thumbnails: list[dict]  # raw Discourse thumbnail objects (multi-resolution)
-    category_id: Optional[int]
+    category_id: int | None
 
 
 @dataclass
@@ -66,8 +64,8 @@ class SearchResponse:
 
     ok: bool
     results: list[SearchResult]
-    error: Optional[str] = None
-    status_code: Optional[int] = None
+    error: str | None = None
+    status_code: int | None = None
     rate_limited: bool = False
 
 
@@ -75,9 +73,9 @@ class SearchResponse:
 class TopicAttachment:
     """A downloadable file linked from a topic's first post."""
 
-    filename: str                   # e.g. "MyScript_v3.funscript"
-    url: str                        # short-url form, e.g. "/uploads/short-url/xyz.funscript"
-    size_bytes: Optional[int] = None  # populated via HEAD probe; None if unknown
+    filename: str  # e.g. "MyScript_v3.funscript"
+    url: str  # short-url form, e.g. "/uploads/short-url/xyz.funscript"
+    size_bytes: int | None = None  # populated via HEAD probe; None if unknown
 
 
 @dataclass
@@ -86,16 +84,16 @@ class TopicResponse:
 
     ok: bool
     topic_id: int
-    title: Optional[str] = None
-    cooked_html: Optional[str] = None
-    funscript_attachments: Optional[list[TopicAttachment]] = None
-    external_links: Optional[list[str]] = None  # mega.nz, gumroad, patreon, etc.
-    error: Optional[str] = None
-    status_code: Optional[int] = None
+    title: str | None = None
+    cooked_html: str | None = None
+    funscript_attachments: list[TopicAttachment] | None = None
+    external_links: list[str] | None = None  # mega.nz, gumroad, patreon, etc.
+    error: str | None = None
+    status_code: int | None = None
 
 
 _FUNSCRIPT_HREF_PATTERN = re.compile(
-    r'^(?:/uploads/short-url/[^?]+\.(?:funscript|zip))$|^upload://[^?]+\.(?:funscript|zip)$',
+    r"^(?:/uploads/short-url/[^?]+\.(?:funscript|zip))$|^upload://[^?]+\.(?:funscript|zip)$",
     re.IGNORECASE,
 )
 _EXTERNAL_HOST_HREF = re.compile(
@@ -111,10 +109,12 @@ class EroScriptsClient:
         self._cookie = session_cookie
         self._timeout = timeout
         self._session = requests.Session()
-        self._session.headers.update({
-            "User-Agent": USER_AGENT,
-            "Accept": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+            }
+        )
         self._session.cookies.set("_t", session_cookie, domain="discuss.eroscripts.com")
 
     # ------------------------------------------------------------------ auth
@@ -133,7 +133,7 @@ class EroScriptsClient:
                 valid=False,
                 status_code=resp.status_code,
                 error="Session is invalid or expired (received "
-                      f"HTTP {resp.status_code}). Re-copy your `_t` cookie.",
+                f"HTTP {resp.status_code}). Re-copy your `_t` cookie.",
             )
         try:
             data = resp.json()
@@ -150,7 +150,7 @@ class EroScriptsClient:
                 valid=False,
                 status_code=resp.status_code,
                 error="Cookie is anonymous — make sure you are logged into "
-                      "eroscripts.com before copying.",
+                "eroscripts.com before copying.",
             )
         return SessionInfo(valid=True, username=username, status_code=resp.status_code)
 
@@ -168,24 +168,33 @@ class EroScriptsClient:
 
         if resp.status_code == 429:
             return SearchResponse(
-                ok=False, results=[], status_code=429, rate_limited=True,
+                ok=False,
+                results=[],
+                status_code=429,
+                rate_limited=True,
                 error="EroScripts is rate-limiting requests. Wait 30 seconds.",
             )
         if resp.status_code in (401, 403) or _is_login_redirect(resp):
             return SearchResponse(
-                ok=False, results=[], status_code=resp.status_code,
+                ok=False,
+                results=[],
+                status_code=resp.status_code,
                 error="Your eroscripts session has expired. Re-paste cookie.",
             )
         if resp.status_code != 200:
             return SearchResponse(
-                ok=False, results=[], status_code=resp.status_code,
+                ok=False,
+                results=[],
+                status_code=resp.status_code,
                 error=f"EroScripts returned HTTP {resp.status_code}.",
             )
         try:
             data = resp.json()
         except ValueError:
             return SearchResponse(
-                ok=False, results=[], status_code=resp.status_code,
+                ok=False,
+                results=[],
+                status_code=resp.status_code,
                 error="EroScripts returned a malformed search response.",
             )
 
@@ -204,24 +213,32 @@ class EroScriptsClient:
 
         if resp.status_code in (401, 403) or _is_login_redirect(resp):
             return TopicResponse(
-                ok=False, topic_id=topic_id, status_code=resp.status_code,
+                ok=False,
+                topic_id=topic_id,
+                status_code=resp.status_code,
                 error="Your eroscripts session has expired. Re-paste cookie.",
             )
         if resp.status_code == 404:
             return TopicResponse(
-                ok=False, topic_id=topic_id, status_code=404,
+                ok=False,
+                topic_id=topic_id,
+                status_code=404,
                 error="Topic not found (it may have been deleted).",
             )
         if resp.status_code != 200:
             return TopicResponse(
-                ok=False, topic_id=topic_id, status_code=resp.status_code,
+                ok=False,
+                topic_id=topic_id,
+                status_code=resp.status_code,
                 error=f"EroScripts returned HTTP {resp.status_code}.",
             )
         try:
             data = resp.json()
         except ValueError:
             return TopicResponse(
-                ok=False, topic_id=topic_id, status_code=resp.status_code,
+                ok=False,
+                topic_id=topic_id,
+                status_code=resp.status_code,
                 error="EroScripts returned a malformed topic response.",
             )
 
@@ -247,7 +264,7 @@ class EroScriptsClient:
         )
 
     # ---------------------------------------------------------- size probe
-    def _probe_size(self, attachment_url: str) -> Optional[int]:
+    def _probe_size(self, attachment_url: str) -> int | None:
         """Return the attachment size via a HEAD request, or None on error.
 
         Discourse redirects ``/uploads/short-url/...`` to the underlying CDN
@@ -275,7 +292,7 @@ class EroScriptsClient:
             return None
 
     # ------------------------------------------------------------- download
-    def download_attachment(self, attachment_url: str) -> tuple[bool, bytes, Optional[str]]:
+    def download_attachment(self, attachment_url: str) -> tuple[bool, bytes, str | None]:
         """Download an attachment URL. Follows Discourse's CDN redirect.
 
         Returns ``(ok, content, error_message)``.
@@ -337,20 +354,22 @@ def _parse_search_results(data: dict) -> list[SearchResult]:
             continue
         post = posts_by_topic.get(tid, {})
         slug = t.get("slug", "")
-        results.append(SearchResult(
-            topic_id=tid,
-            title=t.get("title", "(untitled)"),
-            slug=slug,
-            url=f"{BASE_URL}/t/{slug}/{tid}" if slug else f"{BASE_URL}/t/{tid}",
-            excerpt=post.get("blurb") or t.get("excerpt") or "",
-            creator_username=post.get("username"),
-            creator_avatar_template=post.get("avatar_template"),
-            like_count=int(post.get("like_count") or 0),
-            created_at=t.get("created_at"),
-            tags=[tag.get("name") for tag in (t.get("tags") or []) if tag.get("name")],
-            thumbnails=t.get("thumbnails") or [],
-            category_id=t.get("category_id"),
-        ))
+        results.append(
+            SearchResult(
+                topic_id=tid,
+                title=t.get("title", "(untitled)"),
+                slug=slug,
+                url=f"{BASE_URL}/t/{slug}/{tid}" if slug else f"{BASE_URL}/t/{tid}",
+                excerpt=post.get("blurb") or t.get("excerpt") or "",
+                creator_username=post.get("username"),
+                creator_avatar_template=post.get("avatar_template"),
+                like_count=int(post.get("like_count") or 0),
+                created_at=t.get("created_at"),
+                tags=[tag.get("name") for tag in (t.get("tags") or []) if tag.get("name")],
+                thumbnails=t.get("thumbnails") or [],
+                category_id=t.get("category_id"),
+            )
+        )
     return results
 
 
@@ -368,7 +387,7 @@ class _AttachmentLinkParser(HTMLParser):
         self._links: list[tuple[str, list[str]]] = []  # (href, text-fragments)
         self._depth = 0  # nesting depth inside a matching <a>
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "a":
             href = next((v for k, v in attrs if k == "href" and v), None) or ""
             if _FUNSCRIPT_HREF_PATTERN.match(href):
@@ -378,7 +397,7 @@ class _AttachmentLinkParser(HTMLParser):
         if self._depth:
             self._depth += 1
 
-    def handle_endtag(self, tag: str) -> None:  # noqa: ARG002 — required signature
+    def handle_endtag(self, tag: str) -> None:
         if self._depth:
             self._depth -= 1
 
@@ -412,7 +431,7 @@ def _extract_funscript_attachments(cooked_html: str) -> list[TopicAttachment]:
     parser = _AttachmentLinkParser()
     try:
         parser.feed(cooked_html or "")
-    except Exception:  # noqa: BLE001 — malformed HTML shouldn't break search
+    except Exception:
         return []
     return parser.attachments()
 

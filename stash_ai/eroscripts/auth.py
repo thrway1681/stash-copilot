@@ -11,8 +11,6 @@ import json
 import os
 import stat
 from dataclasses import dataclass
-from typing import Optional
-
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 AUTH_FILE_PATH = os.path.join(_PLUGIN_ROOT, ".eroscripts_auth.json")
@@ -23,10 +21,10 @@ class StoredAuth:
     """Persisted auth state. ``cookie`` is the raw ``_t`` value (URL-encoded)."""
 
     cookie: str
-    username: Optional[str] = None
+    username: str | None = None
 
 
-def load() -> Optional[StoredAuth]:
+def load() -> StoredAuth | None:
     """Return the stored auth or ``None`` if not configured / unreadable."""
     if not os.path.isfile(AUTH_FILE_PATH):
         return None
@@ -42,7 +40,7 @@ def load() -> Optional[StoredAuth]:
     return StoredAuth(cookie=cookie, username=username if isinstance(username, str) else None)
 
 
-def save(cookie: str, username: Optional[str]) -> None:
+def save(cookie: str, username: str | None) -> None:
     """Write the cookie to the auth file with mode 0600."""
     payload = {"cookie": cookie, "username": username}
     with open(AUTH_FILE_PATH, "w") as f:

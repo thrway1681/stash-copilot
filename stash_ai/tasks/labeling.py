@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -153,8 +152,7 @@ class LabelingTask:
         use_sampling = total_count > max_candidates
         if use_sampling:
             self.log(
-                f"Sampling {max_candidates} of {total_count} candidates "
-                f"(memory-safe mode)",
+                f"Sampling {max_candidates} of {total_count} candidates (memory-safe mode)",
                 "info",
             )
             cursor.execute(
@@ -193,9 +191,7 @@ class LabelingTask:
             key = (row["scene_id"], row["frame_index"])
             if key in labeled_keys:
                 continue
-            frame_embeddings_list.append(
-                self.storage._unpack_embedding(row["embedding"])
-            )
+            frame_embeddings_list.append(self.storage._unpack_embedding(row["embedding"]))
             frame_keys.append(key)
             frame_timestamps[key] = row["timestamp"]
 
@@ -226,9 +222,7 @@ class LabelingTask:
             )
 
         tag_info = [{"text": t["text"], "source": t["source"]} for t in tag_data]
-        tag_embeddings = np.array(
-            [t["embedding"] for t in tag_data], dtype=np.float32
-        )
+        tag_embeddings = np.array([t["embedding"] for t in tag_data], dtype=np.float32)
 
         # 4. Compute similarity matrix (normalize in-place to halve peak memory)
         self.log("Computing frame-tag similarities...", "info")
@@ -267,8 +261,11 @@ class LabelingTask:
                 scene_title_cache[scene_id] = self._get_scene_title(scene_id)
 
             frame_path = str(
-                plugin_dir / "assets" / "embedded_frames"
-                / f"scene_{scene_id}" / f"frame_{frame_index:04d}.jpg"
+                plugin_dir
+                / "assets"
+                / "embedded_frames"
+                / f"scene_{scene_id}"
+                / f"frame_{frame_index:04d}.jpg"
             )
             timestamp = frame_timestamps.get((scene_id, frame_index), 0.0)
 
@@ -296,20 +293,21 @@ class LabelingTask:
             sampling_method="uncertainty",
             batch_size=config.batch_size,
             total_frames=len(batch),
-            config_json=json.dumps({
-                "uncertainty_low": config.uncertainty_low,
-                "uncertainty_high": config.uncertainty_high,
-                "max_suggested_tags": config.max_suggested_tags,
-                "model_key": self.model_key,
-            }),
+            config_json=json.dumps(
+                {
+                    "uncertainty_low": config.uncertainty_low,
+                    "uncertainty_high": config.uncertainty_high,
+                    "max_suggested_tags": config.max_suggested_tags,
+                    "model_key": self.model_key,
+                }
+            ),
         )
 
         # 8. Build vocabulary list for autocomplete
-        vocabulary = sorted(set(t["text"] for t in tag_info))
+        vocabulary = sorted({t["text"] for t in tag_info})
 
         self.log(
-            f"Session {session_id} ready: {len(batch)} frames, "
-            f"{len(vocabulary)} vocabulary items",
+            f"Session {session_id} ready: {len(batch)} frames, {len(vocabulary)} vocabulary items",
             "info",
         )
 
@@ -431,8 +429,11 @@ class LabelingTask:
         with tarfile.open(tar_path, "w") as tar:
             for (scene_id, frame_index), tags in frame_tags.items():
                 frame_path = (
-                    plugin_dir / "assets" / "embedded_frames"
-                    / f"scene_{scene_id}" / f"frame_{frame_index:04d}.jpg"
+                    plugin_dir
+                    / "assets"
+                    / "embedded_frames"
+                    / f"scene_{scene_id}"
+                    / f"frame_{frame_index:04d}.jpg"
                 )
                 if not frame_path.exists():
                     self.log(f"Frame not found: {frame_path}", "warning")

@@ -403,9 +403,7 @@ class MyPlugin(StashPlugin):
             handlers[name] = self._make_preference_handler(name)
         return handlers
 
-    def _make_preference_handler(
-        self, task_name: str
-    ) -> Callable[[dict[str, Any]], None]:
+    def _make_preference_handler(self, task_name: str) -> Callable[[dict[str, Any]], None]:
         """Bind ``task_name`` into a preference handler with the standard shape."""
 
         def handler(args: dict[str, Any]) -> None:
@@ -429,8 +427,9 @@ class MyPlugin(StashPlugin):
         """Validate (or clear/re-check) the EroScripts session cookie."""
         try:
             from stash_ai.tasks import eroscripts_auth as task_module
+
             task_module.run(args, self.log)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.error(f"eroscripts_validate_auth failed: {e}")
 
     def run_eroscripts_search(self, args: dict[str, Any]) -> None:
@@ -440,8 +439,9 @@ class MyPlugin(StashPlugin):
             return
         try:
             from stash_ai.tasks import eroscripts_search as task_module
+
             task_module.run(self.stash, args, self.log)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.error(f"eroscripts_search failed: {e}")
 
     def run_eroscripts_download(self, args: dict[str, Any]) -> None:
@@ -451,8 +451,9 @@ class MyPlugin(StashPlugin):
             return
         try:
             from stash_ai.tasks import eroscripts_download as task_module
+
             task_module.run(self.stash, args, self.log)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.error(f"eroscripts_download failed: {e}")
 
     def run_eroscripts_status(self, args: dict[str, Any]) -> None:
@@ -462,8 +463,9 @@ class MyPlugin(StashPlugin):
             return
         try:
             from stash_ai.tasks import eroscripts_status as task_module
+
             task_module.run(self.stash, args, self.log)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.error(f"eroscripts_status failed: {e}")
 
     def run_stats_summary(self, args: dict[str, Any]) -> None:
@@ -1124,7 +1126,9 @@ class MyPlugin(StashPlugin):
         request_id = args.get("request_id", "")
         batch_size = int(args.get("batch_size", 200))
 
-        self.log(f"Preparing labeling session (batch_size={batch_size}), request_id={request_id}", "info")
+        self.log(
+            f"Preparing labeling session (batch_size={batch_size}), request_id={request_id}", "info"
+        )
 
         try:
             from stash_ai.embeddings.config import EmbeddingConfig
@@ -1152,9 +1156,7 @@ class MyPlugin(StashPlugin):
 
             # Sync tag vocabulary before preparing session
             self.log("Syncing tag vocabulary...", "info")
-            tag_vocab = TagVocabulary(
-                storage=storage, model_key=model_key, log_callback=self.log
-            )
+            tag_vocab = TagVocabulary(storage=storage, model_key=model_key, log_callback=self.log)
             stash_tags = [t["name"] for t in self.stash_client.find_tags(f={})]
             tag_vocab.ensure_embeddings(stash_tags=stash_tags)
 
@@ -1196,13 +1198,17 @@ class MyPlugin(StashPlugin):
 
             assets_dir = Path(__file__).parent / "assets"
             result_file = assets_dir / f"labeling_session_{request_id}.json"
-            result_file.write_text(json.dumps({
-                "status": "error",
-                "session_id": "",
-                "batch": [],
-                "vocabulary": [],
-                "error": str(e),
-            }))
+            result_file.write_text(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "session_id": "",
+                        "batch": [],
+                        "vocabulary": [],
+                        "error": str(e),
+                    }
+                )
+            )
 
     def run_sync_labeling_annotations(self, args: dict[str, Any]) -> None:
         """Sync annotations from the labeling UI."""
@@ -1212,6 +1218,7 @@ class MyPlugin(StashPlugin):
         try:
             import json
             from pathlib import Path
+
             from stash_ai.embeddings.storage import EmbeddingStorage
             from stash_ai.tasks.labeling import LabelingTask
 
@@ -1243,6 +1250,7 @@ class MyPlugin(StashPlugin):
         try:
             import json
             from pathlib import Path
+
             from stash_ai.embeddings.storage import EmbeddingStorage
             from stash_ai.tasks.labeling import LabelingTask
             from stash_ai.tasks.labeling_types import LabelingConfig
@@ -1272,13 +1280,17 @@ class MyPlugin(StashPlugin):
 
             assets_dir = Path(__file__).parent / "assets"
             result_file = assets_dir / f"labeling_export_{request_id}.json"
-            result_file.write_text(json.dumps({
-                "status": "error",
-                "export_path": "",
-                "total_images": 0,
-                "total_tags": 0,
-                "error": str(e),
-            }))
+            result_file.write_text(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "export_path": "",
+                        "total_images": 0,
+                        "total_tags": 0,
+                        "error": str(e),
+                    }
+                )
+            )
 
     def run_get_labeling_sessions(self, args: dict[str, Any]) -> None:
         """List labeling sessions."""
@@ -1287,6 +1299,7 @@ class MyPlugin(StashPlugin):
         try:
             import json
             from pathlib import Path
+
             from stash_ai.embeddings.storage import EmbeddingStorage
 
             storage = EmbeddingStorage()
@@ -1294,10 +1307,15 @@ class MyPlugin(StashPlugin):
 
             assets_dir = Path(__file__).parent / "assets"
             result_file = assets_dir / f"labeling_sessions_{request_id}.json"
-            result_file.write_text(json.dumps({
-                "status": "complete",
-                "sessions": sessions,
-            }, indent=2))
+            result_file.write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "sessions": sessions,
+                    },
+                    indent=2,
+                )
+            )
 
         except Exception as e:
             self.log(f"Error listing sessions: {e}", "error")
@@ -3099,7 +3117,8 @@ class MyPlugin(StashPlugin):
 
             if not scene_id:
                 self._write_frame_search_result(
-                    request_id, {"status": "error", "error": "Scene ID is required", "request_id": request_id}
+                    request_id,
+                    {"status": "error", "error": "Scene ID is required", "request_id": request_id},
                 )
                 return
 
@@ -3108,10 +3127,17 @@ class MyPlugin(StashPlugin):
                 limit = int(args.get("limit", 20))
             except ValueError as e:
                 self._write_frame_search_result(
-                    request_id, {"status": "error", "error": f"Invalid parameter: {e}", "request_id": request_id}
+                    request_id,
+                    {
+                        "status": "error",
+                        "error": f"Invalid parameter: {e}",
+                        "request_id": request_id,
+                    },
                 )
                 return
-            self.log(f"Frame search: scene={scene_id}, timestamp={timestamp:.1f}s, limit={limit}", "info")
+            self.log(
+                f"Frame search: scene={scene_id}, timestamp={timestamp:.1f}s, limit={limit}", "info"
+            )
 
             # Step 1: Resolve video file path from Stash SQLite
             db_path = get_stash_db_path()
@@ -3137,7 +3163,11 @@ class MyPlugin(StashPlugin):
             if not row:
                 self._write_frame_search_result(
                     request_id,
-                    {"status": "error", "error": f"Could not find video file for scene {scene_id}", "request_id": request_id},
+                    {
+                        "status": "error",
+                        "error": f"Could not find video file for scene {scene_id}",
+                        "request_id": request_id,
+                    },
                 )
                 return
 
@@ -3156,7 +3186,11 @@ class MyPlugin(StashPlugin):
             if frame_bytes is None:
                 self._write_frame_search_result(
                     request_id,
-                    {"status": "error", "error": f"Failed to extract frame at {timestamp:.1f}s", "request_id": request_id},
+                    {
+                        "status": "error",
+                        "error": f"Failed to extract frame at {timestamp:.1f}s",
+                        "request_id": request_id,
+                    },
                 )
                 return
 
@@ -3171,7 +3205,11 @@ class MyPlugin(StashPlugin):
             if not image_provider or not image_model:
                 self._write_frame_search_result(
                     request_id,
-                    {"status": "error", "error": "No image embedding provider configured. Set up in Plugin Settings.", "request_id": request_id},
+                    {
+                        "status": "error",
+                        "error": "No image embedding provider configured. Set up in Plugin Settings.",
+                        "request_id": request_id,
+                    },
                 )
                 return
 
@@ -3186,7 +3224,11 @@ class MyPlugin(StashPlugin):
             if not hasattr(embedder, "embed_image"):
                 self._write_frame_search_result(
                     request_id,
-                    {"status": "error", "error": f"Provider '{image_provider}' does not support image embedding.", "request_id": request_id},
+                    {
+                        "status": "error",
+                        "error": f"Provider '{image_provider}' does not support image embedding.",
+                        "request_id": request_id,
+                    },
                 )
                 return
             result = embedder.embed_image(frame_bytes)
@@ -3263,7 +3305,11 @@ class MyPlugin(StashPlugin):
             self.error(f"Failed to import modules: {e}")
             self._write_frame_search_result(
                 args.get("request_id", ""),
-                {"status": "error", "error": f"Failed to import modules: {e}", "request_id": args.get("request_id", "")},
+                {
+                    "status": "error",
+                    "error": f"Failed to import modules: {e}",
+                    "request_id": args.get("request_id", ""),
+                },
             )
         except Exception as e:
             self.error(f"Frame search error: {e}")

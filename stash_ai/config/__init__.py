@@ -27,13 +27,6 @@ Defaults:
 """
 
 # Legacy exports - for backwards compatibility
-from .legacy import (
-    LLMConfig,
-    LLMSettingsLegacy as LLMSettings,  # Alias for backwards compatibility
-    get_text_llm_settings,
-    get_vision_llm_settings,
-)
-
 # Default value classes
 from .defaults import (
     EmbeddingDefaults,
@@ -45,6 +38,12 @@ from .defaults import (
     PerformanceDefaults,
     RecommendationDefaults,
     VisionDefaults,
+)
+from .legacy import (
+    LLMConfig,
+    LLMSettingsLegacy as LLMSettings,  # Alias for backwards compatibility
+    get_text_llm_settings,
+    get_vision_llm_settings,
 )
 
 # New typed settings classes

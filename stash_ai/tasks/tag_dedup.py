@@ -75,9 +75,7 @@ class FindDuplicateTagsTask:
         try:
             # 1. Load tag embeddings (only stash_tag source)
             tag_embeddings_data = self.storage.get_all_tag_embeddings(self.model_key)
-            stash_tags_only = [
-                t for t in tag_embeddings_data if t["source"] == "stash_tag"
-            ]
+            stash_tags_only = [t for t in tag_embeddings_data if t["source"] == "stash_tag"]
             if not stash_tags_only:
                 return FindDuplicateTagsResult(
                     status="no_embeddings",
@@ -89,16 +87,16 @@ class FindDuplicateTagsTask:
 
             # 2. Build embedding matrix
             tag_names = [t["text"] for t in stash_tags_only]
-            embeddings = np.array(
-                [t["embedding"] for t in stash_tags_only], dtype=np.float32
-            )
+            embeddings = np.array([t["embedding"] for t in stash_tags_only], dtype=np.float32)
 
             # 3. Compute all-pairs cosine similarity
             similarities = self._compute_all_pairs(embeddings)
 
             # 4. Extract pairs above threshold
             pairs = self._extract_candidate_pairs(similarities, tag_names)
-            self.log(f"Found {len(pairs)} pairs above {self.SIMILARITY_THRESHOLD} threshold", "info")
+            self.log(
+                f"Found {len(pairs)} pairs above {self.SIMILARITY_THRESHOLD} threshold", "info"
+            )
 
             if not pairs:
                 return FindDuplicateTagsResult(
@@ -110,7 +108,8 @@ class FindDuplicateTagsTask:
             # 5. Filter out previously dismissed pairs
             dismissed = self.storage.get_dismissed_tag_merges()
             pairs = [
-                (a, b, sim) for a, b, sim in pairs
+                (a, b, sim)
+                for a, b, sim in pairs
                 if (min(a.lower(), b.lower()), max(a.lower(), b.lower())) not in dismissed
             ]
             self.log(f"{len(pairs)} pairs after excluding dismissed", "info")
@@ -133,12 +132,14 @@ class FindDuplicateTagsTask:
                     continue
 
                 suggested_keep = "a" if info_a["scene_count"] >= info_b["scene_count"] else "b"
-                candidates.append(TagDedupCandidate(
-                    tag_a=info_a,
-                    tag_b=info_b,
-                    similarity=round(sim, 4),
-                    suggested_keep=suggested_keep,
-                ))
+                candidates.append(
+                    TagDedupCandidate(
+                        tag_a=info_a,
+                        tag_b=info_b,
+                        similarity=round(sim, 4),
+                        suggested_keep=suggested_keep,
+                    )
+                )
 
             # Sort by descending similarity
             candidates.sort(key=lambda c: c["similarity"], reverse=True)
@@ -158,9 +159,7 @@ class FindDuplicateTagsTask:
                 error=str(e),
             )
 
-    def _compute_all_pairs(
-        self, embeddings: NDArray[np.float32]
-    ) -> NDArray[np.float32]:
+    def _compute_all_pairs(self, embeddings: NDArray[np.float32]) -> NDArray[np.float32]:
         """Compute all-pairs cosine similarity matrix.
 
         Args:
@@ -193,10 +192,7 @@ class FindDuplicateTagsTask:
         ri, ci, si = rows[mask], cols[mask], sims[mask]
         # Sort descending by similarity
         order = np.argsort(si)[::-1]
-        return [
-            (tag_names[int(ri[k])], tag_names[int(ci[k])], float(si[k]))
-            for k in order
-        ]
+        return [(tag_names[int(ri[k])], tag_names[int(ci[k])], float(si[k])) for k in order]
 
     def _get_tag_info_with_scene_counts(self) -> dict[str, TagInfo]:
         """Get tag IDs and scene counts from Stash.

@@ -3037,7 +3037,9 @@ class SceneVisionTask:
             history.use_limited_frames = True
 
         # Helper to update and save progress
-        def update_progress(status: str, message: str, progress: int, total_frames: int = 0) -> None:
+        def update_progress(
+            status: str, message: str, progress: int, total_frames: int = 0
+        ) -> None:
             history.status = status
             history.status_message = message
             history.progress = progress

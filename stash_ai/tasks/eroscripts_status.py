@@ -23,10 +23,8 @@ import os
 import time
 from typing import Any, TypedDict
 
-from ..stash_client import StashClient
-
 from ..eroscripts import metadata as metadata_mod
-
+from ..stash_client import StashClient
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _RESULTS_DIR = os.path.join(_PLUGIN_ROOT, "assets", "eroscripts")
@@ -34,12 +32,12 @@ _RESULT_TTL_SECONDS = 3600
 
 
 class StatusResult(TypedDict, total=False):
-    status: str                      # "complete" or "error"
-    state: str                       # matched / orphan_local / orphan_metadata / empty
+    status: str  # "complete" or "error"
+    state: str  # matched / orphan_local / orphan_metadata / empty
     has_sidecar: bool
     has_funscript_on_disk: bool
-    funscript_filename: str | None   # basename of the .funscript Stash will use
-    sidecar: dict | None             # raw sidecar metadata, if present
+    funscript_filename: str | None  # basename of the .funscript Stash will use
+    sidecar: dict | None  # raw sidecar metadata, if present
     error: str | None
     request_id: str
 
@@ -53,10 +51,14 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
     scene_id = str(args.get("scene_id") or "").strip()
 
     result: StatusResult = {
-        "status": "error", "state": "empty",
-        "has_sidecar": False, "has_funscript_on_disk": False,
-        "funscript_filename": None, "sidecar": None,
-        "error": None, "request_id": request_id,
+        "status": "error",
+        "state": "empty",
+        "has_sidecar": False,
+        "has_funscript_on_disk": False,
+        "funscript_filename": None,
+        "sidecar": None,
+        "error": None,
+        "request_id": request_id,
     }
 
     try:
@@ -76,7 +78,7 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
         # auto-detects; any -1/-2 variants are inert.
         try:
             scene = stash.find_scene(int(scene_id))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log(f"find_scene({scene_id}) failed: {e}", "warning")
             scene = None
         if scene:
@@ -101,7 +103,7 @@ def run(stash: StashClient, args: dict[str, Any], log: Any) -> None:
             result["state"] = "empty"
 
         result["status"] = "complete"
-    except Exception as e:  # noqa: BLE001 — task entry: surface to frontend
+    except Exception as e:
         log(f"EroScripts status task crashed: {e}", "error")
         result["status"] = "error"
         result["error"] = f"Internal error: {e}"

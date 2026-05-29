@@ -144,15 +144,17 @@ class TagSuggestionsTask:
 
             voting_sims = tag_similarities[voting_mask]
 
-            results.append({
-                "tag_id": tag["id"],
-                "tag_name": tag["name"],
-                "frame_count": len(voting_frames),
-                "max_similarity": float(np.max(voting_sims)),
-                "mean_similarity": float(np.mean(voting_sims)),
-                "voting_frames": voting_frames.tolist(),
-                "voting_similarities": voting_sims.tolist(),
-            })
+            results.append(
+                {
+                    "tag_id": tag["id"],
+                    "tag_name": tag["name"],
+                    "frame_count": len(voting_frames),
+                    "max_similarity": float(np.max(voting_sims)),
+                    "mean_similarity": float(np.mean(voting_sims)),
+                    "voting_frames": voting_frames.tolist(),
+                    "voting_similarities": voting_sims.tolist(),
+                }
+            )
 
         return results
 
@@ -176,9 +178,7 @@ class TagSuggestionsTask:
                     error="No frame embeddings found for this scene",
                 )
 
-            frame_embeddings = np.array(
-                [f["embedding"] for f in frame_data], dtype=np.float32
-            )
+            frame_embeddings = np.array([f["embedding"] for f in frame_data], dtype=np.float32)
             frame_timestamps = [f["timestamp"] for f in frame_data]
 
             # 2. Load tag embeddings
@@ -250,14 +250,16 @@ class TagSuggestionsTask:
                     vote["voting_similarities"],
                     frame_timestamps,
                 )
-                suggestions.append({
-                    "tag_id": vote["tag_id"],
-                    "tag_name": vote["tag_name"],
-                    "max_similarity": vote["max_similarity"],
-                    "mean_similarity": vote["mean_similarity"],
-                    "frame_count": vote["frame_count"],
-                    "evidence_frames": evidence,
-                })
+                suggestions.append(
+                    {
+                        "tag_id": vote["tag_id"],
+                        "tag_name": vote["tag_name"],
+                        "max_similarity": vote["max_similarity"],
+                        "mean_similarity": vote["mean_similarity"],
+                        "frame_count": vote["frame_count"],
+                        "evidence_frames": evidence,
+                    }
+                )
 
             return TagSuggestionsResult(
                 status="complete",
@@ -336,15 +338,15 @@ class TagSuggestionsTask:
             seconds = int(ts % 60)
             ts_str = f"{minutes}:{seconds:02d}"
 
-            frame_path = (
-                f"assets/embedded_frames/scene_{scene_id}/frame_{frame_idx:04d}.jpg"
-            )
+            frame_path = f"assets/embedded_frames/scene_{scene_id}/frame_{frame_idx:04d}.jpg"
 
-            evidence.append({
-                "frame_index": frame_idx,
-                "similarity": round(sim, 3),
-                "timestamp": ts_str,
-                "thumbnail_path": frame_path,
-            })
+            evidence.append(
+                {
+                    "frame_index": frame_idx,
+                    "similarity": round(sim, 3),
+                    "timestamp": ts_str,
+                    "thumbnail_path": frame_path,
+                }
+            )
 
         return evidence
