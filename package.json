@@ -4,7 +4,7 @@
   "description": "AI-powered assistant for your [StashApp](https://github.com/stashapp/stash) library. Chat with your library, get insights, and analyze scenes using vision AI.",
   "main": "stash-copilot.js",
   "scripts": {
-    "postinstall": "cp node_modules/marked/lib/marked.umd.js assets/marked.min.js && cp node_modules/dompurify/dist/purify.min.js assets/purify.min.js && cp node_modules/plotly.js-gl3d-dist-min/plotly-gl3d.min.js assets/plotly-gl3d.min.js"
+    "postinstall": "mkdir -p assets && cp node_modules/marked/lib/marked.umd.js assets/marked.min.js && cp node_modules/dompurify/dist/purify.min.js assets/purify.min.js && cp node_modules/plotly.js-gl3d-dist-min/plotly-gl3d.min.js assets/plotly-gl3d.min.js"
   },
   "repository": {
     "type": "git",
