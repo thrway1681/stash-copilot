@@ -6,21 +6,21 @@ Runs on pushes to `main`/`dev` and PRs into either.
 
 | Job | Gate | What it does |
 |---|---|---|
-| **Test** | **blocking** | `uv sync --extra dev` + `pytest` (deselects the one known-failing `test_caption_dashboard` test so it can't mask regressions). |
-| Lint & Format | advisory | `ruff check` + `ruff format --check`, scoped to `stash-copilot.py stash_ai/`. |
-| Type Check | advisory | strict `mypy .`. |
+| **Test** | **blocking** | `uv sync --extra dev` + `pytest` (full suite). |
+| **Lint & Format** | **blocking** | `ruff check` + `ruff format --check`, scoped to `stash-copilot.py stash_ai/`. |
+| **Type Check** | **blocking** | strict `mypy stash-copilot.py stash_ai/`. |
 | **Integration** | **blocking** (needs Test) | Boots a real Dockerized Stash, runs the `docs/TESTING.md` §6 flow (setup → scan → OpenCLIP embed → recommendations) and asserts real recs come back. |
 
-Lint and type checks are advisory because the package carries a known baseline
-(~97 ruff findings, ~124 mypy errors). The intent is "no **new** errors." To make
-them blocking, first run a cleanup pass:
+All four jobs are blocking gates. Lint, format, and type checks are scoped to the
+shipped package (`stash-copilot.py` + `stash_ai/`) — matching the `[tool.mypy]`
+`files` setting — so throwaway `poc_*`/`standalone`/experimental `tools` scripts
+don't gate releases. Keep the package clean:
 
 ```bash
-uv run --extra dev ruff check --fix stash-copilot.py stash_ai/
-uv run --extra dev ruff format stash-copilot.py stash_ai/
+uv run --extra dev ruff check stash-copilot.py stash_ai/
+uv run --extra dev ruff format --check stash-copilot.py stash_ai/
+uv run --extra dev mypy stash-copilot.py stash_ai/
 ```
-
-then drop the `continue-on-error: true` lines.
 
 ## Releases (`.github/workflows/release.yml`)
 

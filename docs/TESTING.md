@@ -31,10 +31,7 @@ packages, `uv sync` will prune them back to the lockfile — that's expected.)
 uv run --extra dev pytest -q
 ```
 
-Expected: **all pass except one known, unrelated pre-existing failure** —
-`tests/tools/test_caption_dashboard.py::test_load_recent_scenes_returns_last_n`
-(`KeyError: 'sample_captions'`). It fails identically on a clean checkout and is
-not caused by the local-dev seam. Everything else should be green.
+Expected: **all pass.**
 
 Run a single file or test while iterating:
 
@@ -46,14 +43,15 @@ uv run --extra dev pytest tests/test_stash_client_seam.py::TestPluginInjection -
 ## 4. Type-check & lint
 
 ```bash
-uv run --extra dev mypy .                              # strict typing (scoped to stash_ai + entry point via config)
+uv run --extra dev mypy stash-copilot.py stash_ai/         # strict typing, package + entry point
 uv run --extra dev ruff check stash-copilot.py stash_ai/   # lint the package + entry point
+uv run --extra dev ruff format --check stash-copilot.py stash_ai/
 ```
 
-These have a known baseline of pre-existing findings (mypy ~123, ruff ~97 for the
-package + entry point). When changing code, compare against that baseline — the
-goal is "no new errors," not zero. (`ruff check .` over the *whole* repo reports
-more, since it also scans throwaway `poc_*.py` / `standalone_embed.py` scripts.)
+These are **clean and CI-blocking** for the shipped package (`stash-copilot.py` +
+`stash_ai/`); keep them at zero. The scope deliberately excludes throwaway
+`poc_*.py` / `standalone_embed.py` / experimental `tools/` scripts (running
+`mypy .` or `ruff check .` over the whole repo reports findings in those).
 
 ## 5. Run a task with NO Stash server (fast loop)
 

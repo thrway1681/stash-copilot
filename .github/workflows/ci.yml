@@ -16,9 +16,6 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  # The one pre-existing test failure, unrelated to any change under test. Tracked
-  # separately; deselected so it doesn't mask real regressions in the gate.
-  KNOWN_FAILING: "tests/tools/test_caption_dashboard.py::test_load_recent_scenes_returns_last_n"
 
 jobs:
   # Hard gate. Everything below the unit suite must stay green.
@@ -39,7 +36,7 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Run tests
-        run: uv run --extra dev pytest -q --tb=short --deselect "${KNOWN_FAILING}"
+        run: uv run --extra dev pytest -q --tb=short
 
   # Hard gate: the package is lint- and format-clean. Keep it that way.
   lint:

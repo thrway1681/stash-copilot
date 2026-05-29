@@ -128,9 +128,11 @@ def test_load_recent_scenes_returns_last_n(tmp_path: Path) -> None:
     # Newest first (last lines of file)
     assert scenes[0]["scene_id"] == 19
     assert scenes[4]["scene_id"] == 15
-    # Each has sample_frames and sample_captions
-    assert len(scenes[0]["sample_frames"]) <= 5
-    assert len(scenes[0]["sample_captions"]) == 2
+    # Captions are embedded per-frame inside sample_frames (there is no separate
+    # sample_captions list — that predates the per-frame caption refactor).
+    assert len(scenes[0]["sample_frames"]) == 5
+    assert all("caption" in f for f in scenes[0]["sample_frames"])
+    assert scenes[0]["sample_frames"][0]["caption"] == "Caption for s19_f0000.jpg"
 
 
 def test_load_recent_scenes_handles_empty(tmp_path: Path) -> None:
