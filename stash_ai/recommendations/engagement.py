@@ -19,14 +19,13 @@ class EngagementCalculator:
     Calculate engagement scores for scenes.
 
     Supports two scoring methods:
-    1. Base Weighted: Static weights (o_count > views > duration)
-    2. Time Decayed: Recent engagement weighs more via exponential decay
+    1. Base Weighted: Canonical formula (ADR-0004): o_count*20 + replays*2 + stars*1.5
+    2. Time Decayed: Base score multiplied by exponential recency decay (30-day half-life)
     """
 
     DEFAULT_WEIGHTS: EngagementWeights = {
         "o_count": 20.0,  # Median scene plays between o_counts
         "view_count": 2.0,  # Per replay (views beyond the first)
-        "play_duration": 1.0,  # Per hour
         "rating": 1.5,  # Per star on 5-star scale (rating100/20), only adds if rated
     }
 
@@ -46,13 +45,22 @@ class EngagementCalculator:
         self.time_decay = time_decay or self.DEFAULT_TIME_DECAY
         self.log = log_callback or (lambda msg, level: None)
 
-    def get_all_scene_engagement(self) -> dict[int, SceneEngagementData]:
+    def get_engagement(
+        self,
+        scene_ids: list[int] | None = None,
+    ) -> dict[int, SceneEngagementData]:
         """
-        Fetch engagement data for all watched scenes.
+        Fetch engagement data for scenes.
+
+        Args:
+            scene_ids: Optional list of scene IDs to fetch. None = all engaged scenes.
 
         Returns:
             Dict mapping scene_id to SceneEngagementData
         """
+        if scene_ids is not None and len(scene_ids) == 0:
+            return {}
+
         db_path = get_stash_db_path()
         if not db_path.exists():
             self.log(f"Database not found at {db_path}", "warning")
@@ -61,9 +69,16 @@ class EngagementCalculator:
         conn = get_readonly_connection(db_path)
         cursor = conn.cursor()
 
-        # Query aggregates views, o_count, play_duration, rating, and timestamps
+        if scene_ids is not None:
+            placeholders = ",".join("?" * len(scene_ids))
+            where_clause = f"s.id IN ({placeholders})"
+            params: tuple[int, ...] = tuple(scene_ids)
+        else:
+            where_clause = "(view_agg.view_count > 0 OR o_agg.o_count > 0)"
+            params = ()
+
         cursor.execute(
-            """
+            f"""
             SELECT
                 s.id as scene_id,
                 COALESCE(view_agg.view_count, 0) as view_count,
@@ -87,8 +102,9 @@ class EngagementCalculator:
                 FROM scenes_o_dates
                 GROUP BY scene_id
             ) o_agg ON s.id = o_agg.scene_id
-            WHERE view_agg.view_count > 0 OR o_agg.o_count > 0
-        """
+            WHERE {where_clause}
+            """,
+            params,
         )
 
         results: dict[int, SceneEngagementData] = {}
@@ -107,16 +123,21 @@ class EngagementCalculator:
         self.log(f"Found engagement data for {len(results)} scenes", "debug")
         return results
 
+    def get_all_scene_engagement(self) -> dict[int, SceneEngagementData]:
+        """Thin alias for get_engagement(None). Fetches all engaged scenes."""
+        return self.get_engagement(scene_ids=None)
+
     def calculate_base_score(self, data: SceneEngagementData) -> tuple[float, dict[str, float]]:
         """
         Calculate base weighted engagement score.
 
-        Formula:
-            score = (o_count * w_o) + (replay_count * w_v) + (play_hours * w_d) + (stars * w_r)
+        Canonical formula (ADR-0004):
+            score = (o_count * w_o) + (replay_count * w_v) + (stars * w_r)
 
         Where replay_count = max(view_count - 1, 0) (views beyond the first).
         Rating is converted to 5-star scale (rating100 / 20) and only contributes
         if the scene has been rated. Unrated scenes get 0 bonus (not penalty).
+        play_duration is intentionally excluded to avoid duration bias.
 
         Returns:
             (score, components_dict)
@@ -125,10 +146,6 @@ class EngagementCalculator:
         # replay_count = views beyond the first one (replays indicate preference)
         replay_count = max(data["view_count"] - 1, 0)
         view_component = replay_count * self.weights["view_count"]
-
-        # Normalize play_duration to hours
-        play_hours = data["play_duration"] / 3600.0
-        duration_component = play_hours * self.weights["play_duration"]
 
         # Rating: convert rating100 (0-100) to 5-star scale (0-5)
         # Only add rating bonus if scene is rated (not None and > 0)
@@ -139,12 +156,11 @@ class EngagementCalculator:
         else:
             rating_component = 0.0  # No penalty for unrated scenes
 
-        score = o_component + view_component + duration_component + rating_component
+        score = o_component + view_component + rating_component
 
         components = {
             "o_count": o_component,
             "view_count": view_component,
-            "play_duration": duration_component,
             "rating": rating_component,
         }
 
@@ -205,17 +221,24 @@ class EngagementCalculator:
             components=components,
         )
 
-    def get_top_engaged_scenes(
+    def rank(
         self,
-        limit: int = 20,
+        scene_ids: list[int] | None = None,
         method: EngagementScoringMethod = EngagementScoringMethod.BASE_WEIGHTED,
+        limit: int | None = None,
     ) -> list[EngagementScore]:
         """
-        Get top N scenes by engagement score.
+        Rank scenes by engagement score.
 
-        Returns scenes sorted by engagement score descending.
+        Args:
+            scene_ids: Optional list of scene IDs to rank; None = all engaged scenes.
+            method: Scoring method to use.
+            limit: Maximum number of results. None = return all.
+
+        Returns:
+            List of EngagementScore sorted by score descending.
         """
-        all_engagement = self.get_all_scene_engagement()
+        all_engagement = self.get_engagement(scene_ids=scene_ids)
 
         if not all_engagement:
             self.log("No engagement data found", "warning")
@@ -223,11 +246,21 @@ class EngagementCalculator:
 
         scores = [self.calculate_score(data, method) for data in all_engagement.values()]
 
-        # Sort by the appropriate score field
         if method == EngagementScoringMethod.TIME_DECAYED:
             scores.sort(key=lambda x: x.time_decayed_score, reverse=True)
         else:
             scores.sort(key=lambda x: x.raw_score, reverse=True)
 
-        self.log(f"Returning top {min(limit, len(scores))} engaged scenes", "debug")
-        return scores[:limit]
+        if limit is not None:
+            scores = scores[:limit]
+
+        self.log(f"Returning {len(scores)} ranked scenes", "debug")
+        return scores
+
+    def get_top_engaged_scenes(
+        self,
+        limit: int = 20,
+        method: EngagementScoringMethod = EngagementScoringMethod.BASE_WEIGHTED,
+    ) -> list[EngagementScore]:
+        """Get top N scenes by engagement score. Delegates to rank()."""
+        return self.rank(scene_ids=None, method=method, limit=limit)
