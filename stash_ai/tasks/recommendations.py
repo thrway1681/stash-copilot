@@ -151,7 +151,6 @@ class RecommendationsTask:
             weights={
                 "o_count": o_weight,
                 "view_count": view_weight,
-                "play_duration": duration_weight,
                 "rating": rating_weight,
             },
             time_decay={

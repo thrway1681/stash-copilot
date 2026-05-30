@@ -72,7 +72,7 @@ class EngagementCalculator:
         if scene_ids is not None:
             placeholders = ",".join("?" * len(scene_ids))
             where_clause = f"s.id IN ({placeholders})"
-            params: tuple = tuple(scene_ids)
+            params: tuple[int, ...] = tuple(scene_ids)
         else:
             where_clause = "(view_agg.view_count > 0 OR o_agg.o_count > 0)"
             params = ()
