@@ -23,7 +23,7 @@ class RecommendationMode(Enum):
 class EngagementScoringMethod(Enum):
     """Methods for scoring scene engagement."""
 
-    BASE_WEIGHTED = "base_weighted"  # Static weights: o_count > views > duration
+    BASE_WEIGHTED = "base_weighted"  # Canonical: o_count*20 + replays*2 + stars*1.5
     TIME_DECAYED = "time_decayed"  # Recent engagement weighs more
 
 
@@ -44,7 +44,6 @@ class EngagementWeights(TypedDict):
 
     o_count: float  # Default: 20.0 (median scene plays between o_counts)
     view_count: float  # Default: 2.0 (per replay, views beyond the first)
-    play_duration: float  # Default: 1.0 (per hour)
     rating: float  # Default: 1.5 (per star on 5-star scale, only adds if rated)
 
 
@@ -63,7 +62,7 @@ class EngagementScore:
     scene_id: int
     raw_score: float  # Base weighted score
     time_decayed_score: float  # After time decay
-    components: dict[str, float]  # Breakdown: {o_count: x, views: y, duration: z}
+    components: dict[str, float]  # Breakdown: {o_count: x, view_count: y, rating: z}
 
 
 @dataclass
@@ -83,7 +82,6 @@ class RecommendationConfig:
             {
                 "o_count": 20.0,  # Median scene plays between o_counts
                 "view_count": 2.0,  # Per replay (views beyond the first)
-                "play_duration": 1.0,
                 "rating": 1.5,  # Per star (5-star scale), only adds if scene is rated
             },
         )
