@@ -8422,32 +8422,32 @@ class EnrichSceneResultsTool(BaseTool):
                 "error": f"Stash database not found at {db_path}",
             }
 
+        # Engagement counts, scoring, and the rating-to-stars conversion all come
+        # from the single EngagementCalculator (ADR-0004 canonical formula). This
+        # tool no longer carries its own engagement query or formula. Lazy import
+        # avoids the engagement.py -> tools.database import cycle.
+        from ..recommendations.engagement import EngagementCalculator
+        from ..recommendations.types import EngagementScoringMethod
+
+        calculator = EngagementCalculator()
+        engagement_data = calculator.get_engagement(scene_ids)
+
         try:
             conn = get_readonly_connection(db_path)
             cursor = conn.cursor()
 
-            # Get basic scene metadata
+            # Get basic scene metadata (engagement counts come from get_engagement above)
             placeholders = ",".join("?" * len(scene_ids))
             cursor.execute(
                 f"""
-                SELECT s.id, s.title, s.rating, s.date, s.created_at,
+                SELECT s.id, s.title, s.date, s.created_at,
                        st.id as studio_id, st.name as studio_name,
-                       vf.duration,
-                       COALESCE(view_agg.view_count, 0) as view_count,
-                       COALESCE(o_agg.o_count, 0) as o_count
+                       vf.duration
                 FROM scenes s
                 LEFT JOIN studios st ON s.studio_id = st.id
                 LEFT JOIN scenes_files sf ON s.id = sf.scene_id AND sf."primary" = 1
                 LEFT JOIN files f ON sf.file_id = f.id
                 LEFT JOIN video_files vf ON f.id = vf.file_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
                 WHERE s.id IN ({placeholders})
                 """,
                 scene_ids,
@@ -8458,13 +8458,23 @@ class EnrichSceneResultsTool(BaseTool):
             for row in cursor.fetchall():
                 scene_id = row["id"]
 
-                # Calculate engagement score
-                view_count = row["view_count"]
-                o_count = row["o_count"]
-                replay_count = max(view_count - 1, 0)  # Replays = views beyond first
-                rating = row["rating"] or 0  # Rating is 0-5 stars
+                engagement = engagement_data.get(scene_id)
+                if engagement is not None:
+                    view_count = engagement["view_count"]
+                    o_count = engagement["o_count"]
+                    rating100 = engagement["rating"]
+                    engagement_score = calculator.calculate_score(
+                        engagement, EngagementScoringMethod.BASE_WEIGHTED
+                    ).raw_score
+                else:
+                    view_count = 0
+                    o_count = 0
+                    rating100 = None
+                    engagement_score = 0.0
 
-                engagement_score = (o_count * 20.0) + (replay_count * 2.0) + (rating * 1.5)
+                replay_count = max(view_count - 1, 0)  # Replays = views beyond first
+                # rating100 (0-100) -> 0-5 star scale; unrated stays None (no penalty)
+                stars = rating100 / 20.0 if rating100 else None
 
                 scene_data = {
                     "scene_id": scene_id,
@@ -8475,7 +8485,7 @@ class EnrichSceneResultsTool(BaseTool):
                 }
 
                 if "rating" in include_fields:
-                    scene_data["rating"] = rating if rating else None  # Already 0-5 star scale
+                    scene_data["rating"] = stars  # 0-5 star scale (rating100 / 20)
 
                 if "engagement" in include_fields:
                     scene_data["view_count"] = view_count
