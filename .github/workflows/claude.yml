@@ -1,0 +1,61 @@
+name: Claude Code
+
+# Lets Claude act on this repo when you mention @claude in an issue or PR comment
+# (or in a new issue body). Powered by the official Claude GitHub App, so commits
+# land as `claude[bot]` — no personal identity is attached, and the commits still
+# trigger ci.yml on the resulting PR.
+#
+# Setup (one-time):
+#   1. Install the Claude GitHub App on this repo:  https://github.com/apps/claude
+#   2. Auth — pick ONE:
+#        a) Subscription (Pro/Max): run `claude setup-token`, then add the repo
+#           secret CLAUDE_CODE_OAUTH_TOKEN.  (This is what the step below uses.)
+#        b) API credits: add the repo secret ANTHROPIC_API_KEY (console.anthropic.com)
+#           and swap the auth line in the step below.
+# Docs: https://code.claude.com/docs/en/github-actions
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+
+jobs:
+  claude:
+    # Only fire when "@claude" actually appears, so ordinary comments are ignored.
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create branches and commit
+      pull-requests: write   # open and update PRs
+      issues: write          # comment back on the issue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Subscription auth — uses your Claude Pro/Max plan (run `claude setup-token`).
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # API-credit alternative (separate console.anthropic.com billing) — swap the
+          # two lines to use it instead:
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # v1 auto-detects interactive "@claude" mode — no `mode:` input needed.
+          claude_args: |
+            --max-turns 40
+            --model claude-sonnet-4-6
+          # Tips:
+          #   - Hard refactor? Switch the model: --model claude-opus-4-8
+          #   - Tighter blast radius? Add an allowlist: --allowedTools "Read,Edit,Bash"
+          #   - Bigger jobs may need more turns: raise --max-turns
