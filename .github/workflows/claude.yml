@@ -33,6 +33,7 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
     runs-on: ubuntu-latest
+    timeout-minutes: 90      # wall-clock backstop for a runaway run (sized to ~300 turns)
     permissions:
       contents: write        # create branches and commit
       pull-requests: write   # open and update PRs
@@ -54,7 +55,7 @@ jobs:
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # v1 auto-detects interactive "@claude" mode — no `mode:` input needed.
           claude_args: |
-            --max-turns 40
+            --max-turns 300
             --model claude-sonnet-4-6
           # Tips:
           #   - Hard refactor? Switch the model: --model claude-opus-4-8
