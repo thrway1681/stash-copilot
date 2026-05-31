@@ -32,8 +32,16 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
-          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          # Always-comment review: run the skill, then post one summary comment no matter
+          # what. The code-review plugin only comments when it finds something, so a clean
+          # PR would otherwise get NO comment — making it impossible to tell a clean review
+          # from one that never ran. The instruction below forces a summary either way.
+          prompt: |
+            Review pull request ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+            using the /code-review:code-review skill. Then ALWAYS post exactly one summary comment
+            on the PR describing the outcome — even when there are no findings. If nothing needs
+            changing, post "✅ Auto-review: no issues found." If there are findings, summarize them
+            in that same comment. Never finish without leaving a comment on the PR.
           claude_args: "--model claude-sonnet-4-6"
-          # Always leave a single, updated summary comment — even on a clean pass —
-          # so automation waiting on the review has a deterministic signal to detect.
+          # Keeps that summary as a single comment, updated in place across re-reviews.
           use_sticky_comment: true
