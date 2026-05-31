@@ -225,9 +225,10 @@ class QuerySimilarScenesTool(BaseTool):
     ) -> list[dict[str, Any]]:
         """Add scene metadata and engagement data to similarity results.
 
-        Engagement score uses replay_count instead of raw play_hours to avoid
-        duration bias (longer scenes scoring higher unfairly).
-        Formula: (o_count * 3) + (replay_count * 2)
+        Engagement counts, scoring, and the rating term all come from the single
+        EngagementCalculator (ADR-0004 canonical formula:
+        o_count*20 + replays*2 + stars*1.5). This tool no longer carries its own
+        engagement query or formula.
         """
         db_path = get_stash_db_path()
         if not db_path.exists():
@@ -250,27 +251,24 @@ class QuerySimilarScenesTool(BaseTool):
                 for r in results
             ]
 
+        # Lazy import avoids the engagement.py -> tools.database import cycle.
+        from ..recommendations.engagement import EngagementCalculator
+        from ..recommendations.types import EngagementScoringMethod
+
+        calculator = EngagementCalculator()
+        engagement_data = calculator.get_engagement([r.scene_id for r in results])
+
         conn = get_readonly_connection(db_path)
         cursor = conn.cursor()
 
         enriched: list[dict[str, Any]] = []
         for r in results:
-            # Get scene info with engagement data
+            # Get scene metadata (engagement counts come from get_engagement above)
             cursor.execute(
                 """
-                SELECT s.id, s.title, st.name as studio,
-                       COALESCE(view_agg.view_count, 0) as view_count,
-                       COALESCE(o_agg.o_count, 0) as o_count
+                SELECT s.id, s.title, st.name as studio
                 FROM scenes s
                 LEFT JOIN studios st ON s.studio_id = st.id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
                 WHERE s.id = ?
             """,
                 (r.scene_id,),
@@ -278,13 +276,19 @@ class QuerySimilarScenesTool(BaseTool):
 
             row = cursor.fetchone()
             title = row["title"] if row else None
-            view_count = row["view_count"] if row else 0
-            o_count = row["o_count"] if row else 0
 
-            # Calculate engagement score without duration bias
-            # replay_count = views beyond the first one
-            replay_count = max(view_count - 1, 0)
-            engagement_score = (o_count * 20.0) + (replay_count * 2.0)
+            engagement = engagement_data.get(r.scene_id)
+            if engagement is not None:
+                view_count = engagement["view_count"]
+                o_count = engagement["o_count"]
+                engagement_score = calculator.calculate_score(
+                    engagement, EngagementScoringMethod.BASE_WEIGHTED
+                ).raw_score
+            else:
+                view_count = 0
+                o_count = 0
+                engagement_score = 0.0
+            replay_count = max(view_count - 1, 0)  # Replays = views beyond first
 
             # Get performers
             cursor.execute(
@@ -483,9 +487,10 @@ class SearchByTextTool(BaseTool):
     def _enrich_results(self, results: list[SimilarityResult]) -> list[dict[str, Any]]:
         """Add scene metadata and engagement data to results.
 
-        Engagement score uses replay_count instead of raw play_hours to avoid
-        duration bias (longer scenes scoring higher unfairly).
-        Formula: (o_count * 3) + (replay_count * 2)
+        Engagement counts, scoring, and the rating term all come from the single
+        EngagementCalculator (ADR-0004 canonical formula:
+        o_count*20 + replays*2 + stars*1.5). This tool no longer carries its own
+        engagement query or formula.
         """
         db_path = get_stash_db_path()
         if not db_path.exists():
@@ -503,27 +508,24 @@ class SearchByTextTool(BaseTool):
                 for r in results
             ]
 
+        # Lazy import avoids the engagement.py -> tools.database import cycle.
+        from ..recommendations.engagement import EngagementCalculator
+        from ..recommendations.types import EngagementScoringMethod
+
+        calculator = EngagementCalculator()
+        engagement_data = calculator.get_engagement([r.scene_id for r in results])
+
         conn = get_readonly_connection(db_path)
         cursor = conn.cursor()
 
         enriched: list[dict[str, Any]] = []
         for r in results:
-            # Get scene info with engagement data
+            # Get scene metadata (engagement counts come from get_engagement above)
             cursor.execute(
                 """
-                SELECT s.id, s.title, st.name as studio,
-                       COALESCE(view_agg.view_count, 0) as view_count,
-                       COALESCE(o_agg.o_count, 0) as o_count
+                SELECT s.id, s.title, st.name as studio
                 FROM scenes s
                 LEFT JOIN studios st ON s.studio_id = st.id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
                 WHERE s.id = ?
             """,
                 (r.scene_id,),
@@ -531,13 +533,19 @@ class SearchByTextTool(BaseTool):
 
             row = cursor.fetchone()
             title = row["title"] if row else None
-            view_count = row["view_count"] if row else 0
-            o_count = row["o_count"] if row else 0
 
-            # Calculate engagement score without duration bias
-            # replay_count = views beyond the first one
-            replay_count = max(view_count - 1, 0)
-            engagement_score = (o_count * 20.0) + (replay_count * 2.0)
+            engagement = engagement_data.get(r.scene_id)
+            if engagement is not None:
+                view_count = engagement["view_count"]
+                o_count = engagement["o_count"]
+                engagement_score = calculator.calculate_score(
+                    engagement, EngagementScoringMethod.BASE_WEIGHTED
+                ).raw_score
+            else:
+                view_count = 0
+                o_count = 0
+                engagement_score = 0.0
+            replay_count = max(view_count - 1, 0)  # Replays = views beyond first
 
             cursor.execute(
                 """
@@ -1029,7 +1037,13 @@ class FilterScenesByVisualContentTool(BaseTool):
         }
 
     def _enrich_results(self, results: list[SimilarityResult]) -> list[dict[str, Any]]:
-        """Add scene metadata and engagement data to results."""
+        """Add scene metadata and engagement data to results.
+
+        Engagement counts, scoring, and the rating term all come from the single
+        EngagementCalculator (ADR-0004 canonical formula:
+        o_count*20 + replays*2 + stars*1.5). This tool no longer carries its own
+        engagement query or formula.
+        """
         db_path = get_stash_db_path()
         if not db_path.exists():
             return [
@@ -1046,27 +1060,24 @@ class FilterScenesByVisualContentTool(BaseTool):
                 for r in results
             ]
 
+        # Lazy import avoids the engagement.py -> tools.database import cycle.
+        from ..recommendations.engagement import EngagementCalculator
+        from ..recommendations.types import EngagementScoringMethod
+
+        calculator = EngagementCalculator()
+        engagement_data = calculator.get_engagement([r.scene_id for r in results])
+
         conn = get_readonly_connection(db_path)
         cursor = conn.cursor()
 
         enriched: list[dict[str, Any]] = []
         for r in results:
-            # Get scene info with engagement data
+            # Get scene metadata (engagement counts come from get_engagement above)
             cursor.execute(
                 """
-                SELECT s.id, s.title, st.name as studio,
-                       COALESCE(view_agg.view_count, 0) as view_count,
-                       COALESCE(o_agg.o_count, 0) as o_count
+                SELECT s.id, s.title, st.name as studio
                 FROM scenes s
                 LEFT JOIN studios st ON s.studio_id = st.id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
                 WHERE s.id = ?
             """,
                 (r.scene_id,),
@@ -1074,12 +1085,19 @@ class FilterScenesByVisualContentTool(BaseTool):
 
             row = cursor.fetchone()
             title = row["title"] if row else None
-            view_count = row["view_count"] if row else 0
-            o_count = row["o_count"] if row else 0
 
-            # Calculate engagement score
-            replay_count = max(view_count - 1, 0)
-            engagement_score = (o_count * 20.0) + (replay_count * 2.0)
+            engagement = engagement_data.get(r.scene_id)
+            if engagement is not None:
+                view_count = engagement["view_count"]
+                o_count = engagement["o_count"]
+                engagement_score = calculator.calculate_score(
+                    engagement, EngagementScoringMethod.BASE_WEIGHTED
+                ).raw_score
+            else:
+                view_count = 0
+                o_count = 0
+                engagement_score = 0.0
+            replay_count = max(view_count - 1, 0)  # Replays = views beyond first
 
             cursor.execute(
                 """
