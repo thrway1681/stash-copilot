@@ -54,9 +54,16 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # show_full_output surfaces the agent's tool calls in the run log (no secrets
+          # in this prompt). Drop it once the routine is proven stable.
+          show_full_output: true
           claude_args: |
             --max-turns 600
             --model claude-sonnet-4-6
+            # prompt/automation mode locks tools down by default; the routine needs to run
+            # git/gh/uv/pytest/ruff (Bash) and edit code, so grant them explicitly or every
+            # call is denied in the headless runner (see permission_denials_count in the log).
+            --allowedTools "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,TodoWrite"
           prompt: |
             In thrway1681/stash-copilot, keep up to TWO agent chunks in flight, then stop.
             The review-queue cap is 2 open agent PRs (open PRs into `dev` with a `claude/*`
