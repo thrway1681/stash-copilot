@@ -124,6 +124,14 @@ def patched_db_functions(
     with (
         patch("stash_ai.tools.database.get_stash_db_path", return_value=mock_db_path),
         patch("stash_ai.tools.database.get_readonly_connection", return_value=wrapped_conn),
+        patch(
+            "stash_ai.recommendations.engagement.get_stash_db_path",
+            return_value=mock_db_path,
+        ),
+        patch(
+            "stash_ai.recommendations.engagement.get_readonly_connection",
+            return_value=wrapped_conn,
+        ),
     ):
         yield
 

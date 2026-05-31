@@ -147,28 +147,53 @@ class TestRankScenesByEngagementTool:
     def test_favorites_scoring_mode(
         self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
     ) -> None:
-        """Test favorites scoring mode."""
+        """Test favorites mode uses canonical ADR-0004 formula including rating term."""
         tool = RankScenesByEngagementTool(mock_stash)
 
         result = tool.execute(scene_ids=[1, 3, 7, 10], scoring_mode="favorites")
 
         assert result["success"] is True
         scenes = result["data"]["scenes"]
-        # Scenes with higher O counts should rank higher
-        if len(scenes) >= 2:
-            # Verify ordering by score
-            for i in range(len(scenes) - 1):
-                assert scenes[i]["score"] >= scenes[i + 1]["score"]
+        # Verify ordering by score descending
+        for i in range(len(scenes) - 1):
+            assert scenes[i]["score"] >= scenes[i + 1]["score"]
+
+        # Canonical scores (ADR-0004): o_count*20 + replays*2 + stars*1.5
+        # scene 10: views=10, o=4, rating=100 → 4*20 + 9*2 + 5*1.5 = 105.5
+        # scene  7: views=8,  o=4, rating=100 → 4*20 + 7*2 + 5*1.5 = 101.5
+        # scene  3: views=5,  o=3, rating=100 → 3*20 + 4*2 + 5*1.5 =  75.5
+        # scene  1: views=3,  o=2, rating=100 → 2*20 + 2*2 + 5*1.5 =  51.5
+        score_by_id = {s["scene_id"]: s["score"] for s in scenes}
+        assert score_by_id[10] == 105.5
+        assert score_by_id[7] == 101.5
+        assert score_by_id[3] == 75.5
+        assert score_by_id[1] == 51.5
 
     def test_recent_scoring_mode(
         self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
     ) -> None:
-        """Test recent scoring mode with time decay."""
+        """Test recent mode applies TIME_DECAYED method (canonical base * recency)."""
         tool = RankScenesByEngagementTool(mock_stash)
 
         result = tool.execute(scene_ids=[1, 10, 13], scoring_mode="recent")
 
         assert result["success"] is True
+        scenes = result["data"]["scenes"]
+        # Decayed scores must be non-negative and in descending order
+        for s in scenes:
+            assert s["score"] >= 0.0
+        for i in range(len(scenes) - 1):
+            assert scenes[i]["score"] >= scenes[i + 1]["score"]
+        # recency_decay is the multiplier applied (between min_weight=0.1 and 1.0)
+        for s in scenes:
+            assert 0.0 < s["recency_decay"] <= 1.0
+        # Decayed score must be ≤ the base score (decay ≤ 1)
+        # scene 13: views=6, o=2, rating=100 → 2*20 + 5*2 + 5*1.5 = 57.5
+        base_scores = {10: 105.5, 1: 51.5, 13: 57.5}
+        for s in scenes:
+            sid = s["scene_id"]
+            if sid in base_scores:
+                assert s["score"] <= base_scores[sid] + 0.01
 
     def test_completion_scoring_mode(
         self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
