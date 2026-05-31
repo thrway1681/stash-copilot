@@ -1,11 +1,11 @@
 name: Claude Auto-Review
 
-# Auto-reviews PRs the agent opens (head branch `claude/*`) with the official
-# code-review plugin: it posts findings as comments and NEVER blocks the merge
-# (you stay the merge gate). Scoped to `claude/*` branches to target AI-generated
-# code and keep subscription-quota cost down — broaden the `if` below to review
-# every PR. Managed "Code Review" (claude.ai admin settings) is Team/Enterprise
-# only; this Actions path works on a Pro/Max subscription token.
+# Auto-reviews PRs the agent opens (head branch `claude/*`) and posts findings as
+# GitHub comments — a "review started" note, inline comments at specific lines, and a
+# sticky summary. It NEVER blocks the merge (you stay the merge gate). Runs via the
+# Claude GitHub App, so comments post as claude[bot] (not a personal account). Scoped
+# to `claude/*` branches to target AI-generated code and keep subscription-quota cost
+# down — broaden the `if` below to review every PR.
 on:
   pull_request:
     types: [opened, synchronize]
@@ -17,31 +17,92 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read         # read the code under review
-      pull-requests: write   # post review comments
+      contents: read         # read the code under review (+ git history for context)
+      pull-requests: write   # post the review, inline comments, and summary
       id-token: write        # subscription/OAuth (CLAUDE_CODE_OAUTH_TOKEN) exchange
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0     # full history for review context
+          fetch-depth: 0     # full history for blame/prior-PR context
 
       - name: Claude code review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
-          plugins: "code-review@claude-code-plugins"
-          # Always-comment review: run the skill, then post one summary comment no matter
-          # what. The code-review plugin only comments when it finds something, so a clean
-          # PR would otherwise get NO comment — making it impossible to tell a clean review
-          # from one that never ran. The instruction below forces a summary either way.
+          claude_args: |
+            --model claude-opus-4-8
+            --allowedTools "Bash,Read,Glob,Grep,TodoWrite"
           prompt: |
-            Review pull request ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
-            using the /code-review:code-review skill. Then ALWAYS post exactly one summary comment
-            on the PR describing the outcome — even when there are no findings. If nothing needs
-            changing, post "✅ Auto-review: no issues found." If there are findings, summarize them
-            in that same comment. Never finish without leaving a comment on the PR.
-          claude_args: "--model claude-sonnet-4-6"
-          # Keeps that summary as a single comment, updated in place across re-reviews.
-          use_sticky_comment: true
+            ROLE: You are the automated PR code reviewer for ${{ github.repository }}. You review
+            the pull request below and post your review as GitHub comments. You NEVER modify code,
+            NEVER approve or request-changes (the human is the merge gate), and NEVER merge. Make a
+            TODO list first; use `gh` for all GitHub interaction.
+
+            1. TARGET
+               - Review pull request #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+               - The head commit under review is ${{ github.event.pull_request.head.sha }} (use its
+                 short form for `<short-sha>` below).
+
+            2. ELIGIBILITY — stop and do nothing if ANY:
+               - PR is closed or a draft.
+               - It's trivial/obviously fine, or a pure automation/dependency bump.
+               - You already posted a completed review for this exact head SHA (your sticky summary
+                 comment, marked `<!-- auto-review:summary -->`, names the SHA). Only re-review when
+                 new commits landed.
+
+            3. POST "REVIEW STARTED" immediately
+               - Create/update the sticky summary comment (find prior by marker
+                 `<!-- auto-review:summary -->`, else create) to:
+                 "🔍 Auto-review in progress for `<short-sha>`…". This tells the author — and the
+                 refactor routine — the review has begun.
+
+            4. GATHER CONTEXT (read-only)
+               - The diff: `gh pr diff <N>`.
+               - Root `CLAUDE.md` plus any `CLAUDE.md` in directories the PR modifies — these are the
+                 binding project rules (CLAUDE.md is guidance to the author, so not every line applies
+                 to review).
+               - A short summary of what the change does.
+               - `git blame`/log on the modified regions; prior merged PRs touching these files and
+                 their review comments; existing code comments in the touched files.
+
+            5. REVIEW THESE ASPECTS — only on lines this PR changed:
+               - CLAUDE.md compliance (explicit rules only).
+               - Bugs: logic errors, null/undefined, races, leaks, security, performance, broken invariants.
+               - Silent failures / error handling: swallowed exceptions, empty catch blocks, missing
+                 propagation/logging, inappropriate fallbacks.
+               - Comment accuracy: comments/docstrings that now contradict the code (comment rot).
+               - Type design (only if types added/changed): encapsulation, expressed invariants.
+               - Test coverage (only if behavior changed or tests touched): meaningful behavioral gaps.
+
+            6. SCORE & FILTER — quality over quantity:
+               - Score each issue 0–100: 0–25 false positive/pre-existing; 26–50 minor nitpick not in
+                 CLAUDE.md; 51–75 valid but low-impact; 76–90 important; 91–100 critical bug or explicit
+                 CLAUDE.md violation.
+               - KEEP ONLY issues ≥ 80.
+               - DO NOT report (false positives): pre-existing issues; anything on lines not modified by
+                 this PR; nitpicks a senior engineer wouldn't raise; anything a linter/typechecker/
+                 compiler/test run would catch (imports, type errors, formatting, broken tests) — CI runs
+                 separately, do NOT build or typecheck; general quality/coverage/security/doc gripes unless
+                 CLAUDE.md requires them; CLAUDE.md items explicitly silenced in code (e.g. lint-ignore);
+                 changes clearly intentional to the PR's purpose.
+
+            7. POST THE REVIEW
+               - Submit ONE PR review with inline comments via:
+                 POST repos/${{ github.repository }}/pulls/<N>/reviews
+                 with event=COMMENT (NEVER APPROVE/REQUEST_CHANGES), body=<overall summary>, and a
+                 `comments` array — one per kept finding — each {path, line, side:"RIGHT", body}. Each
+                 inline body: brief description + the rule/bug + a concrete fix; cite+link the CLAUDE.md
+                 rule when that's the basis; no emojis in inline bodies.
+               - Then update the sticky SUMMARY comment (marker `<!-- auto-review:summary -->`) to the
+                 FINAL result, and ALWAYS include the reviewed SHA so the refactor routine can match it:
+                   • With findings: counts grouped Critical (90–100) / Important (80–89), one line each
+                     linking file:line, plus a short "Strengths" note. End with: "This review never blocks merge."
+                   • No findings: "✅ Auto-review: no issues found for `<short-sha>`. Checked CLAUDE.md
+                     compliance, bugs, error handling, comments, types, and tests."
+               - ALWAYS leave the summary comment (clean or not) — it is the signal the review finished.
+
+            8. STOP — do not edit code, push, approve, request changes, or merge. Review only.
+
+            Link format for the summary (full SHA required, ≥1 line of context each side, or GitHub
+            won't render): https://github.com/${{ github.repository }}/blob/<full-sha>/<path>#L<start>-L<end>
