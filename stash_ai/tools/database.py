@@ -2352,8 +2352,6 @@ class RankScenesByEngagementTool(BaseTool):
     Scoring modes:
     - favorites: canonical ADR-0004 formula (o_count*20 + replays*2 + stars*1.5)
     - recent: favorites score with 30-day half-life recency decay
-    - completion: completion_rate (play_duration / video_duration) - best for thoroughly watched
-    - intensity: o_rate * view_count - best for consistently satisfying scenes
 
     No raw play_hours to avoid duration bias (longer scenes scoring higher unfairly).
     """
@@ -2367,9 +2365,7 @@ class RankScenesByEngagementTool(BaseTool):
         return (
             "Rank a list of scene IDs by engagement score. "
             "Scoring modes: 'favorites' (o_count*20 + replays*2 + stars*1.5, canonical ADR-0004), "
-            "'recent' (favorites with recency decay), "
-            "'completion' (play_duration / video_duration), "
-            "'intensity' (o_rate * view_count). "
+            "'recent' (favorites with recency decay). "
             "Default mode is 'favorites'. Use to find favorites from any scene list."
         )
 
@@ -2393,9 +2389,9 @@ class RankScenesByEngagementTool(BaseTool):
             {
                 "name": "scoring_mode",
                 "type": "string",
-                "description": "Scoring mode: favorites (default), recent, completion, intensity",
+                "description": "Scoring mode: favorites (default), recent",
                 "required": False,
-                "enum": ["favorites", "recent", "completion", "intensity"],
+                "enum": ["favorites", "recent"],
             },
             {
                 "name": "min_score",
@@ -2420,7 +2416,7 @@ class RankScenesByEngagementTool(BaseTool):
                 "error": "scene_ids is required and must be non-empty",
             }
 
-        valid_modes = {"favorites", "recent", "completion", "intensity"}
+        valid_modes = {"favorites", "recent"}
         if scoring_mode not in valid_modes:
             return {
                 "success": False,
@@ -2436,10 +2432,7 @@ class RankScenesByEngagementTool(BaseTool):
                 "error": f"Stash database not found at {db_path}",
             }
 
-        if scoring_mode in {"favorites", "recent"}:
-            return self._execute_canonical(scene_ids, scoring_mode, limit, min_score, db_path)
-        else:
-            return self._execute_legacy(scene_ids, scoring_mode, limit, min_score, db_path)
+        return self._execute_canonical(scene_ids, scoring_mode, limit, min_score, db_path)
 
     def _execute_canonical(
         self,
@@ -2541,7 +2534,6 @@ class RankScenesByEngagementTool(BaseTool):
             view_count = data["view_count"]
             o_count = data["o_count"]
             replay_count = max(view_count - 1, 0)
-            o_rate = o_count / view_count if view_count > 0 else 0.0
             if scoring_mode == "recent":
                 recency_decay = (
                     round(eng_score.time_decayed_score / eng_score.raw_score, 2)
@@ -2561,8 +2553,6 @@ class RankScenesByEngagementTool(BaseTool):
                     "view_count": view_count,
                     "o_count": o_count,
                     "replay_count": replay_count,
-                    "o_rate": round(o_rate, 2),
-                    "completion_rate": 0.0,
                     "recency_decay": recency_decay,
                     "score": round(effective, 2),
                     "scoring_mode": scoring_mode,
@@ -2596,165 +2586,6 @@ class RankScenesByEngagementTool(BaseTool):
             },
             "error": None,
         }
-
-    def _execute_legacy(
-        self,
-        scene_ids: list[int],
-        scoring_mode: str,
-        limit: int | None,
-        min_score: float,
-        db_path: Any,
-    ) -> ToolResult:
-        """Rank scenes using legacy scoring for completion/intensity modes."""
-        try:
-            conn = get_readonly_connection(db_path)
-            cursor = conn.cursor()
-
-            # Build placeholders for IN clause
-            placeholders = ",".join("?" * len(scene_ids))
-
-            # Query engagement data for all provided scene IDs
-            # Include video duration for completion rate calculation
-            cursor.execute(
-                f"""
-                SELECT
-                    s.id,
-                    s.title,
-                    s.play_duration,
-                    COALESCE(view_agg.view_count, 0) as view_count,
-                    COALESCE(o_agg.o_count, 0) as o_count,
-                    st.name as studio,
-                    vf.duration as video_duration,
-                    last_view.max_date as last_view_date
-                FROM scenes s
-                LEFT JOIN studios st ON s.studio_id = st.id
-                LEFT JOIN scenes_files fs ON s.id = fs.scene_id
-                LEFT JOIN video_files vf ON fs.file_id = vf.file_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates
-                    GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates
-                    GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, MAX(view_date) as max_date
-                    FROM scenes_view_dates
-                    GROUP BY scene_id
-                ) last_view ON s.id = last_view.scene_id
-                WHERE s.id IN ({placeholders})
-                """,
-                scene_ids,
-            )
-
-            scenes: list[dict[str, Any]] = []
-            for row in cursor.fetchall():
-                scene_id = row["id"]
-                view_count = row["view_count"]
-                o_count = row["o_count"]
-                play_duration = row["play_duration"] or 0.0
-                video_duration = row["video_duration"] or 0.0
-
-                # Calculate base metrics
-                replay_count = max(view_count - 1, 0)
-                o_rate = o_count / view_count if view_count > 0 else 0.0
-                completion_rate = (
-                    (play_duration / video_duration * 100.0) if video_duration > 0 else 0.0
-                )
-                # Cap completion rate at 500% to avoid extreme outliers
-                completion_rate = min(completion_rate, 500.0)
-
-                # Calculate score based on mode
-                if scoring_mode == "completion":
-                    score = completion_rate
-                elif scoring_mode == "intensity":
-                    score = o_rate * view_count
-                else:
-                    score = 0.0
-
-                # Skip if below minimum score
-                if score < min_score:
-                    continue
-
-                # Get performers for this scene
-                cursor.execute(
-                    """
-                    SELECT p.name FROM performers p
-                    JOIN performers_scenes ps ON p.id = ps.performer_id
-                    WHERE ps.scene_id = ?
-                    """,
-                    (scene_id,),
-                )
-                performers = [pr["name"] for pr in cursor.fetchall()]
-
-                scenes.append(
-                    {
-                        "scene_id": scene_id,
-                        "title": row["title"] or f"Scene {scene_id}",
-                        "url": f"/scenes/{scene_id}",
-                        "studio": row["studio"],
-                        "performers": performers,
-                        "view_count": view_count,
-                        "o_count": o_count,
-                        "replay_count": replay_count,
-                        "o_rate": round(o_rate, 2),
-                        "completion_rate": round(completion_rate, 1),
-                        "recency_decay": 1.0,
-                        "score": round(score, 2),
-                        "scoring_mode": scoring_mode,
-                    }
-                )
-
-            conn.close()
-
-            # Sort by score descending
-            scenes.sort(key=lambda x: x["score"], reverse=True)
-
-            # Apply limit if specified
-            if limit is not None and limit > 0:
-                scenes = scenes[:limit]
-
-            # Build formatted output with mode-appropriate labeling
-            formatted_lines = []
-            for i, s in enumerate(scenes):
-                performers_str = ", ".join(s["performers"][:3]) if s["performers"] else "Unknown"
-                if len(s["performers"]) > 3:
-                    performers_str += f" +{len(s['performers']) - 3}"
-
-                # Mode-specific detail
-                if scoring_mode == "completion":
-                    detail = f"completion: {s['completion_rate']:.0f}%"
-                else:
-                    detail = f"o-rate: {s['o_rate']:.2f}, views: {s['view_count']}"
-
-                formatted_lines.append(
-                    f"{i + 1}. [{s['title']}]({s['url']}) - {performers_str} ({detail})"
-                )
-
-            return {
-                "success": True,
-                "data": {
-                    "scenes": scenes,
-                    "count": len(scenes),
-                    "total_requested": len(scene_ids),
-                    "scoring_mode": scoring_mode,
-                    "min_score_filter": min_score,
-                    "formatted_results": "\n".join(formatted_lines)
-                    if formatted_lines
-                    else "No scenes meet the criteria.",
-                },
-                "error": None,
-            }
-
-        except sqlite3.Error as e:
-            return {
-                "success": False,
-                "data": None,
-                "error": f"Database error: {e!s}",
-            }
 
 
 class QueryPerformersByAttributeTool(BaseTool):

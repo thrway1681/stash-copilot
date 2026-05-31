@@ -195,25 +195,16 @@ class TestRankScenesByEngagementTool:
             if sid in base_scores:
                 assert s["score"] <= base_scores[sid] + 0.01
 
-    def test_completion_scoring_mode(
+    def test_invalid_scoring_mode(
         self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
     ) -> None:
-        """Test completion scoring mode."""
+        """Removed modes (completion, intensity) are rejected as invalid."""
         tool = RankScenesByEngagementTool(mock_stash)
 
-        result = tool.execute(scene_ids=[1, 3, 7], scoring_mode="completion")
-
-        assert result["success"] is True
-
-    def test_intensity_scoring_mode(
-        self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
-    ) -> None:
-        """Test intensity scoring mode."""
-        tool = RankScenesByEngagementTool(mock_stash)
-
-        result = tool.execute(scene_ids=[7, 10, 13], scoring_mode="intensity")
-
-        assert result["success"] is True
+        for mode in ("completion", "intensity"):
+            result = tool.execute(scene_ids=[1, 3, 7], scoring_mode=mode)
+            assert result["success"] is False
+            assert "Invalid scoring_mode" in (result["error"] or "")
 
     def test_min_score_filter(
         self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
