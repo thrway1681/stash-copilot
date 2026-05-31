@@ -2350,8 +2350,8 @@ class RankScenesByEngagementTool(BaseTool):
     Tool to rank scenes by engagement score with multiple scoring modes.
 
     Scoring modes:
-    - favorites: (o_count * 3) + (replay_count * 2) - best for finding most-loved content
-    - recent: favorites score with recency decay - best for current preferences
+    - favorites: canonical ADR-0004 formula (o_count*20 + replays*2 + stars*1.5)
+    - recent: favorites score with 30-day half-life recency decay
     - completion: completion_rate (play_duration / video_duration) - best for thoroughly watched
     - intensity: o_rate * view_count - best for consistently satisfying scenes
 
@@ -2366,7 +2366,7 @@ class RankScenesByEngagementTool(BaseTool):
     def description(self) -> str:
         return (
             "Rank a list of scene IDs by engagement score. "
-            "Scoring modes: 'favorites' (o_count * 3 + replay_count * 2), "
+            "Scoring modes: 'favorites' (o_count*20 + replays*2 + stars*1.5, canonical ADR-0004), "
             "'recent' (favorites with recency decay), "
             "'completion' (play_duration / video_duration), "
             "'intensity' (o_rate * view_count). "
@@ -2436,6 +2436,176 @@ class RankScenesByEngagementTool(BaseTool):
                 "error": f"Stash database not found at {db_path}",
             }
 
+        if scoring_mode in {"favorites", "recent"}:
+            return self._execute_canonical(scene_ids, scoring_mode, limit, min_score, db_path)
+        else:
+            return self._execute_legacy(scene_ids, scoring_mode, limit, min_score, db_path)
+
+    def _execute_canonical(
+        self,
+        scene_ids: list[int],
+        scoring_mode: str,
+        limit: int | None,
+        min_score: float,
+        db_path: Any,
+    ) -> ToolResult:
+        """Rank scenes using the canonical EngagementCalculator (ADR-0004)."""
+        from stash_ai.recommendations.engagement import EngagementCalculator
+        from stash_ai.recommendations.types import EngagementScoringMethod
+
+        method = (
+            EngagementScoringMethod.TIME_DECAYED
+            if scoring_mode == "recent"
+            else EngagementScoringMethod.BASE_WEIGHTED
+        )
+        calculator = EngagementCalculator()
+
+        # One query for engagement counts + last_played (needed for recency decay)
+        eng_data = calculator.get_engagement(scene_ids)
+
+        # Score, filter by min_score, and sort
+        scored: list[Any] = []
+        for data in eng_data.values():
+            eng_score = calculator.calculate_score(data, method)
+            effective = (
+                eng_score.time_decayed_score if scoring_mode == "recent" else eng_score.raw_score
+            )
+            if effective >= min_score:
+                scored.append((eng_score, data))
+
+        scored.sort(
+            key=lambda x: x[0].time_decayed_score if scoring_mode == "recent" else x[0].raw_score,
+            reverse=True,
+        )
+
+        if limit is not None and limit > 0:
+            scored = scored[:limit]
+
+        if not scored:
+            return {
+                "success": True,
+                "data": {
+                    "scenes": [],
+                    "count": 0,
+                    "total_requested": len(scene_ids),
+                    "scoring_mode": scoring_mode,
+                    "min_score_filter": min_score,
+                    "formatted_results": "No scenes meet the criteria.",
+                },
+                "error": None,
+            }
+
+        # Fetch scene metadata (title, studio, performers) in a second query
+        ranked_ids = [es.scene_id for es, _ in scored]
+        try:
+            conn = get_readonly_connection(db_path)
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(ranked_ids))
+
+            cursor.execute(
+                f"""
+                SELECT s.id, s.title, st.name as studio
+                FROM scenes s
+                LEFT JOIN studios st ON s.studio_id = st.id
+                WHERE s.id IN ({placeholders})
+                """,
+                ranked_ids,
+            )
+            meta: dict[int, dict[str, Any]] = {}
+            for row in cursor.fetchall():
+                meta[row["id"]] = {"title": row["title"], "studio": row["studio"]}
+
+            cursor.execute(
+                f"""
+                SELECT ps.scene_id, p.name
+                FROM performers_scenes ps
+                JOIN performers p ON p.id = ps.performer_id
+                WHERE ps.scene_id IN ({placeholders})
+                """,
+                ranked_ids,
+            )
+            performers_map: dict[int, list[str]] = {sid: [] for sid in ranked_ids}
+            for row in cursor.fetchall():
+                performers_map[row["scene_id"]].append(row["name"])
+
+            conn.close()
+        except sqlite3.Error as e:
+            return {"success": False, "data": None, "error": f"Database error: {e!s}"}
+
+        scenes: list[dict[str, Any]] = []
+        for eng_score, data in scored:
+            sid = eng_score.scene_id
+            effective = (
+                eng_score.time_decayed_score if scoring_mode == "recent" else eng_score.raw_score
+            )
+            view_count = data["view_count"]
+            o_count = data["o_count"]
+            replay_count = max(view_count - 1, 0)
+            o_rate = o_count / view_count if view_count > 0 else 0.0
+            if scoring_mode == "recent":
+                recency_decay = (
+                    round(eng_score.time_decayed_score / eng_score.raw_score, 2)
+                    if eng_score.raw_score > 0
+                    else 0.1
+                )
+            else:
+                recency_decay = 1.0
+            scene_meta = meta.get(sid, {})
+            scenes.append(
+                {
+                    "scene_id": sid,
+                    "title": scene_meta.get("title") or f"Scene {sid}",
+                    "url": f"/scenes/{sid}",
+                    "studio": scene_meta.get("studio"),
+                    "performers": performers_map.get(sid, []),
+                    "view_count": view_count,
+                    "o_count": o_count,
+                    "replay_count": replay_count,
+                    "o_rate": round(o_rate, 2),
+                    "completion_rate": 0.0,
+                    "recency_decay": recency_decay,
+                    "score": round(effective, 2),
+                    "scoring_mode": scoring_mode,
+                }
+            )
+
+        formatted_lines = []
+        for i, s in enumerate(scenes):
+            performers_str = ", ".join(s["performers"][:3]) if s["performers"] else "Unknown"
+            if len(s["performers"]) > 3:
+                performers_str += f" +{len(s['performers']) - 3}"
+            if scoring_mode == "recent":
+                detail = f"score: {s['score']:.1f}, recency: {s['recency_decay']:.0%}"
+            else:
+                detail = f"score: {s['score']:.1f}, o: {s['o_count']}, replays: {s['replay_count']}"
+            formatted_lines.append(
+                f"{i + 1}. [{s['title']}]({s['url']}) - {performers_str} ({detail})"
+            )
+
+        return {
+            "success": True,
+            "data": {
+                "scenes": scenes,
+                "count": len(scenes),
+                "total_requested": len(scene_ids),
+                "scoring_mode": scoring_mode,
+                "min_score_filter": min_score,
+                "formatted_results": "\n".join(formatted_lines)
+                if formatted_lines
+                else "No scenes meet the criteria.",
+            },
+            "error": None,
+        }
+
+    def _execute_legacy(
+        self,
+        scene_ids: list[int],
+        scoring_mode: str,
+        limit: int | None,
+        min_score: float,
+        db_path: Any,
+    ) -> ToolResult:
+        """Rank scenes using legacy scoring for completion/intensity modes."""
         try:
             conn = get_readonly_connection(db_path)
             cursor = conn.cursor()
@@ -2487,7 +2657,6 @@ class RankScenesByEngagementTool(BaseTool):
                 o_count = row["o_count"]
                 play_duration = row["play_duration"] or 0.0
                 video_duration = row["video_duration"] or 0.0
-                last_view_date = row["last_view_date"]
 
                 # Calculate base metrics
                 replay_count = max(view_count - 1, 0)
@@ -2498,31 +2667,10 @@ class RankScenesByEngagementTool(BaseTool):
                 # Cap completion rate at 500% to avoid extreme outliers
                 completion_rate = min(completion_rate, 500.0)
 
-                # Calculate recency decay (30-day half-life)
-                recency_decay = 1.0
-                if last_view_date:
-                    try:
-                        from datetime import datetime
-
-                        last_dt = datetime.fromisoformat(last_view_date.replace("Z", "+00:00"))
-                        days_ago = (datetime.now(last_dt.tzinfo) - last_dt).days
-                        recency_decay = 0.5 ** (days_ago / 30.0)
-                    except (ValueError, TypeError):
-                        recency_decay = 1.0
-
                 # Calculate score based on mode
-                if scoring_mode == "favorites":
-                    # (o_count * 20) + (replay_count * 2) - no duration bias
-                    score = (o_count * 20.0) + (replay_count * 2.0)
-                elif scoring_mode == "recent":
-                    # Favorites with recency decay
-                    base_score = (o_count * 20.0) + (replay_count * 2.0)
-                    score = base_score * recency_decay
-                elif scoring_mode == "completion":
-                    # Completion rate (capped)
+                if scoring_mode == "completion":
                     score = completion_rate
                 elif scoring_mode == "intensity":
-                    # O-rate * view_count - high intensity scenes
                     score = o_rate * view_count
                 else:
                     score = 0.0
@@ -2554,7 +2702,7 @@ class RankScenesByEngagementTool(BaseTool):
                         "replay_count": replay_count,
                         "o_rate": round(o_rate, 2),
                         "completion_rate": round(completion_rate, 1),
-                        "recency_decay": round(recency_decay, 2),
+                        "recency_decay": 1.0,
                         "score": round(score, 2),
                         "scoring_mode": scoring_mode,
                     }
@@ -2579,14 +2727,8 @@ class RankScenesByEngagementTool(BaseTool):
                 # Mode-specific detail
                 if scoring_mode == "completion":
                     detail = f"completion: {s['completion_rate']:.0f}%"
-                elif scoring_mode == "intensity":
-                    detail = f"o-rate: {s['o_rate']:.2f}, views: {s['view_count']}"
-                elif scoring_mode == "recent":
-                    detail = f"score: {s['score']:.1f}, recency: {s['recency_decay']:.0%}"
                 else:
-                    detail = (
-                        f"score: {s['score']:.1f}, o: {s['o_count']}, replays: {s['replay_count']}"
-                    )
+                    detail = f"o-rate: {s['o_rate']:.2f}, views: {s['view_count']}"
 
                 formatted_lines.append(
                     f"{i + 1}. [{s['title']}]({s['url']}) - {performers_str} ({detail})"
