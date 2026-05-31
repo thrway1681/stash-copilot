@@ -1,0 +1,119 @@
+name: Claude Refactor Routine (two-track)
+
+# Merge-triggered autonomous refactor loop. Keeps up to TWO agent PRs in flight
+# (one you're reviewing, one being generated) so you're never idle waiting on an
+# agent. Each time you MERGE an agent PR into `dev`, this fires and tops the queue
+# back up to 2 by opening the next eligible chunk.
+#
+# Auth/cascade: runs via the Claude GitHub App (CLAUDE_CODE_OAUTH_TOKEN), so the
+# PRs it opens are attributed to claude[bot] and DO trigger claude-review.yml --
+# which is what lets the routine's "wait for the review check" resolve.
+#
+# Cold start (0 PRs open): trigger once via the Actions "Run workflow" button
+# (workflow_dispatch). The routine's internal loop seeds BOTH tracks in that single
+# run -- no need to trigger twice. NOTE: the "Run workflow" button only appears once
+# this file is on the DEFAULT branch (main); for the very first seed you can instead
+# just merge an already-open agent PR, which fires the merge trigger below.
+
+on:
+  pull_request:
+    types: [closed]        # fires on merge; gated below to agent PRs into dev
+  workflow_dispatch: {}    # manual cold-start / recovery
+
+# Serialize runs so two near-simultaneous merges can't both open a chunk and blow
+# the cap. cancel-in-progress:false queues the follow-up; the routine is idempotent
+# (it re-counts open PRs and tops up to 2), so one queued run is enough.
+concurrency:
+  group: claude-refactor-routine
+  cancel-in-progress: false
+
+jobs:
+  routine:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'dev' &&
+       startsWith(github.event.pull_request.head.ref, 'claude/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 150     # generous backstop; steady-state runs (1 chunk) are far shorter.
+                             # The routine has its own ~20-min per-chunk review timeout, so it
+                             # should never approach this.
+    permissions:
+      contents: write        # cut branches, commit
+      pull-requests: write   # list + open + update PRs
+      issues: read           # read ready-for-agent issues and their bodies
+      checks: read           # poll the "review" check status
+      id-token: write        # subscription/OAuth (CLAUDE_CODE_OAUTH_TOKEN) exchange
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # full history so the routine can branch from / rebase onto dev
+
+      - name: Run two-track routine
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 600
+            --model claude-sonnet-4-6
+          prompt: |
+            In thrway1681/stash-copilot, keep up to TWO agent chunks in flight, then stop.
+            The review-queue cap is 2 open agent PRs (open PRs into `dev` with a `claude/*`
+            head branch). Never exceed it -- the human is the merge gate and can only review so
+            many at once.
+
+            CONCURRENCY -- how many chunks to open this run:
+            1. Count currently-open agent PRs (open, base `dev`, head `claude/*`). Call it OPEN.
+            2. If OPEN >= 2, do nothing this run and stop -- both review slots are full.
+            3. Otherwise repeat the SELECT -> DETERMINE -> IMPLEMENT -> WAIT/ADDRESS cycle below,
+               opening exactly ONE new chunk per pass, until OPEN reaches 2 or no eligible issue
+               remains. (Steady state -- triggered right after a PR merge -- is just one chunk.
+               A cold start with nothing open seeds two parallel tracks.)
+
+            SELECT -- pick the issue for this chunk:
+            1. List open issues labeled `ready-for-agent`.
+            2. Going from lowest-numbered to highest, pick the FIRST issue that satisfies ALL of:
+               a. It has no open PR targeting it. This avoids stacking a second PR on one issue
+                  AND spreads the two in-flight chunks across DIFFERENT issues, so the two tracks
+                  run in parallel rather than both racing the same issue.
+               b. It has no unmet dependency. Check the body for "depends on #N": the dependency
+                  is satisfied only if issue #N is CLOSED. If #N is still open, skip this issue.
+            3. If no issue satisfies all of the above, stop this pass (nothing eligible to open).
+
+            DETERMINE THE NEXT CHUNK:
+            - Many issues are split into a numbered list of commits/chunks in the body, each
+              meant to leave the codebase working.
+            - Figure out which chunks are already done by checking which have MERGED PRs (search
+              merged PRs referencing this issue and read their titles/bodies, e.g. "commit 4 of #1").
+            - The chunk to implement this pass is the lowest-numbered commit not yet merged.
+            - If the issue is not split into chunks, implement the smallest reviewable slice that
+              leaves the codebase working.
+
+            IMPLEMENT:
+            - Branch from the LATEST `dev` onto a `claude/<short-slug>` branch. (Always cut from
+              current `dev` so a chunk already merged by the other track is included.)
+            - Implement only that one chunk. Keep it reviewable and leave the codebase working/green.
+            - Run the test suite and the linter/formatter. If either fails, fix it before the PR.
+            - Open a PR into `dev`. In the PR body, state which issue and which chunk this is
+              (e.g. "commit 5 of #1"), and what changed.
+
+            WAIT FOR THE AUTO-REVIEW & ADDRESS IT (at most 2 review->fix rounds):
+            - The auto-review runs as a GitHub Actions check named "review" on the PR and posts
+              its findings as a single sticky comment.
+            - Poll that CHECK until it reaches a COMPLETED state -- do NOT wait on a comment to
+              appear. Give up after ~20 minutes; if the check never completes (or never starts),
+              record that the review did not complete in time and treat this chunk as done (go
+              back to CONCURRENCY step 1). Never wait indefinitely.
+            - When the check completes, read the auto-review's sticky comment:
+              - No actionable findings -> this chunk is DONE; go back to CONCURRENCY step 1.
+              - Findings -> implement the fixes on the SAME branch, re-run tests + lint (fix any
+                failures), and push. Pushing re-triggers the auto-review.
+            - Repeat the wait->address cycle for the re-triggered review, but do AT MOST 2 fix
+              rounds total. After the 2nd round, treat the chunk as DONE regardless of remaining
+              review state, note any findings you did not address, and go back to CONCURRENCY step 1.
+
+            END OF RUN:
+            - Do NOT merge, ever -- opening/updating PRs is the end state. The human merges.
+            - Stop once OPEN has reached 2, or no eligible issue remains. Do not open a 3rd agent PR.
+            - A later merge re-triggers this workflow and tops the queue back up to 2.
