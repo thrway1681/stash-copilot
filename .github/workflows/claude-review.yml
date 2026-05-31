@@ -51,11 +51,17 @@ jobs:
                  comment, marked `<!-- auto-review:summary -->`, names the SHA). Only re-review when
                  new commits landed.
 
-            3. POST "REVIEW STARTED" immediately
-               - Create/update the sticky summary comment (find prior by marker
-                 `<!-- auto-review:summary -->`, else create) to:
-                 "🔍 Auto-review in progress for `<short-sha>`…". This tells the author — and the
-                 refactor routine — the review has begun.
+            3. POST "REVIEW STARTED" immediately — use exactly ONE tracking comment for this PR:
+               - List the PR's issue comments: `gh api repos/${{ github.repository }}/issues/<N>/comments`.
+                 Find every comment whose body contains the marker `<!-- auto-review:summary -->`.
+               - If NONE exists: create it with `gh pr comment <N> --body "<body>"`, where <body> is the
+                 marker on its own first line, then "🔍 Auto-review in progress for `<short-sha>`…".
+               - If one or more ALREADY exist (e.g. from a prior run): keep the most recent and DELETE the
+                 others with `gh api -X DELETE repos/${{ github.repository }}/issues/comments/<id>`, then
+                 EDIT the kept one in place with
+                 `gh api -X PATCH repos/${{ github.repository }}/issues/comments/<id> -f body="<body>"`.
+               - Record the kept/created comment's id. You will EDIT THIS SAME comment by id in step 7 —
+                 NEVER create a second tracking comment. (Inline review comments in step 7 are separate.)
 
             4. GATHER CONTEXT (read-only)
                - The diff: `gh pr diff <N>`.
@@ -94,13 +100,17 @@ jobs:
                  `comments` array — one per kept finding — each {path, line, side:"RIGHT", body}. Each
                  inline body: brief description + the rule/bug + a concrete fix; cite+link the CLAUDE.md
                  rule when that's the basis; no emojis in inline bodies.
-               - Then update the sticky SUMMARY comment (marker `<!-- auto-review:summary -->`) to the
-                 FINAL result, and ALWAYS include the reviewed SHA so the refactor routine can match it:
+               - Then EDIT the SAME tracking comment from step 3 — by its id, via
+                 `gh api -X PATCH repos/${{ github.repository }}/issues/comments/<id> -f body="<body>"`.
+                 Do NOT create a new comment for the summary (that is the duplicate-comment bug). Keep the
+                 marker `<!-- auto-review:summary -->` as the first line, and ALWAYS include the reviewed
+                 SHA so the refactor routine can match it:
                    • With findings: counts grouped Critical (90–100) / Important (80–89), one line each
                      linking file:line, plus a short "Strengths" note. End with: "This review never blocks merge."
                    • No findings: "✅ Auto-review: no issues found for `<short-sha>`. Checked CLAUDE.md
                      compliance, bugs, error handling, comments, types, and tests."
-               - ALWAYS leave the summary comment (clean or not) — it is the signal the review finished.
+               - The single tracking comment is ALWAYS left (clean or not), transitioned from "in progress"
+                 to the final result — it is the signal the review finished.
 
             8. STOP — do not edit code, push, approve, request changes, or merge. Review only.
 
