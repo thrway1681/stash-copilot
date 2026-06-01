@@ -56,82 +56,6 @@ class RecommendationEngine:
         self.storage = storage or EmbeddingStorage()
         self.log = log_callback or (lambda msg, level: None)
 
-    def _apply_preference_model(
-        self,
-        profile: UserPreferenceProfile,
-    ) -> UserPreferenceProfile:
-        """Blend engagement profile with learned preference model if available.
-
-        If the user has completed preference training sessions (swipe
-        comparisons), the Bayesian preference model is loaded from the DB
-        and blended with the engagement-based profile using a sigmoid
-        schedule that transitions from engagement-dominated to
-        comparison-dominated as the number of comparisons grows.
-
-        Returns the original profile unchanged if no model exists.
-        """
-        try:
-            from ..preferences.model import BayesianPreferenceModel
-
-            conn = self.storage._get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT preference_mean, preference_covariance_diag,
-                           n_comparisons, noise_variance
-                    FROM preference_model_state
-                    WHERE model_key = ?
-                    """,
-                    (self.storage.model_key,),
-                )
-                row = cursor.fetchone()
-            finally:
-                conn.close()
-
-            if row is None or row["n_comparisons"] == 0:
-                return profile
-
-            # Reconstruct model from persisted state
-            mean = np.array(
-                self.storage._unpack_embedding(row["preference_mean"]),
-                dtype=np.float32,
-            )
-            cov_diag = np.array(
-                self.storage._unpack_embedding(row["preference_covariance_diag"]),
-                dtype=np.float32,
-            )
-            model = BayesianPreferenceModel(
-                dims=len(mean),
-                noise_variance=row["noise_variance"],
-            )
-            model.mu = mean
-            model.sigma_sq = cov_diag
-            model.n_comparisons = row["n_comparisons"]
-
-            # Blend learned preferences with engagement profile
-            engagement_emb = np.array(profile.profile_embedding, dtype=np.float32)
-            blended = model.combine_with_engagement_profile(engagement_emb)
-
-            self.log(
-                f"Blended preference model ({model.n_comparisons} comparisons) "
-                f"with engagement profile",
-                "info",
-            )
-
-            return UserPreferenceProfile(
-                profile_embedding=blended.tolist(),
-                contributing_scenes=profile.contributing_scenes,
-                total_engagement_score=profile.total_engagement_score,
-                created_at=profile.created_at,
-                scoring_method=profile.scoring_method,
-            )
-        except ImportError:
-            return profile
-        except Exception as e:
-            self.log(f"Failed to apply preference model: {e}", "warning")
-            return profile
-
     def generate_recommendations(
         self,
         config: RecommendationConfig,
@@ -155,9 +79,6 @@ class RecommendationEngine:
             if profile is None:
                 self.log("Could not build user profile", "error")
                 return []
-
-        # Blend with learned preference model if available
-        profile = self._apply_preference_model(profile)
 
         if config.mode == RecommendationMode.DISCOVER_NEW:
             # Use cluster engine if available (and no seed scene - seeds bypass clusters)
