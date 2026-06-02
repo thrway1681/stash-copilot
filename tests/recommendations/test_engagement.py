@@ -208,13 +208,6 @@ class TestGetEngagement:
         assert data[7]["o_count"] == 4
         assert data[7]["view_count"] == 8
 
-    def test_get_all_scene_engagement_alias(self, patched_engagement_db: None) -> None:
-        """get_all_scene_engagement() is a thin alias for get_engagement(None)."""
-        calc = EngagementCalculator()
-        via_alias = calc.get_all_scene_engagement()
-        via_new = calc.get_engagement()
-        assert set(via_alias.keys()) == set(via_new.keys())
-
     def test_empty_scene_ids_list(self, patched_engagement_db: None) -> None:
         """get_engagement([]) with an empty list returns an empty dict."""
         calc = EngagementCalculator()

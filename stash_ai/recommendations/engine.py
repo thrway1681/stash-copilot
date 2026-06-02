@@ -269,7 +269,7 @@ class RecommendationEngine:
         )
 
         # Get all engagement data
-        all_engagement = calculator.get_all_scene_engagement()
+        all_engagement = calculator.get_engagement()
 
         if not all_engagement:
             self.log("No engagement data found", "warning")
@@ -452,7 +452,7 @@ class RecommendationEngine:
         )
 
         # Get engagement data for scenes with O-moments
-        all_engagement = calculator.get_all_scene_engagement()
+        all_engagement = calculator.get_engagement()
 
         # Build weighted profile from O-moments
         profile_embedding, profile_info = self._build_o_moment_profile(
