@@ -3828,6 +3828,60 @@ class EmbeddingStorage:
         conn.close()
         return rowcount
 
+    def get_frame_tag_best_similarities(self, model_key: str) -> list[float]:
+        """Return every frame's best-tag similarity for ``model_key``.
+
+        Used by the tag-gap task's slow-path threshold computation (the
+        5th-percentile of all best-similarities). Keeps the
+        ``frame_tag_coverage`` table behind the store interface so callers
+        never run their own SQL against it.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT best_similarity FROM frame_tag_coverage WHERE model_key = ?",
+                (model_key,),
+            )
+            return [float(row["best_similarity"]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_tag_gap_threshold(self, model_key: str) -> float | None:
+        """Return the cached tag-gap coverage threshold for ``model_key``.
+
+        Reads the typed value from the store's ``schema_info`` cache. Returns
+        ``None`` when no threshold has been cached yet, so the caller can fall
+        back to recomputing it.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM schema_info WHERE key = ?",
+                (f"tag_gap_threshold_{model_key}",),
+            )
+            row = cursor.fetchone()
+            return float(row["value"]) if row else None
+        finally:
+            conn.close()
+
+    def set_tag_gap_threshold(self, model_key: str, value: float) -> None:
+        """Cache the tag-gap coverage threshold for ``model_key``.
+
+        Stores the value in the store's ``schema_info`` cache so subsequent
+        runs can skip the expensive percentile recomputation.
+        """
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?)",
+                (f"tag_gap_threshold_{model_key}", str(value)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def save_dismissed_tag(self, scene_id: int, tag_id: int) -> None:
         """Record that a tag suggestion was dismissed for a scene."""
         conn = self._get_connection()

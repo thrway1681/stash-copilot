@@ -250,14 +250,9 @@ class TagGapDetectionTask:
         Returns:
             Sorted list of scene IDs to process.
         """
-        conn = self.storage._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT DISTINCT scene_id FROM frame_embeddings WHERE model_key = ?",
-            (self.model_key,),
+        all_scene_ids: set[int] = set(
+            self.storage.get_scene_ids_with_frame_embeddings(self.model_key)
         )
-        all_scene_ids: set[int] = {row["scene_id"] for row in cursor.fetchall()}
-        conn.close()
 
         if force:
             return sorted(all_scene_ids)
@@ -356,14 +351,7 @@ class TagGapDetectionTask:
 
         # Cache the threshold for fast retrieval
         self._cached_threshold = threshold
-        conn = self.storage._get_connection()
-        cache_key = f"tag_gap_threshold_{self.model_key}"
-        conn.execute(
-            "INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?)",
-            (cache_key, str(threshold)),
-        )
-        conn.commit()
-        conn.close()
+        self.storage.set_tag_gap_threshold(self.model_key, threshold)
 
         return threshold
 
@@ -379,40 +367,21 @@ class TagGapDetectionTask:
         if self._cached_threshold is not None:
             return self._cached_threshold
 
-        conn = self.storage._get_connection()
-        cursor = conn.cursor()
-
-        # Check for stored threshold in schema_info
-        cache_key = f"tag_gap_threshold_{self.model_key}"
-        cursor.execute(
-            "SELECT value FROM schema_info WHERE key = ?",
-            (cache_key,),
-        )
-        row = cursor.fetchone()
-        if row:
-            self._cached_threshold = float(row["value"])
-            conn.close()
+        # Check for a stored threshold in the store's cache
+        cached = self.storage.get_tag_gap_threshold(self.model_key)
+        if cached is not None:
+            self._cached_threshold = cached
             return self._cached_threshold
 
         # Compute from scratch (slow)
-        cursor.execute(
-            "SELECT best_similarity FROM frame_tag_coverage WHERE model_key = ?",
-            (self.model_key,),
-        )
-        sims = [row["best_similarity"] for row in cursor.fetchall()]
+        sims = self.storage.get_frame_tag_best_similarities(self.model_key)
         if not sims:
-            conn.close()
             return 0.0
 
         threshold = float(np.percentile(sims, 5))
 
         # Store for future use
-        cursor.execute(
-            "INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?)",
-            (cache_key, str(threshold)),
-        )
-        conn.commit()
-        conn.close()
+        self.storage.set_tag_gap_threshold(self.model_key, threshold)
 
         self._cached_threshold = threshold
         return threshold
