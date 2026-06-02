@@ -568,56 +568,16 @@ class EmbeddingStorage:
         """)
 
     def _migrate_to_v8(self, cursor: sqlite3.Cursor) -> None:
-        """Add preference learning tables (v8)."""
-        # Pairwise comparison history
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS preference_comparisons (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene_a_id INTEGER NOT NULL,
-                scene_b_id INTEGER NOT NULL,
-                winner_id INTEGER NOT NULL,
-                phase TEXT NOT NULL,
-                response_time_ms INTEGER,
-                session_id TEXT NOT NULL,
-                model_key TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
+        """No-op (formerly added the preference-learning tables).
 
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_pref_comp_session
-            ON preference_comparisons(session_id)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_pref_comp_model_key
-            ON preference_comparisons(model_key)
-        """)
-
-        # Learned preference model state (one row per model_key)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS preference_model_state (
-                model_key TEXT PRIMARY KEY,
-                preference_mean BLOB NOT NULL,
-                preference_covariance_diag BLOB NOT NULL,
-                n_comparisons INTEGER NOT NULL,
-                noise_variance REAL NOT NULL,
-                phase TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-
-        # Session metadata
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS preference_sessions (
-                session_id TEXT PRIMARY KEY,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                comparison_count INTEGER DEFAULT 0,
-                phase TEXT NOT NULL,
-                convergence_avg_sigma REAL
-            )
-        """)
+        The explicit swipe/preference subsystem was removed per ADR-0001
+        (issue #2), so this migration no longer creates the
+        ``preference_comparisons`` / ``preference_model_state`` /
+        ``preference_sessions`` tables. The version step is retained as a
+        no-op so the migration chain stays contiguous; databases that
+        already ran the original v8 keep those now-unused tables harmlessly
+        (no DROP migration — abandoning them is acceptable, ADR-0001).
+        """
 
     def _migrate_to_v9(self, cursor: sqlite3.Cursor) -> None:
         """Add z column to scene_umap_coords for 3D UMAP projection."""
