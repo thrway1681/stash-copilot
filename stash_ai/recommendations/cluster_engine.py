@@ -7,13 +7,17 @@ and weighted round-robin merging for diverse recommendations.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     from stash_ai.embeddings.storage import EmbeddingStorage
-    from stash_ai.recommendations.types import RecommendationResult, SceneDetails
+    from stash_ai.recommendations.types import (
+        RecommendationResult,
+        SceneDetails,
+        TasteCluster,
+    )
 
 
 def _empty_scene_details(scene_id: int = 0) -> SceneDetails:
@@ -72,21 +76,19 @@ class ClusterRecommendationEngine:
             return []
 
         # Filter to active (non-excluded) clusters
-        active_clusters = [c for c in clusters if not c["excluded"]]
+        active_clusters = [c for c in clusters if not c.excluded]
         if not active_clusters:
             self.log("All clusters are excluded", "warning")
             return []
 
         # Calculate effective weights
-        total_weight = sum(
-            c.get("weight_override") or c["engagement_share"] for c in active_clusters
-        )
+        total_weight = sum((c.weight_override or c.engagement_share) for c in active_clusters)
         if total_weight <= 0:
             total_weight = 1.0
 
-        cluster_weights: list[tuple[dict[str, Any], float]] = []
+        cluster_weights: list[tuple[TasteCluster, float]] = []
         for c in active_clusters:
-            weight = (c.get("weight_override") or c["engagement_share"]) / total_weight
+            weight = (c.weight_override or c.engagement_share) / total_weight
             cluster_weights.append((c, weight))
 
         self.log(
@@ -96,9 +98,9 @@ class ClusterRecommendationEngine:
         )
 
         # Query each cluster
-        per_cluster_results: list[tuple[dict[str, Any], float, list[RecommendationResult]]] = []
+        per_cluster_results: list[tuple[TasteCluster, float, list[RecommendationResult]]] = []
         for cluster, weight in cluster_weights:
-            centroid = np.array(cluster["centroid"], dtype=np.float32)
+            centroid = np.array(cluster.centroid, dtype=np.float32)
             cluster_limit = max(10, int(limit * weight * 2))  # Over-fetch for dedup
 
             results = self._query_single_cluster(
@@ -107,13 +109,13 @@ class ClusterRecommendationEngine:
                 min_similarity=min_similarity,
                 mode=mode,
                 exclude_scene_ids=exclude_scene_ids or set(),
-                profile_scene_ids=set(cluster["scene_ids"]),
+                profile_scene_ids=set(cluster.scene_ids),
                 watched_scene_ids=watched_scene_ids or set(),
             )
 
             per_cluster_results.append((cluster, weight, results))
             self.log(
-                f"  Cluster '{cluster['auto_label']}': {len(results)} results",
+                f"  Cluster '{cluster.auto_label}': {len(results)} results",
                 "debug",
             )
 
@@ -177,7 +179,7 @@ class ClusterRecommendationEngine:
 
     def _proportional_merge(
         self,
-        per_cluster_results: list[tuple[dict[str, Any], float, list[RecommendationResult]]],
+        per_cluster_results: list[tuple[TasteCluster, float, list[RecommendationResult]]],
         limit: int,
     ) -> list[RecommendationResult]:
         """Merge results from multiple clusters with proportional sampling.

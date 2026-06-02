@@ -6,10 +6,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from stash_ai.recommendations.types import TasteCluster
 
 
 class SceneEmbeddingRecord(TypedDict):
@@ -3113,9 +3116,17 @@ class EmbeddingStorage:
         conn.commit()
         conn.close()
 
-    def get_taste_clusters(self, model_key: str) -> list[dict[str, Any]]:
-        """Load taste clusters for a model_key."""
+    def get_taste_clusters(self, model_key: str) -> "list[TasteCluster]":
+        """Load taste clusters for a model_key as typed read objects.
+
+        Returns ``TasteCluster`` dataclasses (the same runtime type the write
+        path consumes) rather than raw dicts, so callers never depend on the
+        table schema or BLOB layout. The store owns unpacking the centroid BLOB
+        and decoding the JSON columns.
+        """
         import json
+
+        from stash_ai.recommendations.types import TagMatch, TasteCluster
 
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -3126,23 +3137,22 @@ class EmbeddingStorage:
         )
         rows = cursor.fetchall()
 
-        clusters = []
+        clusters: list[TasteCluster] = []
         for row in rows:
+            tag_matches = cast("list[TagMatch]", json.loads(row["tag_matches"]))
             clusters.append(
-                {
-                    "cluster_id": row["cluster_id"],
-                    "model_key": row["model_key"],
-                    "centroid": self._unpack_embedding(row["centroid"]),
-                    "scene_ids": json.loads(row["scene_ids"]),
-                    "engagement_total": row["engagement_total"],
-                    "engagement_share": row["engagement_share"],
-                    "auto_label": row["auto_label"],
-                    "user_label": row["user_label"],
-                    "weight_override": row["weight_override"],
-                    "excluded": bool(row["excluded"]),
-                    "tag_matches": json.loads(row["tag_matches"]),
-                    "created_at": row["created_at"],
-                }
+                TasteCluster(
+                    cluster_id=row["cluster_id"],
+                    centroid=np.array(self._unpack_embedding(row["centroid"]), dtype=np.float32),
+                    scene_ids=json.loads(row["scene_ids"]),
+                    engagement_total=row["engagement_total"],
+                    engagement_share=row["engagement_share"],
+                    auto_label=row["auto_label"],
+                    user_label=row["user_label"],
+                    weight_override=row["weight_override"],
+                    excluded=bool(row["excluded"]),
+                    tag_matches=tag_matches,
+                )
             )
 
         conn.close()
