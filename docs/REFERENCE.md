@@ -55,8 +55,10 @@ CREATE TABLE o_moment_embeddings (
 from stash_ai.recommendations import UserProfileBuilder, RecommendationConfig
 
 config = RecommendationConfig(
+    # Canonical engagement weights (ADR-0004): o_count*20 + replays*2 + stars*1.5.
+    # Play time is intentionally excluded to avoid duration bias.
     top_scenes_for_profile=20,  # Use top 20 engaged scenes
-    weights={"o_count": 20.0, "view_count": 2.0, "play_duration": 1.0},
+    weights={"o_count": 20.0, "view_count": 2.0, "rating": 1.5},
 )
 
 builder = UserProfileBuilder(storage=embedding_storage)
