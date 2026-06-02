@@ -123,10 +123,6 @@ class EngagementCalculator:
         self.log(f"Found engagement data for {len(results)} scenes", "debug")
         return results
 
-    def get_all_scene_engagement(self) -> dict[int, SceneEngagementData]:
-        """Thin alias for get_engagement(None). Fetches all engaged scenes."""
-        return self.get_engagement(scene_ids=None)
-
     def calculate_base_score(self, data: SceneEngagementData) -> tuple[float, dict[str, float]]:
         """
         Calculate base weighted engagement score.
