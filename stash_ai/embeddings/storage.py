@@ -3,6 +3,7 @@
 import sqlite3
 import struct
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +72,41 @@ class FrameEmbeddingRecord(TypedDict):
     embedding: list[float]
     model_key: str
     created_at: str
+
+
+@dataclass
+class FrameEmbeddingBatch:
+    """A memory-bounded batch of frame embeddings.
+
+    Yielded by :meth:`EmbeddingStorage.iter_frame_embeddings` so a caller can
+    stream every frame for a model without ever holding the whole table in
+    memory. The four arrays are row-aligned (index ``i`` describes one frame).
+    """
+
+    scene_ids: NDArray[np.int64]
+    frame_indices: NDArray[np.int32]
+    timestamps: NDArray[np.float32]
+    embeddings: NDArray[np.float32]  # shape (batch, dims)
+
+    def __len__(self) -> int:
+        return int(self.embeddings.shape[0])
+
+
+@dataclass
+class FrameEmbeddingSample:
+    """A memory-capped random sample of frame embeddings.
+
+    Returned by :meth:`EmbeddingStorage.sample_frame_embeddings`. ``keys`` and
+    the rows of ``embeddings`` are aligned; ``timestamps`` maps each key to its
+    frame timestamp.
+    """
+
+    keys: list[tuple[int, int]]  # (scene_id, frame_index)
+    embeddings: NDArray[np.float32]  # shape (n, dims)
+    timestamps: dict[tuple[int, int], float]
+
+    def __len__(self) -> int:
+        return len(self.keys)
 
 
 class FrameEmbeddingMetadata(TypedDict):
@@ -1078,6 +1114,191 @@ class EmbeddingStorage:
         for i, blob in enumerate(blobs):
             arr[i] = np.frombuffer(blob, dtype=np.float32)
         return arr
+
+    # ------------------------------------------------------------------
+    # Frame-embedding operations (own the memory-safety logic so callers
+    # don't reach past the store with a raw connection / blob unpacking)
+    # ------------------------------------------------------------------
+
+    def count_frame_embeddings(self, model_key: str) -> int:
+        """Count stored frame embeddings for ``model_key``."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) AS n FROM frame_embeddings WHERE model_key = ?",
+                (model_key,),
+            )
+            return int(cursor.fetchone()["n"])
+        finally:
+            conn.close()
+
+    def get_scene_ids_with_frame_embeddings(self, model_key: str) -> list[int]:
+        """Return the distinct scene IDs that have frame embeddings for ``model_key``.
+
+        Sorted ascending so callers get a stable, deterministic ordering.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT DISTINCT scene_id FROM frame_embeddings
+                WHERE model_key = ?
+                ORDER BY scene_id
+                """,
+                (model_key,),
+            )
+            return [int(row["scene_id"]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def iter_frame_embeddings(
+        self, model_key: str, batch_size: int = 10000
+    ) -> Iterator[FrameEmbeddingBatch]:
+        """Stream every frame embedding for ``model_key`` in row-aligned batches.
+
+        Reads at most ``batch_size`` frames into memory at a time (via
+        ``fetchmany``) so a full-library index build never materialises the
+        whole ``frame_embeddings`` table. Frames are ordered by
+        ``(scene_id, frame_index)``. Yields nothing when no frames exist.
+
+        Args:
+            model_key: Model whose frames to stream.
+            batch_size: Maximum frames per yielded batch.
+
+        Yields:
+            :class:`FrameEmbeddingBatch` instances, each holding up to
+            ``batch_size`` row-aligned frames.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT scene_id, frame_index, timestamp, embedding
+                FROM frame_embeddings
+                WHERE model_key = ?
+                ORDER BY scene_id, frame_index
+                """,
+                (model_key,),
+            )
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if not rows:
+                    break
+                n = len(rows)
+                scene_ids = np.empty(n, dtype=np.int64)
+                frame_indices = np.empty(n, dtype=np.int32)
+                timestamps = np.empty(n, dtype=np.float32)
+                vectors = [self._unpack_embedding(row["embedding"]) for row in rows]
+                for i, row in enumerate(rows):
+                    scene_ids[i] = row["scene_id"]
+                    frame_indices[i] = row["frame_index"]
+                    timestamps[i] = row["timestamp"]
+                yield FrameEmbeddingBatch(
+                    scene_ids=scene_ids,
+                    frame_indices=frame_indices,
+                    timestamps=timestamps,
+                    embeddings=np.asarray(vectors, dtype=np.float32),
+                )
+        finally:
+            conn.close()
+
+    def sample_frame_embeddings(
+        self,
+        model_key: str,
+        n: int,
+        exclude_keys: set[tuple[int, int]] | None = None,
+    ) -> FrameEmbeddingSample:
+        """Return a memory-capped random sample of frame embeddings.
+
+        Two-phase to bound memory: when more than ``n`` frames exist, randomly
+        pick ``n`` rowids first (no BLOB reads), then fetch the full rows only
+        for the chosen subset. When the table holds at most ``n`` frames, all
+        of them are loaded. In both cases frames whose ``(scene_id,
+        frame_index)`` appears in ``exclude_keys`` are dropped *after*
+        selection, so the returned sample may be smaller than ``n``.
+
+        Args:
+            model_key: Model whose frames to sample.
+            n: Maximum number of frames to select before exclusion.
+            exclude_keys: ``(scene_id, frame_index)`` pairs to drop.
+
+        Returns:
+            A :class:`FrameEmbeddingSample` (empty when no frames qualify).
+        """
+        if n <= 0:
+            raise ValueError("n must be positive")
+
+        exclude = exclude_keys or set()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) AS n FROM frame_embeddings WHERE model_key = ?",
+                (model_key,),
+            )
+            total = int(cursor.fetchone()["n"])
+
+            rows: list[Any] = []
+            if total > n:
+                # Phase 1: random rowids (no BLOB reads).
+                cursor.execute(
+                    """
+                    SELECT rowid FROM frame_embeddings
+                    WHERE model_key = ?
+                    ORDER BY RANDOM() LIMIT ?
+                    """,
+                    (model_key, n),
+                )
+                sampled_rowids = [row[0] for row in cursor.fetchall()]
+                # Phase 2: fetch the chosen rows, chunked under SQLite's
+                # bound-variable limit.
+                chunk_size = 500
+                for start in range(0, len(sampled_rowids), chunk_size):
+                    chunk = sampled_rowids[start : start + chunk_size]
+                    placeholders = ",".join("?" * len(chunk))
+                    cursor.execute(
+                        f"""
+                        SELECT scene_id, frame_index, timestamp, embedding
+                        FROM frame_embeddings WHERE rowid IN ({placeholders})
+                        """,
+                        chunk,
+                    )
+                    rows.extend(cursor.fetchall())
+            else:
+                cursor.execute(
+                    """
+                    SELECT scene_id, frame_index, timestamp, embedding
+                    FROM frame_embeddings
+                    WHERE model_key = ?
+                    ORDER BY scene_id, frame_index
+                    """,
+                    (model_key,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        keys: list[tuple[int, int]] = []
+        timestamps: dict[tuple[int, int], float] = {}
+        vectors: list[list[float]] = []
+        for row in rows:
+            key = (int(row["scene_id"]), int(row["frame_index"]))
+            if key in exclude:
+                continue
+            keys.append(key)
+            timestamps[key] = float(row["timestamp"])
+            vectors.append(self._unpack_embedding(row["embedding"]))
+
+        embeddings = (
+            np.asarray(vectors, dtype=np.float32) if vectors else np.empty((0, 0), dtype=np.float32)
+        )
+        return FrameEmbeddingSample(keys=keys, embeddings=embeddings, timestamps=timestamps)
 
     # ------------------------------------------------------------------
     # Frame-level scoring via numpy memmap
