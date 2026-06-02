@@ -121,35 +121,14 @@ class FrameSearchIndex:
         # Ensure assets directory exists
         self.assets_dir.mkdir(parents=True, exist_ok=True)
 
-        # Get all frame embeddings for this model
-        conn = storage._get_connection()
-        cursor = conn.cursor()
-
-        # First, count total frames
-        cursor.execute(
-            "SELECT COUNT(*) FROM frame_embeddings WHERE model_key = ?",
-            (self.model_key,),
-        )
-        total_frames = cursor.fetchone()[0]
+        # Count total frames for this model (the store owns the SQL).
+        total_frames = storage.count_frame_embeddings(self.model_key)
 
         if total_frames == 0:
-            conn.close()
             raise ValueError(
                 f"No frame embeddings found for model '{self.model_key}'. "
                 "Run 'Embed All Scenes' task first."
             )
-
-        # Get dimensions from first embedding
-        cursor.execute(
-            "SELECT embedding FROM frame_embeddings WHERE model_key = ? LIMIT 1",
-            (self.model_key,),
-        )
-        first_row = cursor.fetchone()
-        first_embedding = storage._unpack_embedding(first_row[0])
-        dimensions = len(first_embedding)
-
-        # Create FAISS index (Inner Product = cosine similarity for normalized vectors)
-        index = faiss.IndexFlatIP(dimensions)
 
         # Pre-allocate metadata arrays for efficiency
         scene_ids = np.zeros(total_frames, dtype=np.int64)
@@ -157,46 +136,41 @@ class FrameSearchIndex:
         timestamps = np.zeros(total_frames, dtype=np.float32)
         unique_scene_ids: set[int] = set()
 
-        # Process in batches
-        cursor.execute(
-            """
-            SELECT scene_id, frame_index, timestamp, embedding
-            FROM frame_embeddings
-            WHERE model_key = ?
-            ORDER BY scene_id, frame_index
-            """,
-            (self.model_key,),
-        )
-
-        batch_embeddings = []
+        # Stream frames in row-aligned batches; the store bounds memory by
+        # never materialising the whole frame_embeddings table at once. The
+        # FAISS index is created lazily from the first batch's dimensionality.
+        index: faiss.IndexFlatIP | None = None
+        dimensions = 0
         processed = 0
 
-        for row in cursor:
-            scene_id, frame_index, timestamp, embedding_blob = row
-            embedding = storage._unpack_embedding(embedding_blob)
+        for batch in storage.iter_frame_embeddings(self.model_key, batch_size=batch_size):
+            n = len(batch)
+            if n == 0:
+                continue
 
-            batch_embeddings.append(embedding)
-            scene_ids[processed] = scene_id
-            frame_indices[processed] = frame_index
-            timestamps[processed] = timestamp
-            unique_scene_ids.add(scene_id)
-            processed += 1
+            if index is None:
+                # Inner Product = cosine similarity for normalized vectors.
+                dimensions = int(batch.embeddings.shape[1])
+                index = faiss.IndexFlatIP(dimensions)
 
-            # Add batch to index when full
-            if len(batch_embeddings) >= batch_size:
-                vectors = np.array(batch_embeddings, dtype=np.float32)
-                index.add(vectors)
-                batch_embeddings = []
+            index.add(np.ascontiguousarray(batch.embeddings, dtype=np.float32))
 
-                if progress_callback:
-                    progress_callback(processed, total_frames)
+            scene_ids[processed : processed + n] = batch.scene_ids
+            frame_indices[processed : processed + n] = batch.frame_indices
+            timestamps[processed : processed + n] = batch.timestamps
+            unique_scene_ids.update(batch.scene_ids.tolist())
+            processed += n
 
-        # Add remaining embeddings
-        if batch_embeddings:
-            vectors = np.array(batch_embeddings, dtype=np.float32)
-            index.add(vectors)
+            if progress_callback:
+                progress_callback(processed, total_frames)
 
-        conn.close()
+        if index is None:
+            # count_frame_embeddings reported frames but the stream yielded
+            # none (e.g. rows deleted between the two calls).
+            raise ValueError(
+                f"No frame embeddings found for model '{self.model_key}'. "
+                "Run 'Embed All Scenes' task first."
+            )
 
         if progress_callback:
             progress_callback(total_frames, total_frames)
