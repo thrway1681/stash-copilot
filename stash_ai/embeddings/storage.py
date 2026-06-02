@@ -827,6 +827,68 @@ class EmbeddingStorage:
             "updated_at": row["updated_at"],
         }
 
+    def get_embeddings(self, scene_ids: list[int]) -> dict[int, SceneEmbeddingRecord]:
+        """
+        Bulk-retrieve embedding records for the current model_key.
+
+        Single-query (chunked) replacement for per-scene ``get_embedding``
+        loops, eliminating the N+1 load. Scene IDs without a stored embedding
+        for the current model_key are simply absent from the result.
+
+        Args:
+            scene_ids: Stash scene IDs to fetch
+
+        Returns:
+            Mapping of scene_id -> SceneEmbeddingRecord for the scenes found.
+        """
+        if not scene_ids:
+            return {}
+
+        results: dict[int, SceneEmbeddingRecord] = {}
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            # Chunk the IN clause to stay under SQLite's bound-variable limit
+            # (the +1 leaves room for the trailing model_key parameter).
+            chunk_size = 900
+            for start in range(0, len(scene_ids), chunk_size):
+                chunk = scene_ids[start : start + chunk_size]
+                placeholders = ",".join("?" for _ in chunk)
+                cursor.execute(
+                    f"""
+                    SELECT * FROM scene_embeddings
+                    WHERE model_key = ? AND scene_id IN ({placeholders})
+                    """,
+                    (self.model_key, *chunk),
+                )
+                for row in cursor.fetchall():
+                    results[row["scene_id"]] = {
+                        "scene_id": row["scene_id"],
+                        "model_key": row["model_key"],
+                        "visual_embedding": (
+                            self._unpack_embedding(row["visual_embedding"])
+                            if row["visual_embedding"]
+                            else None
+                        ),
+                        "metadata_embedding": (
+                            self._unpack_embedding(row["metadata_embedding"])
+                            if row["metadata_embedding"]
+                            else None
+                        ),
+                        "composite_embedding": self._unpack_embedding(row["composite_embedding"]),
+                        "visual_model": row["visual_model"],
+                        "text_model": row["text_model"],
+                        "dimensions": row["dimensions"],
+                        "visual_description": row["visual_description"],
+                        "metadata_text": row["metadata_text"],
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"],
+                    }
+        finally:
+            conn.close()
+
+        return results
+
     def has_embedding(self, scene_id: int) -> bool:
         """Check if a scene has an embedding stored for the current model_key."""
         conn = self._get_connection()

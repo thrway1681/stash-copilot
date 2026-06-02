@@ -237,13 +237,14 @@ class TasteMapTask:
             Tuple of (scene_ids, embeddings, engagement_scores) where
             engagement_scores only contains scenes with engagement data.
         """
-        # Load ALL embeddings
+        # Load ALL embeddings in one bulk fetch (avoids per-scene N+1 loads)
         all_ids = self.storage.get_embedded_scene_ids()
+        records = self.storage.get_embeddings(all_ids)
 
         embeddings_list: list[list[float]] = []
         valid_ids: list[int] = []
         for sid in all_ids:
-            emb = self.storage.get_embedding(sid)
+            emb = records.get(sid)
             if emb and emb.get("visual_embedding"):
                 embeddings_list.append(emb["visual_embedding"])  # type: ignore[arg-type]
                 valid_ids.append(sid)
