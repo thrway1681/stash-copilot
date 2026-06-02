@@ -3052,21 +3052,28 @@ class QueryScenesByDateTool(BaseTool):
 
             where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
-            # Build ORDER BY clause
+            # Engagement scoring is owned by the single EngagementCalculator
+            # (ADR-0004); it is no longer embedded in SQL here. For the
+            # "engagement" sort we must score every matching scene, so ordering
+            # and the limit are applied in Python rather than in SQL.
+            sort_by_engagement = sort_by == "engagement"
+
             if sort_by == "date_asc":
                 order_clause = f"ORDER BY {date_column} ASC"
             elif sort_by == "date_desc":
                 order_clause = f"ORDER BY {date_column} DESC"
-            elif sort_by == "engagement":
-                order_clause = "ORDER BY engagement_score DESC"
             elif sort_by == "title":
                 order_clause = "ORDER BY s.title ASC"
             else:
                 order_clause = f"ORDER BY {date_column} DESC"
 
-            params.append(limit)
+            if sort_by_engagement:
+                limit_clause = ""
+            else:
+                limit_clause = "LIMIT ?"
+                params.append(limit)
 
-            # Build query
+            # Build query (engagement counts/score come from the calculator below)
             query = f"""
                 SELECT
                     s.id,
@@ -3074,34 +3081,43 @@ class QueryScenesByDateTool(BaseTool):
                     s.date as scene_date,
                     s.created_at,
                     st.name as studio,
-                    GROUP_CONCAT(DISTINCT p.name) as performers,
-                    COALESCE(view_agg.view_count, 0) as view_count,
-                    COALESCE(o_agg.o_count, 0) as o_count,
-                    (COALESCE(o_agg.o_count, 0) * 20.0 +
-                     GREATEST(COALESCE(view_agg.view_count, 0) - 1, 0) * 2.0) as engagement_score
+                    GROUP_CONCAT(DISTINCT p.name) as performers
                 FROM scenes s
                 {date_table}
                 LEFT JOIN studios st ON s.studio_id = st.id
                 LEFT JOIN performers_scenes ps ON s.id = ps.scene_id
                 LEFT JOIN performers p ON ps.performer_id = p.id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
                 {where_clause}
                 GROUP BY s.id
                 {order_clause}
-                LIMIT ?
+                {limit_clause}
             """
 
             cursor.execute(query, params)
+            rows = cursor.fetchall()
+            conn.close()
+
+            # Per-scene engagement counts + canonical score from the single source.
+            from ..recommendations.engagement import EngagementCalculator
+            from ..recommendations.types import EngagementScoringMethod
+
+            scene_ids = [row["id"] for row in rows]
+            calculator = EngagementCalculator()
+            engagement_data = calculator.get_engagement(scene_ids)
 
             scenes = []
-            for row in cursor.fetchall():
+            for row in rows:
+                eng = engagement_data.get(row["id"])
+                if eng is not None:
+                    view_count = eng["view_count"]
+                    o_count = eng["o_count"]
+                    engagement_score = calculator.calculate_score(
+                        eng, EngagementScoringMethod.BASE_WEIGHTED
+                    ).raw_score
+                else:
+                    view_count = 0
+                    o_count = 0
+                    engagement_score = 0.0
                 scenes.append(
                     {
                         "id": row["id"],
@@ -3111,13 +3127,16 @@ class QueryScenesByDateTool(BaseTool):
                         "created_at": row["created_at"],
                         "studio": row["studio"],
                         "performers": row["performers"].split(",") if row["performers"] else [],
-                        "view_count": row["view_count"],
-                        "o_count": row["o_count"],
-                        "engagement_score": round(row["engagement_score"], 1),
+                        "view_count": view_count,
+                        "o_count": o_count,
+                        "engagement_score": round(engagement_score, 1),
                     }
                 )
 
-            conn.close()
+            # For the engagement sort, rank in Python and apply the limit.
+            if sort_by_engagement:
+                scenes.sort(key=lambda s: s["engagement_score"], reverse=True)
+                scenes = scenes[:limit]
 
             # Build formatted output
             formatted_lines = []
@@ -3720,17 +3739,24 @@ class QueryScenesByRatingTool(BaseTool):
                 where_clause = "s.rating >= ? AND s.rating <= ?"
                 params = [min_rating, max_rating]
 
-            # Build ORDER BY clause
-            if sort_by == "engagement":
-                order_clause = "ORDER BY engagement_score DESC"
-            elif sort_by == "date":
+            # Engagement scoring is owned by the single EngagementCalculator
+            # (ADR-0004); it is no longer embedded in SQL here. For the
+            # "engagement" sort we score every matching scene, so ordering and
+            # the limit are applied in Python rather than in SQL.
+            sort_by_engagement = sort_by == "engagement"
+
+            if sort_by == "date":
                 order_clause = "ORDER BY s.date DESC NULLS LAST"
             elif sort_by == "title":
                 order_clause = "ORDER BY s.title ASC"
             else:  # rating (default)
                 order_clause = "ORDER BY s.rating DESC NULLS LAST"
 
-            params.append(limit)
+            if sort_by_engagement:
+                limit_clause = ""
+            else:
+                limit_clause = "LIMIT ?"
+                params.append(limit)
 
             cursor.execute(
                 f"""
@@ -3740,52 +3766,19 @@ class QueryScenesByRatingTool(BaseTool):
                     s.rating,
                     s.date,
                     st.name as studio,
-                    GROUP_CONCAT(DISTINCT p.name) as performers,
-                    COALESCE(view_agg.view_count, 0) as view_count,
-                    COALESCE(o_agg.o_count, 0) as o_count,
-                    (COALESCE(o_agg.o_count, 0) * 20.0 +
-                     GREATEST(COALESCE(view_agg.view_count, 0) - 1, 0) * 2.0) as engagement_score
+                    GROUP_CONCAT(DISTINCT p.name) as performers
                 FROM scenes s
                 LEFT JOIN studios st ON s.studio_id = st.id
                 LEFT JOIN performers_scenes ps ON s.id = ps.scene_id
                 LEFT JOIN performers p ON ps.performer_id = p.id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as view_count
-                    FROM scenes_view_dates GROUP BY scene_id
-                ) view_agg ON s.id = view_agg.scene_id
-                LEFT JOIN (
-                    SELECT scene_id, COUNT(*) as o_count
-                    FROM scenes_o_dates GROUP BY scene_id
-                ) o_agg ON s.id = o_agg.scene_id
                 WHERE {where_clause}
                 GROUP BY s.id
                 {order_clause}
-                LIMIT ?
+                {limit_clause}
                 """,
                 params,
             )
-
-            scenes = []
-            for row in cursor.fetchall():
-                rating = row["rating"]
-                # Convert to 5-star scale
-                stars = round(rating / 20, 1) if rating else None
-
-                scenes.append(
-                    {
-                        "id": row["id"],
-                        "title": row["title"] or f"Scene {row['id']}",
-                        "url": f"/scenes/{row['id']}",
-                        "rating_100": rating,
-                        "stars": stars,
-                        "date": row["date"],
-                        "studio": row["studio"],
-                        "performers": row["performers"].split(",") if row["performers"] else [],
-                        "view_count": row["view_count"],
-                        "o_count": row["o_count"],
-                        "engagement_score": round(row["engagement_score"], 1),
-                    }
-                )
+            rows = cursor.fetchall()
 
             # Get counts
             cursor.execute(
@@ -3799,8 +3792,54 @@ class QueryScenesByRatingTool(BaseTool):
                 """
             )
             counts = cursor.fetchone()
-
             conn.close()
+
+            # Per-scene engagement counts + canonical score from the single source.
+            from ..recommendations.engagement import EngagementCalculator
+            from ..recommendations.types import EngagementScoringMethod
+
+            scene_ids = [row["id"] for row in rows]
+            calculator = EngagementCalculator()
+            engagement_data = calculator.get_engagement(scene_ids)
+
+            scenes = []
+            for row in rows:
+                rating = row["rating"]
+                # Convert to 5-star scale
+                stars = round(rating / 20, 1) if rating else None
+
+                eng = engagement_data.get(row["id"])
+                if eng is not None:
+                    view_count = eng["view_count"]
+                    o_count = eng["o_count"]
+                    engagement_score = calculator.calculate_score(
+                        eng, EngagementScoringMethod.BASE_WEIGHTED
+                    ).raw_score
+                else:
+                    view_count = 0
+                    o_count = 0
+                    engagement_score = 0.0
+
+                scenes.append(
+                    {
+                        "id": row["id"],
+                        "title": row["title"] or f"Scene {row['id']}",
+                        "url": f"/scenes/{row['id']}",
+                        "rating_100": rating,
+                        "stars": stars,
+                        "date": row["date"],
+                        "studio": row["studio"],
+                        "performers": row["performers"].split(",") if row["performers"] else [],
+                        "view_count": view_count,
+                        "o_count": o_count,
+                        "engagement_score": round(engagement_score, 1),
+                    }
+                )
+
+            # For the engagement sort, rank in Python and apply the limit.
+            if sort_by_engagement:
+                scenes.sort(key=lambda s: s["engagement_score"], reverse=True)
+                scenes = scenes[:limit]
 
             # Build formatted output
             formatted_lines = []

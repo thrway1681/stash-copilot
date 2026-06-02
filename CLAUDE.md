@@ -150,7 +150,7 @@ Set `STASH_COPILOT_DEBUG=1` to enable verbose LLM provider logging. Note: the "i
 
 **Location**: `stash_ai/recommendations/`
 
-Engagement scoring: `score = (o_count * 20) + (replays * 2) + (play_hours * 1) + (stars * 1.5)`. Also supports `time_decayed` mode with exponential half-life decay.
+Engagement scoring (canonical, **ADR-0004**): `score = (o_count * 20) + (replays * 2) + (stars * 1.5)` where `replays = max(view_count - 1, 0)` and `stars = rating100 / 20` (added only if rated). Play time is intentionally excluded to avoid duration bias. Also supports `time_decayed` mode with exponential half-life decay. The formula and the engagement query live in **exactly one module** — `EngagementCalculator` (`stash_ai/recommendations/engagement.py`); no other code reimplements them (enforced by `tests/recommendations/test_engagement_single_source.py`).
 
 Three modes: **Discover** (unwatched scenes similar to user profile), **Re-watch** (watched scenes ranked by engagement + similarity), **Peak Moments** (O-marker frame embeddings, requires "Embed O-Moments" task).
 
