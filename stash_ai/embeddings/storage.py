@@ -4099,6 +4099,19 @@ class EmbeddingStorage:
         conn.close()
         return [dict(r) for r in rows]
 
+    def get_all_rejected_annotations(self) -> list[dict[str, Any]]:
+        """Get all rejected annotations across all sessions.
+
+        Returns:
+            List of annotation dicts where label='rejected'.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM frame_annotations WHERE label = 'rejected'")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
     def update_labeling_progress(
         self, session_id: str, scene_id: int, frame_index: int, status: str
     ) -> None:

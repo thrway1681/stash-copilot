@@ -120,17 +120,11 @@ class LabelingTask:
         # 1. Count embeddings and load a capped random sample to stay within
         #    memory budget (~150 MB for 50K × 768 × float32 instead of ~12 GB
         #    for 4M+).  Uncertainty ranking works well on a random subset.
+        #    The store owns the memory-safe two-phase sampling; the task just
+        #    asks for an excluded, capped sample.
         self.log("Loading frame embeddings...", "info")
-        conn = self.storage._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT COUNT(*) FROM frame_embeddings WHERE model_key = ?",
-            (self.model_key,),
-        )
-        total_count = cursor.fetchone()[0]
+        total_count = self.storage.count_frame_embeddings(self.model_key)
         if total_count == 0:
-            conn.close()
             return LabelingSessionResult(
                 status="no_embeddings",
                 session_id="",
@@ -141,61 +135,18 @@ class LabelingTask:
 
         self.log(f"Total frame embeddings: {total_count}", "info")
 
-        # 2. Exclude already-labeled frames
+        # 2. Exclude already-labeled frames; cap candidates to bound memory.
         labeled_keys = self.storage.get_labeled_frame_keys()
         self.log(f"Excluding {len(labeled_keys)} already-labeled frames", "info")
 
-        # Cap candidates to avoid loading millions of embeddings into RAM.
-        # Two-phase sampling: first pick rowids (fast, no BLOB reads), then
-        # fetch full rows only for the chosen subset.
-        max_candidates = config.max_candidates
-        use_sampling = total_count > max_candidates
-        if use_sampling:
-            self.log(
-                f"Sampling {max_candidates} of {total_count} candidates (memory-safe mode)",
-                "info",
-            )
-            cursor.execute(
-                """SELECT rowid FROM frame_embeddings WHERE model_key = ?
-                ORDER BY RANDOM() LIMIT ?""",
-                (self.model_key, max_candidates),
-            )
-            sampled_rowids = [r[0] for r in cursor.fetchall()]
-            self.log(f"Sampled {len(sampled_rowids)} rowids, fetching embeddings...", "info")
-            # Batch fetch in chunks to avoid SQLite variable limit
-            chunk_size = 500
-            rows_iter: list[Any] = []
-            for i in range(0, len(sampled_rowids), chunk_size):
-                chunk = sampled_rowids[i : i + chunk_size]
-                placeholders = ",".join("?" * len(chunk))
-                cursor.execute(
-                    f"""SELECT scene_id, frame_index, timestamp, embedding
-                    FROM frame_embeddings WHERE rowid IN ({placeholders})""",
-                    chunk,
-                )
-                rows_iter.extend(cursor.fetchall())
-        else:
-            cursor.execute(
-                """SELECT scene_id, frame_index, timestamp, embedding
-                FROM frame_embeddings WHERE model_key = ?
-                ORDER BY scene_id, frame_index""",
-                (self.model_key,),
-            )
-            rows_iter = cursor.fetchall()
-
-        frame_embeddings_list: list[list[float]] = []
-        frame_keys: list[tuple[int, int]] = []
-        frame_timestamps: dict[tuple[int, int], float] = {}
-
-        for row in rows_iter:
-            key = (row["scene_id"], row["frame_index"])
-            if key in labeled_keys:
-                continue
-            frame_embeddings_list.append(self.storage._unpack_embedding(row["embedding"]))
-            frame_keys.append(key)
-            frame_timestamps[key] = row["timestamp"]
-
-        conn.close()
+        sample = self.storage.sample_frame_embeddings(
+            self.model_key,
+            config.max_candidates,
+            exclude_keys=labeled_keys,
+        )
+        frame_keys = sample.keys
+        frame_timestamps = sample.timestamps
+        frame_embeddings = sample.embeddings
 
         if not frame_keys:
             return LabelingSessionResult(
@@ -206,8 +157,7 @@ class LabelingTask:
                 error="All frames have been labeled!",
             )
 
-        frame_embeddings = np.array(frame_embeddings_list, dtype=np.float32)
-        del frame_embeddings_list  # Free the Python list immediately
+        del sample  # Drop the sample wrapper; arrays are referenced above
         self.log(f"{len(frame_keys)} unlabeled candidate frames loaded", "info")
 
         # 3. Load tag embeddings
@@ -408,15 +358,9 @@ class LabelingTask:
         # Collect rejected tags for negatives
         rejected_tags: dict[tuple[int, int], list[str]] = defaultdict(list)
         if include_negatives:
-            conn = self.storage._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT scene_id, frame_index, tag_text FROM frame_annotations WHERE label = 'rejected'"
-            )
-            for row in cursor.fetchall():
-                key = (row["scene_id"], row["frame_index"])
-                rejected_tags[key].append(row["tag_text"])
-            conn.close()
+            for ann in self.storage.get_all_rejected_annotations():
+                key = (ann["scene_id"], ann["frame_index"])
+                rejected_tags[key].append(ann["tag_text"])
 
         # 2. Build tar
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
