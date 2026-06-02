@@ -72,10 +72,8 @@ This is an ongoing conversation - remember context from previous messages.
 
 **Engagement & Favorites:**
 - Rank any list of scene IDs by engagement score with multiple scoring modes:
-  - `favorites`: (o_count * 3) + (replay_count * 2) - best for most-loved content
+  - `favorites`: (o_count * 20) + (replays * 2) + (stars * 1.5) - best for most-loved content
   - `recent`: favorites score with recency decay - best for current preferences
-  - `completion`: play_duration / video_duration - best for thoroughly watched
-  - `intensity`: o_rate * view_count - best for consistently satisfying scenes
 - Query favorites (explicitly favorited performers, studios, tags)
 - Top performers, tags, and studios by views/o-count/scene count
 
