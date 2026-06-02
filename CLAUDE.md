@@ -178,7 +178,6 @@ Task performance should be monitored against these budgets. When a task exceeds 
 | Stats Summary | < 10s (excluding LLM wait) | < 500 MB | Pure data aggregation, no ML models |
 | Recommendations | < 15s for top-N | < 2 GB | Embedding similarity search |
 | Tag Vocabulary Build | < 30s | < 1 GB | One-time vocabulary construction |
-| Preference Session (pair selection) | < 5s | < 1 GB | Should be near-instant |
 | Plugin startup (import + init) | < 3s | < 200 MB | No model loading at startup |
 
 ### When Performance Must Be Improved
