@@ -220,6 +220,17 @@ class TestGetEngagement:
         data = calc.get_engagement(scene_ids=[99999])
         assert len(data) == 0
 
+    def test_scene_ids_batched_beyond_sqlite_param_cap(self, patched_engagement_db: None) -> None:
+        """A scene_ids list larger than the batch size is chunked, not passed as one
+        oversized IN clause (which SQLite would reject as 'too many SQL variables')."""
+        calc = EngagementCalculator()
+        # More ids than one batch; a known engaged scene (7) sits past the boundary.
+        big_ids = list(range(100_000, 100_000 + calc.ID_QUERY_BATCH_SIZE * 2)) + [7]
+        data = calc.get_engagement(scene_ids=big_ids)
+        # The query must succeed and still surface the real scene.
+        assert 7 in data
+        assert data[7]["o_count"] == 4
+
 
 class TestRank:
     """DB-level tests for rank()."""
@@ -261,9 +272,7 @@ class TestRank:
         # o_count=4, replays=9, rating100=100→stars=5: 4*20 + 9*2 + 5*1.5 = 105.5
         assert scores[0].raw_score == pytest.approx(105.5)
 
-    def test_get_top_engaged_scenes_delegates_to_rank(
-        self, patched_engagement_db: None
-    ) -> None:
+    def test_get_top_engaged_scenes_delegates_to_rank(self, patched_engagement_db: None) -> None:
         """get_top_engaged_scenes() returns same result as rank(limit=N)."""
         calc = EngagementCalculator()
         via_legacy = calc.get_top_engaged_scenes(limit=5)
