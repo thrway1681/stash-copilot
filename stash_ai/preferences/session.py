@@ -750,7 +750,7 @@ class PreferenceSessionManager:
         from stash_ai.recommendations.engagement import EngagementCalculator
 
         calculator = EngagementCalculator(log_callback=self.log)
-        engagement_data = calculator.get_all_scene_engagement()
+        engagement_data = calculator.get_engagement()
 
         if not engagement_data:
             self.log("No engagement data available for warm-start", "debug")
