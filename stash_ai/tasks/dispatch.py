@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
@@ -49,6 +49,23 @@ class RunnableTask(Protocol):
     """
 
     def run(self) -> Any: ...
+
+
+@runtime_checkable
+class SelfBuildingTask(RunnableTask, Protocol):
+    """A task that declares how to construct itself from a :class:`TaskContext`.
+
+    The self-describing construction hook (commit 3 of #4): a task implements
+    ``from_context`` as a classmethod that resolves its own settings from the
+    standard context, so a handler points :func:`dispatch` at the task instead
+    of hand-wiring the constructor — the bound ``Task.from_context`` is exactly
+    the ``Callable[[TaskContext], RunnableTask]`` that ``build_task`` expects.
+    Per-task construction knowledge lives on the task, keeping ``dispatch``
+    generic across every task.
+    """
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> RunnableTask: ...
 
 
 TaskT = TypeVar("TaskT", bound=RunnableTask)
