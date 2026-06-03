@@ -84,6 +84,20 @@ _Avoid_: bare "score"
 **Provider**:
 A pluggable backend for an external capability — an **LLM Provider** (Ollama, OpenRouter, Anthropic, …) or an **Embedding Provider** (OpenCLIP, …). Reserve "provider" for the backend service; use **Embedding Model** for the specific model it serves.
 
+## Distribution & storage
+
+**Data Directory**:
+The update-safe location, outside the plugin directory, where all generated runtime
+data lives (the embeddings store, extracted Frames, caches, exports). Rooted at
+`$STASH_CONFIG_DIR/stash-copilot/`. Distinct from the **plugin directory**, which
+Stash owns and replaces on update. See ADR-0007.
+_Avoid_: assets dir (as the data home), plugin assets
+
+**Installed Plugin**:
+The plugin as a packaged, versioned artifact a user installs and updates through a
+Stash plugin source — as opposed to a git checkout run in place. The shipped form.
+See ADR-0006.
+
 ## Out of scope
 
 **Preference / Swipe / A-B comparison** — *out of scope (see ADR-0001)*:

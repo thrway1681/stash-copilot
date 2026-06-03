@@ -23,3 +23,9 @@ No embedding, frame, or library data is sent to a remote embedding or vector ser
   *not* forbid remote **LLM** providers (Ollama / OpenRouter / Anthropic) for
   vision/chat — sending a text prompt to an LLM the user has configured is a separate,
   opt-in choice.
+
+## Related
+
+- [[0007-runtime-data-outside-plugin-dir]] — revises *where* the local store lives:
+  outside the plugin directory (not the assets dir), so it survives plugin updates.
+  The local-only principle here is unchanged.
