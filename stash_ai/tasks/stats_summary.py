@@ -13,6 +13,7 @@ from ..prompts.statistics import format_stats_prompt
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 class StatsSummaryTask:
@@ -49,6 +50,44 @@ class StatsSummaryTask:
 
         # Initialize aggregator with stash interface and excluded tags
         self.aggregator = LibraryStatsAggregator(stash, excluded_tags=self.excluded_tags)
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "StatsSummaryTask":
+        """Build the task from a standard :class:`TaskContext`.
+
+        The self-describing construction hook for the dispatch seam (commit 3 of
+        #4): resolves the text-LLM settings and excluded-tags list from the
+        context's plugin settings / args, so the entry-point handler only points
+        ``dispatch`` at this class instead of wiring the constructor by hand. The
+        per-task construction knowledge that used to live in the handler now
+        lives here, on the task.
+        """
+        from ..config import get_text_llm_settings
+
+        ctx.log("Initializing Stash AI statistics summary...", "info")
+        ctx.log(f"Plugin settings from Stash: {ctx.plugin_settings}", "debug")
+
+        text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
+        ctx.log(f"Using LLM provider: {text_llm.provider}", "info")
+        ctx.log(f"Using model: {text_llm.model}", "info")
+
+        # Parse excluded tags (comma-separated string to list).
+        excluded_tags_str = ctx.plugin_settings.get("excluded_tags", "")
+        excluded_tags = (
+            [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
+            if excluded_tags_str
+            else []
+        )
+        if excluded_tags:
+            ctx.log(f"Excluding tags: {excluded_tags}", "info")
+
+        return cls(
+            stash=ctx.stash,
+            llm_config=text_llm.to_config(),
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            excluded_tags=excluded_tags,
+        )
 
     def run(self) -> str:
         """

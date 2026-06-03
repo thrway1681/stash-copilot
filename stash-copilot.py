@@ -499,43 +499,22 @@ class MyPlugin(StashPlugin):
         """
         Run the AI-powered library statistics summary task.
 
-        Pilot for the dispatch seam (#4): construction, execution, and uniform
-        error handling now live in :func:`dispatch`; this handler only declares
-        how to build the task from the context and how to surface its output.
+        Pilot for the dispatch seam (#4): the task now builds itself from the
+        :class:`TaskContext` via ``StatsSummaryTask.from_context`` (commit 3),
+        and :func:`dispatch` owns execution + uniform error handling; this
+        handler only points at the construction hook and declares how to surface
+        the task's output.
 
         Args:
             args: Task arguments containing LLM settings
         """
 
         def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.config import get_text_llm_settings
+            # Import inside the dispatch boundary so an import failure is logged
+            # uniformly; construction itself is the task's self-describing hook.
             from stash_ai.tasks.stats_summary import StatsSummaryTask
 
-            ctx.log("Initializing Stash AI statistics summary...", "info")
-            ctx.log(f"Plugin settings from Stash: {ctx.plugin_settings}", "debug")
-
-            # Get text LLM settings
-            text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
-            ctx.log(f"Using LLM provider: {text_llm.provider}", "info")
-            ctx.log(f"Using model: {text_llm.model}", "info")
-
-            # Parse excluded tags (comma-separated string to list)
-            excluded_tags_str = ctx.plugin_settings.get("excluded_tags", "")
-            excluded_tags = (
-                [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
-                if excluded_tags_str
-                else []
-            )
-            if excluded_tags:
-                ctx.log(f"Excluding tags: {excluded_tags}", "info")
-
-            return StatsSummaryTask(
-                stash=ctx.stash,
-                llm_config=text_llm.to_config(),
-                log_callback=ctx.log,
-                progress_callback=ctx.progress,
-                excluded_tags=excluded_tags,
-            )
+            return StatsSummaryTask.from_context(ctx)
 
         def on_result(_task: Any, summary: Any) -> None:
             # Output the summary
