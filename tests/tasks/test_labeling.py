@@ -12,37 +12,49 @@ def storage(tmp_path):
 
 
 class TestLabelingSchema:
-    """Tests for labeling database schema."""
+    """Tests that the labeling schema is usable through the store's public API.
+
+    These exercise the public operations rather than peeking at the store's
+    connection: if the underlying tables were not created by migration, the
+    operations would raise.
+    """
 
     def test_labeling_sessions_table_exists(self, storage):
-        """Labeling sessions table should exist after migration."""
-        conn = storage._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='labeling_sessions'"
+        """Labeling sessions are creatable and retrievable after migration."""
+        session_id = storage.create_labeling_session(
+            sampling_method="random", batch_size=10, total_frames=50
         )
-        assert cursor.fetchone() is not None
-        conn.close()
+        assert storage.get_labeling_session(session_id) is not None
 
     def test_frame_annotations_table_exists(self, storage):
-        """Frame annotations table should exist after migration."""
-        conn = storage._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='frame_annotations'"
+        """Frame annotations are persistable after migration."""
+        session_id = storage.create_labeling_session(
+            sampling_method="random", batch_size=10, total_frames=50
         )
-        assert cursor.fetchone() is not None
-        conn.close()
+        storage.save_annotations(
+            session_id,
+            [
+                {
+                    "scene_id": 1,
+                    "frame_index": 5,
+                    "tag_text": "blowjob",
+                    "tag_source": "stash_tag",
+                    "label": "confirmed",
+                    "similarity_score": 0.92,
+                }
+            ],
+        )
+        assert len(storage.get_annotations(session_id)) == 1
 
     def test_labeling_progress_table_exists(self, storage):
-        """Labeling progress table should exist after migration."""
-        conn = storage._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='labeling_progress'"
+        """Labeling progress is recordable after migration."""
+        session_id = storage.create_labeling_session(
+            sampling_method="random", batch_size=10, total_frames=50
         )
-        assert cursor.fetchone() is not None
-        conn.close()
+        storage.update_labeling_progress(
+            session_id, scene_id=3, frame_index=7, status="labeled"
+        )
+        assert (3, 7) in storage.get_labeled_frame_keys()
 
 
 class TestLabelingSessionStorage:

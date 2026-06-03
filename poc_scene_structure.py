@@ -627,21 +627,12 @@ def print_analysis_report(result: dict[str, Any]) -> None:
 def detect_model_key() -> str:
     """Auto-detect the model key used for frame embeddings."""
     storage = EmbeddingStorage(model_key="siglip")  # Temporary to connect
-    conn = storage._get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT model_key, COUNT(*) as cnt
-        FROM frame_embeddings
-        GROUP BY model_key
-        ORDER BY cnt DESC
-        LIMIT 1
-    """)
-    row = cursor.fetchone()
-    conn.close()
-
-    if row:
-        return row["model_key"]
+    # Use the store's public operations rather than reaching for its
+    # connection: pick the model key with the most frame embeddings.
+    model_keys = storage.get_all_model_keys()
+    best_key = max(model_keys, key=storage.count_frame_embeddings, default=None)
+    if best_key is not None and storage.count_frame_embeddings(best_key) > 0:
+        return best_key
     return "siglip"  # Default fallback
 
 
