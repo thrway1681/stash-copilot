@@ -31,6 +31,7 @@ except ImportError:
 
 from stash_ai.stash_client import StashApiClient, StashClient  # noqa: E402
 from stash_ai.tasks.dispatch import TaskContext, dispatch  # noqa: E402
+from stash_ai.tasks.result_store import ResultStore  # noqa: E402
 
 
 class StashPlugin:
@@ -439,6 +440,15 @@ class MyPlugin(StashPlugin):
             build_task=build_task,
             on_result=on_result,
         )
+
+    def _result_store(self) -> ResultStore:
+        """Return the result store rooted at the plugin's ``assets`` directory.
+
+        The single place handlers persist their frontend-polled result file
+        (``assets/{result_key}_{request_id}.json``), replacing the hand-rolled
+        ``os.makedirs`` + ``json.dump`` each used to repeat.
+        """
+        return ResultStore(os.path.join(PLUGIN_DIR, "assets"))
 
     def run_eroscripts_validate_auth(self, args: dict[str, Any]) -> None:
         """Validate (or clear/re-check) the EroScripts session cookie."""
@@ -1028,13 +1038,8 @@ class MyPlugin(StashPlugin):
 
             result = task.run()
 
-            # Save result for frontend polling
-            if request_id:
-                assets_dir = os.path.join(PLUGIN_DIR, "assets")
-                os.makedirs(assets_dir, exist_ok=True)
-                result_path = os.path.join(assets_dir, f"tag_dedup_{request_id}.json")
-                with open(result_path, "w") as f:
-                    json.dump(result, f, indent=2)
+            # Save result for frontend polling via the dispatch seam's result store.
+            self._result_store().save(task.result_key, request_id, result)
 
             if result["status"] == "complete":
                 self.log(f"Found {len(result['candidates'])} duplicate tag candidates", "info")
