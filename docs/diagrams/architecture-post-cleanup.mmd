@@ -52,6 +52,7 @@ graph TB
     end
 
     subgraph Tasks["Task Handlers"]
+        Dispatch["dispatch.py"]
         SceneVision["SceneVisionTask"]
         EmbedScenes["EmbedScenesTask"]
         RecTask["RecommendationsTask"]
@@ -102,8 +103,8 @@ graph TB
     RecEngine --> Clusters
     RecEngine --> EmbedStorage
 
-    %% Task dispatch
-    StashPlugin --> Tasks
+    %% Task dispatch — StashPlugin routes through dispatch.py seam (commit 1 of #4)
+    StashPlugin --> Dispatch
     SceneVision --> LLMRegistry
     SceneVision --> Tools
     EmbedScenes --> EmbedRegistry
@@ -145,7 +146,7 @@ graph TB
     class LLMRegistry,OllamaProvider,OpenRouterProvider,AnthropicProvider,OpenAIProvider,ModelCaps llm
     class EmbedRegistry,OpenCLIP,EmbedStorage,FrameSearch embeddings
     class RecEngine,Engagement,Profile,Clusters recommendations
-    class SceneVision,EmbedScenes,RecTask,ChatTask,FrameAnalysis tasks
+    class Dispatch,SceneVision,EmbedScenes,RecTask,ChatTask,FrameAnalysis tasks
     class StashDB,PluginDB,Aggregators data
     class DatabaseTool,EmbeddingsTool,VisionTool tools
     class StashCopilotError,LLMError,VisionError,EmbeddingError,StorageError,TaskError exceptions
