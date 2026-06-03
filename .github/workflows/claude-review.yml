@@ -30,6 +30,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The agent's commits land as claude[bot]; pushes to claude/* fire a
+          # `synchronize` event whose actor is that bot. claude-code-action blocks
+          # non-human actors by default, so allow this bot through or the review
+          # aborts before it starts.
+          allowed_bots: "claude[bot]"
           claude_args: |
             --model claude-opus-4-8
             --allowedTools "Bash,Read,Glob,Grep,TodoWrite"
