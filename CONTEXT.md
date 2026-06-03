@@ -100,6 +100,6 @@ See ADR-0006.
 
 ## Out of scope
 
-**Preference / Swipe / A-B comparison** — *out of scope (see ADR-0001)*:
-Explicitly training taste by swiping or comparing scene pairs. Stash Copilot infers taste implicitly from Engagement instead; the `preferences/` subsystem is slated for removal. Do not build on it.
+**Preference / Swipe / A-B comparison** — *out of scope, removed (see ADR-0001)*:
+Explicitly training taste by swiping or comparing scene pairs. Stash Copilot infers taste implicitly from Engagement instead. The `preferences/` subsystem (Bayesian Bradley-Terry model, swipe-trainer UI, the seven `preference_*` plugin tasks, the three `preference_*` tables, and the engine's optional preference blend) has been **removed**; a guard test (`tests/test_no_preference_subsystem.py`) keeps it gone. Do not rebuild it.
 _Avoid_: preference model, preference profile, swipe, pairwise comparison (for taste). Note: the **performer-preference** recommendation mode is unrelated and is fine.

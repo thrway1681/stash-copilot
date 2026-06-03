@@ -568,6 +568,36 @@ class TestQueryScenesByDateTool:
         scenes = result["data"]["scenes"]
         assert len(scenes) >= 0  # May be empty if no scenes match
 
+    def test_sort_by_engagement_uses_canonical_score(
+        self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
+    ) -> None:
+        """Engagement sort ranks by, and reports, the canonical score (ADR-0004)."""
+        from stash_ai.recommendations.engagement import EngagementCalculator
+        from stash_ai.recommendations.types import EngagementScoringMethod
+
+        tool = QueryScenesByDateTool(mock_stash)
+        result = tool.execute(sort_by="engagement", limit=10)
+
+        assert result["success"] is True
+        scenes = result["data"]["scenes"]
+        assert len(scenes) > 0
+
+        # Descending by engagement score.
+        scores = [s["engagement_score"] for s in scenes]
+        assert scores == sorted(scores, reverse=True)
+
+        # Each reported score equals the single-source calculator's raw score.
+        calculator = EngagementCalculator()
+        eng = calculator.get_engagement([s["id"] for s in scenes])
+        for s in scenes:
+            expected = round(
+                calculator.calculate_score(
+                    eng[s["id"]], EngagementScoringMethod.BASE_WEIGHTED
+                ).raw_score,
+                1,
+            )
+            assert s["engagement_score"] == expected
+
 
 class TestQueryFavoritesTool:
     """Tests for QueryFavoritesTool."""
@@ -697,6 +727,37 @@ class TestQueryScenesByRatingTool:
         scenes = result["data"]["scenes"]
         for scene in scenes:
             assert 60 <= scene["rating_100"] <= 80
+
+    def test_sort_by_engagement_uses_canonical_score(
+        self, mock_stash: MagicMock, mock_db: sqlite3.Connection, patched_db_functions: None
+    ) -> None:
+        """Engagement sort ranks by, and reports, the canonical score (ADR-0004)."""
+        from stash_ai.recommendations.engagement import EngagementCalculator
+        from stash_ai.recommendations.types import EngagementScoringMethod
+
+        tool = QueryScenesByRatingTool(mock_stash)
+        # Widen the rating filter so engaged scenes are in the candidate set.
+        result = tool.execute(min_rating=1, max_rating=100, sort_by="engagement", limit=10)
+
+        assert result["success"] is True
+        scenes = result["data"]["scenes"]
+        assert len(scenes) > 0
+
+        # Descending by engagement score.
+        scores = [s["engagement_score"] for s in scenes]
+        assert scores == sorted(scores, reverse=True)
+
+        # Each reported score equals the single-source calculator's raw score.
+        calculator = EngagementCalculator()
+        eng = calculator.get_engagement([s["id"] for s in scenes])
+        for s in scenes:
+            expected = round(
+                calculator.calculate_score(
+                    eng[s["id"]], EngagementScoringMethod.BASE_WEIGHTED
+                ).raw_score,
+                1,
+            )
+            assert s["engagement_score"] == expected
 
 
 class TestQueryAllTagsTool:

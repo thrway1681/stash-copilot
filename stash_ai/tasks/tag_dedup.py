@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 import numpy as np
 
@@ -55,6 +55,10 @@ class FindDuplicateTagsTask:
     filters above threshold, and returns candidates sorted
     by descending similarity with auto-suggested keep targets.
     """
+
+    # Declared key for the frontend result file the dispatch seam's ResultStore
+    # writes (assets/{result_key}_{request_id}.json). See stash_ai/tasks/result_store.py.
+    result_key: ClassVar[str] = "tag_dedup"
 
     SIMILARITY_THRESHOLD = 0.75
 

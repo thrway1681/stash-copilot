@@ -3,13 +3,17 @@
 import sqlite3
 import struct
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from stash_ai.recommendations.types import TasteCluster
 
 
 class SceneEmbeddingRecord(TypedDict):
@@ -68,6 +72,41 @@ class FrameEmbeddingRecord(TypedDict):
     embedding: list[float]
     model_key: str
     created_at: str
+
+
+@dataclass
+class FrameEmbeddingBatch:
+    """A memory-bounded batch of frame embeddings.
+
+    Yielded by :meth:`EmbeddingStorage.iter_frame_embeddings` so a caller can
+    stream every frame for a model without ever holding the whole table in
+    memory. The four arrays are row-aligned (index ``i`` describes one frame).
+    """
+
+    scene_ids: NDArray[np.int64]
+    frame_indices: NDArray[np.int32]
+    timestamps: NDArray[np.float32]
+    embeddings: NDArray[np.float32]  # shape (batch, dims)
+
+    def __len__(self) -> int:
+        return int(self.embeddings.shape[0])
+
+
+@dataclass
+class FrameEmbeddingSample:
+    """A memory-capped random sample of frame embeddings.
+
+    Returned by :meth:`EmbeddingStorage.sample_frame_embeddings`. ``keys`` and
+    the rows of ``embeddings`` are aligned; ``timestamps`` maps each key to its
+    frame timestamp.
+    """
+
+    keys: list[tuple[int, int]]  # (scene_id, frame_index)
+    embeddings: NDArray[np.float32]  # shape (n, dims)
+    timestamps: dict[tuple[int, int], float]
+
+    def __len__(self) -> int:
+        return len(self.keys)
 
 
 class FrameEmbeddingMetadata(TypedDict):
@@ -151,7 +190,7 @@ class EmbeddingStorage:
         self.model_key = model_key
         self._init_database()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def __get_connection(self) -> sqlite3.Connection:
         """Get a database connection.
 
         Uses WAL mode for better concurrent write performance.
@@ -164,7 +203,7 @@ class EmbeddingStorage:
 
     def _init_database(self) -> None:
         """Initialize database schema and run migrations."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check current schema version
@@ -568,56 +607,16 @@ class EmbeddingStorage:
         """)
 
     def _migrate_to_v8(self, cursor: sqlite3.Cursor) -> None:
-        """Add preference learning tables (v8)."""
-        # Pairwise comparison history
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS preference_comparisons (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene_a_id INTEGER NOT NULL,
-                scene_b_id INTEGER NOT NULL,
-                winner_id INTEGER NOT NULL,
-                phase TEXT NOT NULL,
-                response_time_ms INTEGER,
-                session_id TEXT NOT NULL,
-                model_key TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
+        """No-op (formerly added the preference-learning tables).
 
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_pref_comp_session
-            ON preference_comparisons(session_id)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_pref_comp_model_key
-            ON preference_comparisons(model_key)
-        """)
-
-        # Learned preference model state (one row per model_key)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS preference_model_state (
-                model_key TEXT PRIMARY KEY,
-                preference_mean BLOB NOT NULL,
-                preference_covariance_diag BLOB NOT NULL,
-                n_comparisons INTEGER NOT NULL,
-                noise_variance REAL NOT NULL,
-                phase TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-
-        # Session metadata
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS preference_sessions (
-                session_id TEXT PRIMARY KEY,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                comparison_count INTEGER DEFAULT 0,
-                phase TEXT NOT NULL,
-                convergence_avg_sigma REAL
-            )
-        """)
+        The explicit swipe/preference subsystem was removed per ADR-0001
+        (issue #2), so this migration no longer creates the
+        ``preference_comparisons`` / ``preference_model_state`` /
+        ``preference_sessions`` tables. The version step is retained as a
+        no-op so the migration chain stays contiguous; databases that
+        already ran the original v8 keep those now-unused tables harmlessly
+        (no DROP migration — abandoning them is acceptable, ADR-0001).
+        """
 
     def _migrate_to_v9(self, cursor: sqlite3.Cursor) -> None:
         """Add z column to scene_umap_coords for 3D UMAP projection."""
@@ -740,12 +739,12 @@ class EmbeddingStorage:
         )
 
     @staticmethod
-    def _pack_embedding(embedding: list[float]) -> bytes:
+    def __pack_embedding(embedding: list[float]) -> bytes:
         """Pack embedding list into binary BLOB (float32 array)."""
         return struct.pack(f"{len(embedding)}f", *embedding)
 
     @staticmethod
-    def _unpack_embedding(blob: bytes) -> list[float]:
+    def __unpack_embedding(blob: bytes) -> list[float]:
         """Unpack binary BLOB to embedding list."""
         if len(blob) % 4 != 0:
             raise ValueError(f"Invalid embedding blob: length {len(blob)} not divisible by 4")
@@ -781,7 +780,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check if record exists to preserve created_at
@@ -804,9 +803,9 @@ class EmbeddingStorage:
             (
                 scene_id,
                 self.model_key,
-                self._pack_embedding(visual_embedding) if visual_embedding else None,
-                (self._pack_embedding(metadata_embedding) if metadata_embedding else None),
-                self._pack_embedding(composite_embedding),
+                self.__pack_embedding(visual_embedding) if visual_embedding else None,
+                (self.__pack_embedding(metadata_embedding) if metadata_embedding else None),
+                self.__pack_embedding(composite_embedding),
                 visual_model,
                 text_model,
                 len(composite_embedding),
@@ -830,7 +829,7 @@ class EmbeddingStorage:
         Returns:
             SceneEmbeddingRecord or None if not found
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -850,14 +849,16 @@ class EmbeddingStorage:
             "scene_id": row["scene_id"],
             "model_key": row["model_key"],
             "visual_embedding": (
-                self._unpack_embedding(row["visual_embedding"]) if row["visual_embedding"] else None
+                self.__unpack_embedding(row["visual_embedding"])
+                if row["visual_embedding"]
+                else None
             ),
             "metadata_embedding": (
-                self._unpack_embedding(row["metadata_embedding"])
+                self.__unpack_embedding(row["metadata_embedding"])
                 if row["metadata_embedding"]
                 else None
             ),
-            "composite_embedding": self._unpack_embedding(row["composite_embedding"]),
+            "composite_embedding": self.__unpack_embedding(row["composite_embedding"]),
             "visual_model": row["visual_model"],
             "text_model": row["text_model"],
             "dimensions": row["dimensions"],
@@ -867,9 +868,71 @@ class EmbeddingStorage:
             "updated_at": row["updated_at"],
         }
 
+    def get_embeddings(self, scene_ids: list[int]) -> dict[int, SceneEmbeddingRecord]:
+        """
+        Bulk-retrieve embedding records for the current model_key.
+
+        Single-query (chunked) replacement for per-scene ``get_embedding``
+        loops, eliminating the N+1 load. Scene IDs without a stored embedding
+        for the current model_key are simply absent from the result.
+
+        Args:
+            scene_ids: Stash scene IDs to fetch
+
+        Returns:
+            Mapping of scene_id -> SceneEmbeddingRecord for the scenes found.
+        """
+        if not scene_ids:
+            return {}
+
+        results: dict[int, SceneEmbeddingRecord] = {}
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            # Chunk the IN clause to stay under SQLite's bound-variable limit
+            # (the +1 leaves room for the trailing model_key parameter).
+            chunk_size = 900
+            for start in range(0, len(scene_ids), chunk_size):
+                chunk = scene_ids[start : start + chunk_size]
+                placeholders = ",".join("?" for _ in chunk)
+                cursor.execute(
+                    f"""
+                    SELECT * FROM scene_embeddings
+                    WHERE model_key = ? AND scene_id IN ({placeholders})
+                    """,
+                    (self.model_key, *chunk),
+                )
+                for row in cursor.fetchall():
+                    results[row["scene_id"]] = {
+                        "scene_id": row["scene_id"],
+                        "model_key": row["model_key"],
+                        "visual_embedding": (
+                            self.__unpack_embedding(row["visual_embedding"])
+                            if row["visual_embedding"]
+                            else None
+                        ),
+                        "metadata_embedding": (
+                            self.__unpack_embedding(row["metadata_embedding"])
+                            if row["metadata_embedding"]
+                            else None
+                        ),
+                        "composite_embedding": self.__unpack_embedding(row["composite_embedding"]),
+                        "visual_model": row["visual_model"],
+                        "text_model": row["text_model"],
+                        "dimensions": row["dimensions"],
+                        "visual_description": row["visual_description"],
+                        "metadata_text": row["metadata_text"],
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"],
+                    }
+        finally:
+            conn.close()
+
+        return results
+
     def has_embedding(self, scene_id: int) -> bool:
         """Check if a scene has an embedding stored for the current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT 1 FROM scene_embeddings WHERE scene_id = ? AND model_key = ?",
@@ -881,7 +944,7 @@ class EmbeddingStorage:
 
     def delete_embedding(self, scene_id: int) -> bool:
         """Delete embedding for a scene with the current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "DELETE FROM scene_embeddings WHERE scene_id = ? AND model_key = ?",
@@ -899,7 +962,7 @@ class EmbeddingStorage:
         Returns:
             List of (scene_id, embedding) tuples
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -911,7 +974,7 @@ class EmbeddingStorage:
         )
 
         results = [
-            (row["scene_id"], self._unpack_embedding(row["composite_embedding"]))
+            (row["scene_id"], self.__unpack_embedding(row["composite_embedding"]))
             for row in cursor.fetchall()
         ]
 
@@ -939,7 +1002,7 @@ class EmbeddingStorage:
             Dict mapping scene_id to a ``(N, dims)`` float32 array of
             frame embeddings, ordered by frame_index.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         if k > 0:
@@ -1030,7 +1093,7 @@ class EmbeddingStorage:
             scene, ordered by frame_index.  ``None`` if no frame
             embeddings exist for this scene.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1053,6 +1116,191 @@ class EmbeddingStorage:
         for i, blob in enumerate(blobs):
             arr[i] = np.frombuffer(blob, dtype=np.float32)
         return arr
+
+    # ------------------------------------------------------------------
+    # Frame-embedding operations (own the memory-safety logic so callers
+    # don't reach past the store with a raw connection / blob unpacking)
+    # ------------------------------------------------------------------
+
+    def count_frame_embeddings(self, model_key: str) -> int:
+        """Count stored frame embeddings for ``model_key``."""
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) AS n FROM frame_embeddings WHERE model_key = ?",
+                (model_key,),
+            )
+            return int(cursor.fetchone()["n"])
+        finally:
+            conn.close()
+
+    def get_scene_ids_with_frame_embeddings(self, model_key: str) -> list[int]:
+        """Return the distinct scene IDs that have frame embeddings for ``model_key``.
+
+        Sorted ascending so callers get a stable, deterministic ordering.
+        """
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT DISTINCT scene_id FROM frame_embeddings
+                WHERE model_key = ?
+                ORDER BY scene_id
+                """,
+                (model_key,),
+            )
+            return [int(row["scene_id"]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def iter_frame_embeddings(
+        self, model_key: str, batch_size: int = 10000
+    ) -> Iterator[FrameEmbeddingBatch]:
+        """Stream every frame embedding for ``model_key`` in row-aligned batches.
+
+        Reads at most ``batch_size`` frames into memory at a time (via
+        ``fetchmany``) so a full-library index build never materialises the
+        whole ``frame_embeddings`` table. Frames are ordered by
+        ``(scene_id, frame_index)``. Yields nothing when no frames exist.
+
+        Args:
+            model_key: Model whose frames to stream.
+            batch_size: Maximum frames per yielded batch.
+
+        Yields:
+            :class:`FrameEmbeddingBatch` instances, each holding up to
+            ``batch_size`` row-aligned frames.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT scene_id, frame_index, timestamp, embedding
+                FROM frame_embeddings
+                WHERE model_key = ?
+                ORDER BY scene_id, frame_index
+                """,
+                (model_key,),
+            )
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if not rows:
+                    break
+                n = len(rows)
+                scene_ids = np.empty(n, dtype=np.int64)
+                frame_indices = np.empty(n, dtype=np.int32)
+                timestamps = np.empty(n, dtype=np.float32)
+                vectors = [self.__unpack_embedding(row["embedding"]) for row in rows]
+                for i, row in enumerate(rows):
+                    scene_ids[i] = row["scene_id"]
+                    frame_indices[i] = row["frame_index"]
+                    timestamps[i] = row["timestamp"]
+                yield FrameEmbeddingBatch(
+                    scene_ids=scene_ids,
+                    frame_indices=frame_indices,
+                    timestamps=timestamps,
+                    embeddings=np.asarray(vectors, dtype=np.float32),
+                )
+        finally:
+            conn.close()
+
+    def sample_frame_embeddings(
+        self,
+        model_key: str,
+        n: int,
+        exclude_keys: set[tuple[int, int]] | None = None,
+    ) -> FrameEmbeddingSample:
+        """Return a memory-capped random sample of frame embeddings.
+
+        Two-phase to bound memory: when more than ``n`` frames exist, randomly
+        pick ``n`` rowids first (no BLOB reads), then fetch the full rows only
+        for the chosen subset. When the table holds at most ``n`` frames, all
+        of them are loaded. In both cases frames whose ``(scene_id,
+        frame_index)`` appears in ``exclude_keys`` are dropped *after*
+        selection, so the returned sample may be smaller than ``n``.
+
+        Args:
+            model_key: Model whose frames to sample.
+            n: Maximum number of frames to select before exclusion.
+            exclude_keys: ``(scene_id, frame_index)`` pairs to drop.
+
+        Returns:
+            A :class:`FrameEmbeddingSample` (empty when no frames qualify).
+        """
+        if n <= 0:
+            raise ValueError("n must be positive")
+
+        exclude = exclude_keys or set()
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) AS n FROM frame_embeddings WHERE model_key = ?",
+                (model_key,),
+            )
+            total = int(cursor.fetchone()["n"])
+
+            rows: list[Any] = []
+            if total > n:
+                # Phase 1: random rowids (no BLOB reads).
+                cursor.execute(
+                    """
+                    SELECT rowid FROM frame_embeddings
+                    WHERE model_key = ?
+                    ORDER BY RANDOM() LIMIT ?
+                    """,
+                    (model_key, n),
+                )
+                sampled_rowids = [row[0] for row in cursor.fetchall()]
+                # Phase 2: fetch the chosen rows, chunked under SQLite's
+                # bound-variable limit.
+                chunk_size = 500
+                for start in range(0, len(sampled_rowids), chunk_size):
+                    chunk = sampled_rowids[start : start + chunk_size]
+                    placeholders = ",".join("?" * len(chunk))
+                    cursor.execute(
+                        f"""
+                        SELECT scene_id, frame_index, timestamp, embedding
+                        FROM frame_embeddings WHERE rowid IN ({placeholders})
+                        """,
+                        chunk,
+                    )
+                    rows.extend(cursor.fetchall())
+            else:
+                cursor.execute(
+                    """
+                    SELECT scene_id, frame_index, timestamp, embedding
+                    FROM frame_embeddings
+                    WHERE model_key = ?
+                    ORDER BY scene_id, frame_index
+                    """,
+                    (model_key,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        keys: list[tuple[int, int]] = []
+        timestamps: dict[tuple[int, int], float] = {}
+        vectors: list[list[float]] = []
+        for row in rows:
+            key = (int(row["scene_id"]), int(row["frame_index"]))
+            if key in exclude:
+                continue
+            keys.append(key)
+            timestamps[key] = float(row["timestamp"])
+            vectors.append(self.__unpack_embedding(row["embedding"]))
+
+        embeddings = (
+            np.asarray(vectors, dtype=np.float32) if vectors else np.empty((0, 0), dtype=np.float32)
+        )
+        return FrameEmbeddingSample(keys=keys, embeddings=embeddings, timestamps=timestamps)
 
     # ------------------------------------------------------------------
     # Frame-level scoring via numpy memmap
@@ -1177,7 +1425,7 @@ class EmbeddingStorage:
 
     def get_embedded_scene_ids(self) -> list[int]:
         """Get list of all scene IDs that have embeddings for the current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT scene_id FROM scene_embeddings WHERE model_key = ? ORDER BY scene_id",
@@ -1243,7 +1491,7 @@ class EmbeddingStorage:
         if query_norm > 0:
             query_arr = query_arr / query_norm
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Select columns based on whether we need dynamic weighting
@@ -1282,7 +1530,7 @@ class EmbeddingStorage:
                     visual_weight,  # type: ignore
                 )
             else:
-                stored_emb = self._unpack_embedding(row["composite_embedding"])
+                stored_emb = self.__unpack_embedding(row["composite_embedding"])
                 stored_arr = np.array(stored_emb, dtype=np.float32)
 
             # Cosine similarity (dot product of normalized vectors)
@@ -1355,17 +1603,17 @@ class EmbeddingStorage:
 
         # Fall back to composite if either embedding is missing
         if visual_blob is None or metadata_blob is None:
-            stored_emb = self._unpack_embedding(row["composite_embedding"])
+            stored_emb = self.__unpack_embedding(row["composite_embedding"])
             return np.array(stored_emb, dtype=np.float32)
 
-        visual_emb = self._unpack_embedding(visual_blob)
-        metadata_emb = self._unpack_embedding(metadata_blob)
+        visual_emb = self.__unpack_embedding(visual_blob)
+        metadata_emb = self.__unpack_embedding(metadata_blob)
 
         return self._compute_weighted_embedding(visual_emb, metadata_emb, visual_weight)
 
     def get_stats(self) -> dict[str, Any]:
         """Get storage statistics for the current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Stats for current model_key
@@ -1428,7 +1676,7 @@ class EmbeddingStorage:
 
     def get_available_model_keys(self) -> list[str]:
         """Get list of all model keys that have embeddings stored."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT model_key FROM scene_embeddings ORDER BY model_key")
         keys = [row["model_key"] for row in cursor.fetchall()]
@@ -1442,7 +1690,7 @@ class EmbeddingStorage:
         Returns:
             Number of embeddings deleted
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "DELETE FROM scene_embeddings WHERE model_key = ?",
@@ -1460,7 +1708,7 @@ class EmbeddingStorage:
         Returns:
             Number of embeddings deleted
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM scene_embeddings")
         deleted = cursor.rowcount
@@ -1496,7 +1744,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1512,7 +1760,7 @@ class EmbeddingStorage:
                 marker_id,
                 center_timestamp,
                 window_seconds,
-                self._pack_embedding(embedding),
+                self.__pack_embedding(embedding),
                 frame_count,
                 self.model_key,
                 now,
@@ -1537,7 +1785,7 @@ class EmbeddingStorage:
         Returns:
             OMomentEmbeddingRecord or None if not found
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1560,7 +1808,7 @@ class EmbeddingStorage:
             "marker_id": row["marker_id"],
             "center_timestamp": row["center_timestamp"],
             "window_seconds": row["window_seconds"],
-            "embedding": self._unpack_embedding(row["embedding"]),
+            "embedding": self.__unpack_embedding(row["embedding"]),
             "frame_count": row["frame_count"],
             "model_key": row["model_key"],
             "created_at": row["created_at"],
@@ -1579,7 +1827,7 @@ class EmbeddingStorage:
         Returns:
             List of OMomentEmbeddingRecord for all O-moments in the scene
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1601,7 +1849,7 @@ class EmbeddingStorage:
                     "marker_id": row["marker_id"],
                     "center_timestamp": row["center_timestamp"],
                     "window_seconds": row["window_seconds"],
-                    "embedding": self._unpack_embedding(row["embedding"]),
+                    "embedding": self.__unpack_embedding(row["embedding"]),
                     "frame_count": row["frame_count"],
                     "model_key": row["model_key"],
                     "created_at": row["created_at"],
@@ -1621,7 +1869,7 @@ class EmbeddingStorage:
         Returns:
             List of (scene_id, marker_id, embedding) tuples
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1634,7 +1882,7 @@ class EmbeddingStorage:
         )
 
         results = [
-            (row["scene_id"], row["marker_id"], self._unpack_embedding(row["embedding"]))
+            (row["scene_id"], row["marker_id"], self.__unpack_embedding(row["embedding"]))
             for row in cursor.fetchall()
         ]
 
@@ -1643,7 +1891,7 @@ class EmbeddingStorage:
 
     def get_scenes_with_o_moments(self) -> list[int]:
         """Get list of scene IDs that have O-moment embeddings for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1659,7 +1907,7 @@ class EmbeddingStorage:
 
     def has_o_moment_embedding(self, scene_id: int, o_event_index: int) -> bool:
         """Check if an O-moment embedding exists for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1674,7 +1922,7 @@ class EmbeddingStorage:
 
     def delete_o_moment_embedding(self, scene_id: int, o_event_index: int) -> bool:
         """Delete O-moment embedding for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1690,7 +1938,7 @@ class EmbeddingStorage:
 
     def delete_all_o_moments_for_scene(self, scene_id: int) -> int:
         """Delete all O-moment embeddings for a scene with current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1706,7 +1954,7 @@ class EmbeddingStorage:
 
     def clear_all_o_moments(self) -> int:
         """Delete all O-moment embeddings for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "DELETE FROM o_moment_embeddings WHERE model_key = ?",
@@ -1719,7 +1967,7 @@ class EmbeddingStorage:
 
     def get_o_moment_stats(self) -> dict[str, Any]:
         """Get O-moment embedding statistics for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Count total O-moment embeddings
@@ -1792,7 +2040,7 @@ class EmbeddingStorage:
         if query_norm > 0:
             query_arr = query_arr / query_norm
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1811,7 +2059,7 @@ class EmbeddingStorage:
             if scene_id in exclude_set:
                 continue
 
-            stored_emb = self._unpack_embedding(row["embedding"])
+            stored_emb = self.__unpack_embedding(row["embedding"])
             stored_arr = np.array(stored_emb, dtype=np.float32)
 
             similarity = float(np.dot(query_arr, stored_arr))
@@ -1860,7 +2108,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1873,7 +2121,7 @@ class EmbeddingStorage:
                 scene_id,
                 frame_index,
                 timestamp,
-                self._pack_embedding(embedding),
+                self.__pack_embedding(embedding),
                 self.model_key,
                 now,
             ),
@@ -1910,7 +2158,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check if record exists to preserve created_at
@@ -1940,7 +2188,7 @@ class EmbeddingStorage:
                 total_frames_extracted,
                 duration,
                 sampling_rate,
-                self._pack_embedding(composite_embedding),
+                self.__pack_embedding(composite_embedding),
                 dedup_ratio,
                 first_frame_timestamp,
                 last_frame_timestamp,
@@ -1962,7 +2210,7 @@ class EmbeddingStorage:
         Returns:
             FrameEmbeddingMetadata or None if not found
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1986,7 +2234,7 @@ class EmbeddingStorage:
             "total_frames_extracted": row["total_frames_extracted"],
             "duration": row["duration"],
             "sampling_rate": row["sampling_rate"],
-            "composite_embedding": self._unpack_embedding(row["composite_embedding"]),
+            "composite_embedding": self.__unpack_embedding(row["composite_embedding"]),
             "dedup_ratio": row["dedup_ratio"],
             "first_frame_timestamp": row["first_frame_timestamp"],
             "last_frame_timestamp": row["last_frame_timestamp"],
@@ -2001,7 +2249,7 @@ class EmbeddingStorage:
         since metadata may be missing for scenes embedded via standalone_embed
         or due to incomplete embedding runs.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -2036,7 +2284,7 @@ class EmbeddingStorage:
         Returns:
             List of dicts with timestamp, frame_index, and similarity
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Load all frame embeddings for scene
@@ -2059,7 +2307,7 @@ class EmbeddingStorage:
         results: list[dict[str, Any]] = []
 
         for row in cursor.fetchall():
-            emb = self._unpack_embedding(row["embedding"])
+            emb = self.__unpack_embedding(row["embedding"])
             emb_arr = np.array(emb, dtype=np.float32)
 
             # Cosine similarity (both are unit vectors)
@@ -2087,7 +2335,7 @@ class EmbeddingStorage:
         Returns:
             List of dicts with frame_index, timestamp, and embedding
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -2106,7 +2354,7 @@ class EmbeddingStorage:
                 {
                     "frame_index": row["frame_index"],
                     "timestamp": row["timestamp"],
-                    "embedding": self._unpack_embedding(row["embedding"]),
+                    "embedding": self.__unpack_embedding(row["embedding"]),
                 }
             )
 
@@ -2258,7 +2506,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -2277,7 +2525,7 @@ class EmbeddingStorage:
                 end_timestamp,
                 start_frame,
                 end_frame,
-                self._pack_embedding(avg_embedding),
+                self.__pack_embedding(avg_embedding),
                 boundary_score,
                 segment_type,
                 now,
@@ -2297,7 +2545,7 @@ class EmbeddingStorage:
         Returns:
             List of SceneSegment records
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -2322,7 +2570,7 @@ class EmbeddingStorage:
                         "end_timestamp": row["end_timestamp"],
                         "start_frame": row["start_frame"],
                         "end_frame": row["end_frame"],
-                        "avg_embedding": self._unpack_embedding(row["avg_embedding"]),
+                        "avg_embedding": self.__unpack_embedding(row["avg_embedding"]),
                         "boundary_score": row["boundary_score"],
                         "segment_type": row["segment_type"],
                         "created_at": row["created_at"],
@@ -2340,7 +2588,7 @@ class EmbeddingStorage:
         Returns:
             Number of frames deleted
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Delete frame embeddings
@@ -2377,7 +2625,7 @@ class EmbeddingStorage:
 
     def get_frame_embedding_stats(self) -> dict[str, Any]:
         """Get frame embedding statistics for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Count scenes with frame embeddings
@@ -2446,7 +2694,7 @@ class EmbeddingStorage:
         Returns:
             List of distinct model_key strings
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Get model keys from all tables
@@ -2479,7 +2727,7 @@ class EmbeddingStorage:
         Returns:
             Dict with counts of deleted items by type
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check which tables exist (resilient to missing tables from partial migrations)
@@ -2559,7 +2807,7 @@ class EmbeddingStorage:
         Returns:
             List of distinct scene IDs with stored data
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check which tables exist (resilient to missing tables from partial migrations)
@@ -2719,7 +2967,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check if record exists to preserve created_at
@@ -2741,7 +2989,7 @@ class EmbeddingStorage:
             (
                 performer_id,
                 self.model_key,
-                self._pack_embedding(embedding),
+                self.__pack_embedding(embedding),
                 contributing_scenes,
                 total_engagement_score,
                 visual_description,
@@ -2765,7 +3013,7 @@ class EmbeddingStorage:
         Returns:
             Dict with performer embedding data or None if not found
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -2785,7 +3033,7 @@ class EmbeddingStorage:
         return {
             "performer_id": row["performer_id"],
             "model_key": row["model_key"],
-            "embedding": self._unpack_embedding(row["embedding"]),
+            "embedding": self.__unpack_embedding(row["embedding"]),
             "contributing_scenes": row["contributing_scenes"],
             "total_engagement_score": row["total_engagement_score"],
             "visual_description": row["visual_description"],
@@ -2797,7 +3045,7 @@ class EmbeddingStorage:
 
     def has_performer_embedding(self, performer_id: int) -> bool:
         """Check if a performer has an embedding for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT 1 FROM performer_embeddings WHERE performer_id = ? AND model_key = ?",
@@ -2809,7 +3057,7 @@ class EmbeddingStorage:
 
     def delete_performer_embedding(self, performer_id: int) -> bool:
         """Delete performer embedding for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "DELETE FROM performer_embeddings WHERE performer_id = ? AND model_key = ?",
@@ -2829,7 +3077,7 @@ class EmbeddingStorage:
         Returns:
             List of (performer_id, embedding) tuples
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -2841,7 +3089,7 @@ class EmbeddingStorage:
         )
 
         results = [
-            (row["performer_id"], self._unpack_embedding(row["embedding"]))
+            (row["performer_id"], self.__unpack_embedding(row["embedding"]))
             for row in cursor.fetchall()
         ]
 
@@ -2850,7 +3098,7 @@ class EmbeddingStorage:
 
     def get_embedded_performer_ids(self) -> list[int]:
         """Get list of all performer IDs with embeddings for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT performer_id FROM performer_embeddings WHERE model_key = ? ORDER BY performer_id",
@@ -2888,7 +3136,7 @@ class EmbeddingStorage:
         if query_norm > 0:
             query_arr = query_arr / query_norm
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -2906,7 +3154,7 @@ class EmbeddingStorage:
             if performer_id in exclude_set:
                 continue
 
-            stored_emb = self._unpack_embedding(row["embedding"])
+            stored_emb = self.__unpack_embedding(row["embedding"])
             stored_arr = np.array(stored_emb, dtype=np.float32)
 
             similarity = float(np.dot(query_arr, stored_arr))
@@ -2923,7 +3171,7 @@ class EmbeddingStorage:
 
     def get_performer_stats(self) -> dict[str, Any]:
         """Get performer embedding statistics for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check if table exists
@@ -2981,7 +3229,7 @@ class EmbeddingStorage:
 
     def clear_all_performer_embeddings(self) -> int:
         """Delete all performer embeddings for current model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Check if table exists
@@ -3020,7 +3268,7 @@ class EmbeddingStorage:
         """
         now = datetime.now().isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         if top_tags is not None:
@@ -3058,7 +3306,7 @@ class EmbeddingStorage:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Clear existing clusters for this model
@@ -3076,7 +3324,7 @@ class EmbeddingStorage:
                 (
                     cluster.cluster_id,
                     model_key,
-                    self._pack_embedding(cluster.centroid.tolist()),
+                    self.__pack_embedding(cluster.centroid.tolist()),
                     scene_ids_json,
                     cluster.engagement_total,
                     cluster.engagement_share,
@@ -3091,11 +3339,19 @@ class EmbeddingStorage:
         conn.commit()
         conn.close()
 
-    def get_taste_clusters(self, model_key: str) -> list[dict[str, Any]]:
-        """Load taste clusters for a model_key."""
+    def get_taste_clusters(self, model_key: str) -> "list[TasteCluster]":
+        """Load taste clusters for a model_key as typed read objects.
+
+        Returns ``TasteCluster`` dataclasses (the same runtime type the write
+        path consumes) rather than raw dicts, so callers never depend on the
+        table schema or BLOB layout. The store owns unpacking the centroid BLOB
+        and decoding the JSON columns.
+        """
         import json
 
-        conn = self._get_connection()
+        from stash_ai.recommendations.types import TagMatch, TasteCluster
+
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3104,23 +3360,22 @@ class EmbeddingStorage:
         )
         rows = cursor.fetchall()
 
-        clusters = []
+        clusters: list[TasteCluster] = []
         for row in rows:
+            tag_matches = cast("list[TagMatch]", json.loads(row["tag_matches"]))
             clusters.append(
-                {
-                    "cluster_id": row["cluster_id"],
-                    "model_key": row["model_key"],
-                    "centroid": self._unpack_embedding(row["centroid"]),
-                    "scene_ids": json.loads(row["scene_ids"]),
-                    "engagement_total": row["engagement_total"],
-                    "engagement_share": row["engagement_share"],
-                    "auto_label": row["auto_label"],
-                    "user_label": row["user_label"],
-                    "weight_override": row["weight_override"],
-                    "excluded": bool(row["excluded"]),
-                    "tag_matches": json.loads(row["tag_matches"]),
-                    "created_at": row["created_at"],
-                }
+                TasteCluster(
+                    cluster_id=row["cluster_id"],
+                    centroid=np.array(self.__unpack_embedding(row["centroid"]), dtype=np.float32),
+                    scene_ids=json.loads(row["scene_ids"]),
+                    engagement_total=row["engagement_total"],
+                    engagement_share=row["engagement_share"],
+                    auto_label=row["auto_label"],
+                    user_label=row["user_label"],
+                    weight_override=row["weight_override"],
+                    excluded=bool(row["excluded"]),
+                    tag_matches=tag_matches,
+                )
             )
 
         conn.close()
@@ -3139,7 +3394,7 @@ class EmbeddingStorage:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [cluster_id, model_key]
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         conn.execute(
             f"UPDATE taste_clusters SET {set_clause} WHERE cluster_id = ? AND model_key = ?",
             values,
@@ -3160,7 +3415,7 @@ class EmbeddingStorage:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         # Clear existing coords for this model
@@ -3179,7 +3434,7 @@ class EmbeddingStorage:
 
     def get_umap_coords(self, model_key: str) -> list[dict[str, int | float | None]]:
         """Load all UMAP 3D coordinates for a model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3212,12 +3467,12 @@ class EmbeddingStorage:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         conn.execute(
             """INSERT OR REPLACE INTO tag_embeddings
             (text, model_key, embedding, source, created_at)
             VALUES (?, ?, ?, ?, ?)""",
-            (text, model_key, self._pack_embedding(embedding), source, now),
+            (text, model_key, self.__pack_embedding(embedding), source, now),
         )
         conn.commit()
         conn.close()
@@ -3232,20 +3487,20 @@ class EmbeddingStorage:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         for text, embedding, source in entries:
             conn.execute(
                 """INSERT OR REPLACE INTO tag_embeddings
                 (text, model_key, embedding, source, created_at)
                 VALUES (?, ?, ?, ?, ?)""",
-                (text, model_key, self._pack_embedding(embedding), source, now),
+                (text, model_key, self.__pack_embedding(embedding), source, now),
             )
         conn.commit()
         conn.close()
 
     def get_all_tag_embeddings(self, model_key: str) -> list[dict[str, Any]]:
         """Load all tag embeddings for a model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3257,7 +3512,7 @@ class EmbeddingStorage:
         result = [
             {
                 "text": r["text"],
-                "embedding": self._unpack_embedding(r["embedding"]),
+                "embedding": self.__unpack_embedding(r["embedding"]),
                 "source": r["source"],
             }
             for r in rows
@@ -3268,7 +3523,7 @@ class EmbeddingStorage:
 
     def get_tag_embedding(self, text: str, model_key: str) -> list[float] | None:
         """Get embedding for a specific tag/phrase."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3279,12 +3534,12 @@ class EmbeddingStorage:
 
         conn.close()
         if row:
-            return self._unpack_embedding(row["embedding"])
+            return self.__unpack_embedding(row["embedding"])
         return None
 
     def get_tag_embedding_count(self, model_key: str) -> int:
         """Count how many tag embeddings exist for a model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3305,7 +3560,7 @@ class EmbeddingStorage:
         Returns:
             Set of lowercase tag names with source='stash_tag'.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3328,7 +3583,7 @@ class EmbeddingStorage:
         if not rows:
             return
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.executemany(
@@ -3356,7 +3611,7 @@ class EmbeddingStorage:
         Returns:
             List of FrameTagCoverageRecord dicts ordered by frame_index.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3392,7 +3647,7 @@ class EmbeddingStorage:
             uncovered_frames, coverage_ratio. Ordered by coverage_ratio
             ascending (most uncovered scenes first).
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3441,7 +3696,7 @@ class EmbeddingStorage:
             Numpy array of shape (N, dims) with uncovered frame embeddings.
             Returns an empty (0,) array if no uncovered frames exist.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3466,7 +3721,7 @@ class EmbeddingStorage:
         if not rows:
             return np.array([], dtype=np.float32)
 
-        embeddings = [self._unpack_embedding(r["embedding"]) for r in rows]
+        embeddings = [self.__unpack_embedding(r["embedding"]) for r in rows]
         return np.array(embeddings, dtype=np.float32)
 
     def get_scene_frame_embeddings(self, scene_id: int) -> NDArray[np.float32]:
@@ -3479,7 +3734,7 @@ class EmbeddingStorage:
             Numpy array of shape (N, dims) with all frame embeddings.
             Returns an empty (0,) array if no frames exist.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3497,7 +3752,7 @@ class EmbeddingStorage:
         if not rows:
             return np.array([], dtype=np.float32)
 
-        embeddings = [self._unpack_embedding(r["embedding"]) for r in rows]
+        embeddings = [self.__unpack_embedding(r["embedding"]) for r in rows]
         return np.array(embeddings, dtype=np.float32)
 
     def get_scenes_with_tag_coverage(self) -> list[int]:
@@ -3507,7 +3762,7 @@ class EmbeddingStorage:
             List of distinct scene IDs with coverage records
             for the current model_key.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3529,7 +3784,7 @@ class EmbeddingStorage:
         Args:
             scene_id: The scene whose coverage data should be removed.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3555,7 +3810,7 @@ class EmbeddingStorage:
         Returns:
             Number of rows updated.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -3575,9 +3830,63 @@ class EmbeddingStorage:
         conn.close()
         return rowcount
 
+    def get_frame_tag_best_similarities(self, model_key: str) -> list[float]:
+        """Return every frame's best-tag similarity for ``model_key``.
+
+        Used by the tag-gap task's slow-path threshold computation (the
+        5th-percentile of all best-similarities). Keeps the
+        ``frame_tag_coverage`` table behind the store interface so callers
+        never run their own SQL against it.
+        """
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT best_similarity FROM frame_tag_coverage WHERE model_key = ?",
+                (model_key,),
+            )
+            return [float(row["best_similarity"]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_tag_gap_threshold(self, model_key: str) -> float | None:
+        """Return the cached tag-gap coverage threshold for ``model_key``.
+
+        Reads the typed value from the store's ``schema_info`` cache. Returns
+        ``None`` when no threshold has been cached yet, so the caller can fall
+        back to recomputing it.
+        """
+        conn = self.__get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM schema_info WHERE key = ?",
+                (f"tag_gap_threshold_{model_key}",),
+            )
+            row = cursor.fetchone()
+            return float(row["value"]) if row else None
+        finally:
+            conn.close()
+
+    def set_tag_gap_threshold(self, model_key: str, value: float) -> None:
+        """Cache the tag-gap coverage threshold for ``model_key``.
+
+        Stores the value in the store's ``schema_info`` cache so subsequent
+        runs can skip the expensive percentile recomputation.
+        """
+        conn = self.__get_connection()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?)",
+                (f"tag_gap_threshold_{model_key}", str(value)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def save_dismissed_tag(self, scene_id: int, tag_id: int) -> None:
         """Record that a tag suggestion was dismissed for a scene."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -3592,7 +3901,7 @@ class EmbeddingStorage:
 
     def get_dismissed_tags(self, scene_id: int) -> set[int]:
         """Get all dismissed tag IDs for a scene."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -3607,7 +3916,7 @@ class EmbeddingStorage:
 
     def clear_dismissed_tags(self, scene_id: int) -> int:
         """Clear all dismissals for a scene. Returns count deleted."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -3629,7 +3938,7 @@ class EmbeddingStorage:
 
         # Normalize order so (A,B) and (B,A) are the same dismissal
         names = sorted([tag_a_name.lower(), tag_b_name.lower()])
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -3644,7 +3953,7 @@ class EmbeddingStorage:
 
     def get_dismissed_tag_merges(self) -> set[tuple[str, str]]:
         """Get all dismissed tag merge pairs as a set of (name_a, name_b) tuples."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT tag_a_name, tag_b_name FROM dismissed_tag_merges")
         result = {(row["tag_a_name"], row["tag_b_name"]) for row in cursor.fetchall()}
@@ -3653,7 +3962,7 @@ class EmbeddingStorage:
 
     def delete_tag_embedding(self, text: str, model_key: str) -> None:
         """Delete a tag embedding by text and model_key."""
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "DELETE FROM tag_embeddings WHERE text = ? AND model_key = ?",
@@ -3687,7 +3996,7 @@ class EmbeddingStorage:
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         conn.execute(
             """
             INSERT INTO labeling_sessions
@@ -3710,7 +4019,7 @@ class EmbeddingStorage:
         Returns:
             Session dict or None if not found.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT * FROM labeling_sessions WHERE session_id = ?",
@@ -3745,7 +4054,7 @@ class EmbeddingStorage:
         values = list(updates.values())
         values.append(session_id)
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         conn.execute(
             f"UPDATE labeling_sessions SET {set_clause} WHERE session_id = ?",
             values,
@@ -3762,7 +4071,7 @@ class EmbeddingStorage:
         Returns:
             List of session dicts ordered by created_at descending.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
 
         if status is not None:
@@ -3791,7 +4100,7 @@ class EmbeddingStorage:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        conn = self._get_connection()
+        conn = self.__get_connection()
         for ann in annotations:
             conn.execute(
                 """
@@ -3823,7 +4132,7 @@ class EmbeddingStorage:
         Returns:
             List of annotation dicts.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT * FROM frame_annotations WHERE session_id = ?",
@@ -3839,9 +4148,22 @@ class EmbeddingStorage:
         Returns:
             List of annotation dicts where label='confirmed'.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM frame_annotations WHERE label = 'confirmed'")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_all_rejected_annotations(self) -> list[dict[str, Any]]:
+        """Get all rejected annotations across all sessions.
+
+        Returns:
+            List of annotation dicts where label='rejected'.
+        """
+        conn = self.__get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM frame_annotations WHERE label = 'rejected'")
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows]
@@ -3857,7 +4179,7 @@ class EmbeddingStorage:
             frame_index: The frame index within the scene.
             status: Progress status (e.g., 'pending', 'labeled', 'skipped').
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         conn.execute(
             """
             INSERT OR REPLACE INTO labeling_progress
@@ -3875,7 +4197,7 @@ class EmbeddingStorage:
         Returns:
             Set of (scene_id, frame_index) tuples.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT scene_id, frame_index FROM labeling_progress WHERE status = 'labeled'"
@@ -3896,7 +4218,7 @@ class EmbeddingStorage:
         Returns:
             List of tag text strings without embeddings.
         """
-        conn = self._get_connection()
+        conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """

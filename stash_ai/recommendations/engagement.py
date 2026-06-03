@@ -1,6 +1,7 @@
 """Engagement scoring and calculation logic."""
 
 import math
+import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timezone
 
@@ -45,6 +46,12 @@ class EngagementCalculator:
         self.time_decay = time_decay or self.DEFAULT_TIME_DECAY
         self.log = log_callback or (lambda msg, level: None)
 
+    # SQLite caps host parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
+    # Batch the id filter well under the historical 999 floor so get_engagement
+    # stays safe for large libraries (the unbounded engagement-sort callers can
+    # pass the whole library here).
+    ID_QUERY_BATCH_SIZE = 900
+
     def get_engagement(
         self,
         scene_ids: list[int] | None = None,
@@ -68,15 +75,34 @@ class EngagementCalculator:
 
         conn = get_readonly_connection(db_path)
         cursor = conn.cursor()
+        results: dict[int, SceneEngagementData] = {}
+        try:
+            if scene_ids is None:
+                self._fetch_engagement_rows(
+                    cursor, "(view_agg.view_count > 0 OR o_agg.o_count > 0)", (), results
+                )
+            else:
+                # Batch the IN filter to stay under SQLite's parameter cap.
+                for start in range(0, len(scene_ids), self.ID_QUERY_BATCH_SIZE):
+                    batch = scene_ids[start : start + self.ID_QUERY_BATCH_SIZE]
+                    placeholders = ",".join("?" * len(batch))
+                    self._fetch_engagement_rows(
+                        cursor, f"s.id IN ({placeholders})", tuple(batch), results
+                    )
+        finally:
+            conn.close()
 
-        if scene_ids is not None:
-            placeholders = ",".join("?" * len(scene_ids))
-            where_clause = f"s.id IN ({placeholders})"
-            params: tuple[int, ...] = tuple(scene_ids)
-        else:
-            where_clause = "(view_agg.view_count > 0 OR o_agg.o_count > 0)"
-            params = ()
+        self.log(f"Found engagement data for {len(results)} scenes", "debug")
+        return results
 
+    def _fetch_engagement_rows(
+        self,
+        cursor: sqlite3.Cursor,
+        where_clause: str,
+        params: tuple[int, ...],
+        results: dict[int, SceneEngagementData],
+    ) -> None:
+        """Run the canonical engagement query for one WHERE clause into ``results``."""
         cursor.execute(
             f"""
             SELECT
@@ -107,7 +133,6 @@ class EngagementCalculator:
             params,
         )
 
-        results: dict[int, SceneEngagementData] = {}
         for row in cursor.fetchall():
             results[row["scene_id"]] = {
                 "scene_id": row["scene_id"],
@@ -118,14 +143,6 @@ class EngagementCalculator:
                 "first_played": row["first_played"],
                 "rating": row["rating"],  # Can be None if unrated
             }
-
-        conn.close()
-        self.log(f"Found engagement data for {len(results)} scenes", "debug")
-        return results
-
-    def get_all_scene_engagement(self) -> dict[int, SceneEngagementData]:
-        """Thin alias for get_engagement(None). Fetches all engaged scenes."""
-        return self.get_engagement(scene_ids=None)
 
     def calculate_base_score(self, data: SceneEngagementData) -> tuple[float, dict[str, float]]:
         """

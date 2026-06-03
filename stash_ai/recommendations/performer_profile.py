@@ -296,7 +296,7 @@ class PerformerProfileBuilder:
             return None
 
         # Get engagement data for scoring
-        all_engagement = self.calculator.get_all_scene_engagement()
+        all_engagement = self.calculator.get_engagement()
 
         # Filter to scenes with embeddings
         embedded_ids = set(self.storage.get_embedded_scene_ids())

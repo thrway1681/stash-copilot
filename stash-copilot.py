@@ -30,6 +30,8 @@ except ImportError:
     pass  # Module may not be available in all contexts
 
 from stash_ai.stash_client import StashApiClient, StashClient  # noqa: E402
+from stash_ai.tasks.dispatch import TaskContext, dispatch  # noqa: E402
+from stash_ai.tasks.result_store import ResultStore  # noqa: E402
 
 
 class StashPlugin:
@@ -372,7 +374,6 @@ class MyPlugin(StashPlugin):
             "describe_performers": self.run_describe_performers,
             "find_similar_performers": self.run_find_similar_performers,
             "build_taste_map": self.run_build_taste_map,
-            "preference_recs": self.run_preference_recs,
             "detect_tag_gaps": self.run_detect_tag_gaps,
             "get_scene_tag_gaps": self.run_get_scene_tag_gaps,
             "preview_tag_impact": self.run_preview_tag_impact,
@@ -392,25 +393,7 @@ class MyPlugin(StashPlugin):
             "eroscripts_download": self.run_eroscripts_download,
             "eroscripts_status": self.run_eroscripts_status,
         }
-        # Preference tasks share one handler that also needs the task name.
-        for name in (
-            "preference_start",
-            "preference_compare",
-            "preference_swipe",
-            "preference_end",
-            "preference_stats",
-            "preference_reset",
-        ):
-            handlers[name] = self._make_preference_handler(name)
         return handlers
-
-    def _make_preference_handler(self, task_name: str) -> Callable[[dict[str, Any]], None]:
-        """Bind ``task_name`` into a preference handler with the standard shape."""
-
-        def handler(args: dict[str, Any]) -> None:
-            self.run_preference_trainer(task_name, args)
-
-        return handler
 
     def available_tasks(self) -> list[str]:
         """Sorted task names this plugin can dispatch (registry as source of truth)."""
@@ -423,6 +406,49 @@ class MyPlugin(StashPlugin):
             self.process_scene(scene_id)
         else:
             self.error("scene_id argument required")
+
+    def _dispatch(
+        self,
+        args: dict[str, Any],
+        build_task: Callable[[TaskContext], Any],
+        *,
+        on_result: Callable[[Any, Any], None] | None = None,
+    ) -> None:
+        """Run ``build_task``'s task through the generic dispatch seam.
+
+        Resolves the plugin settings once, wires the standard
+        log/progress/stash dependencies into a :class:`TaskContext`, and
+        delegates construction, execution, and uniform error handling to
+        :func:`dispatch`. This is the single place per-task handlers get their
+        context, replacing the hand-rolled settings fetch + four-clause
+        ``try/except`` each used to repeat.
+        """
+
+        def build_context() -> TaskContext:
+            return TaskContext(
+                stash=self.stash_client,
+                log=self.log,
+                progress=self.progress,
+                plugin_settings=self.get_plugin_settings("stash-copilot"),
+                args=args,
+                request_id=str(args.get("request_id", "")),
+            )
+
+        dispatch(
+            log=self.log,
+            build_context=build_context,
+            build_task=build_task,
+            on_result=on_result,
+        )
+
+    def _result_store(self) -> ResultStore:
+        """Return the result store rooted at the plugin's ``assets`` directory.
+
+        The single place handlers persist their frontend-polled result file
+        (``assets/{result_key}_{request_id}.json``), replacing the hand-rolled
+        ``os.makedirs`` + ``json.dump`` each used to repeat.
+        """
+        return ResultStore(os.path.join(PLUGIN_DIR, "assets"))
 
     def run_eroscripts_validate_auth(self, args: dict[str, Any]) -> None:
         """Validate (or clear/re-check) the EroScripts session cookie."""
@@ -473,66 +499,54 @@ class MyPlugin(StashPlugin):
         """
         Run the AI-powered library statistics summary task.
 
+        Pilot for the dispatch seam (#4): construction, execution, and uniform
+        error handling now live in :func:`dispatch`; this handler only declares
+        how to build the task from the context and how to surface its output.
+
         Args:
             args: Task arguments containing LLM settings
         """
-        try:
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.config import get_text_llm_settings
             from stash_ai.tasks.stats_summary import StatsSummaryTask
 
-            self.log("Initializing Stash AI statistics summary...", "info")
-
-            # Fetch plugin settings from Stash via GraphQL
-            # The plugin ID is the yml filename without extension: "stash-copilot"
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            self.log(f"Plugin settings from Stash: {plugin_settings}", "debug")
+            ctx.log("Initializing Stash AI statistics summary...", "info")
+            ctx.log(f"Plugin settings from Stash: {ctx.plugin_settings}", "debug")
 
             # Get text LLM settings
-            text_llm = get_text_llm_settings(plugin_settings, args)
-            self.log(f"Using LLM provider: {text_llm.provider}", "info")
-            self.log(f"Using model: {text_llm.model}", "info")
-
-            llm_config = text_llm.to_config()
+            text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
+            ctx.log(f"Using LLM provider: {text_llm.provider}", "info")
+            ctx.log(f"Using model: {text_llm.model}", "info")
 
             # Parse excluded tags (comma-separated string to list)
-            excluded_tags_str = plugin_settings.get("excluded_tags", "")
+            excluded_tags_str = ctx.plugin_settings.get("excluded_tags", "")
             excluded_tags = (
                 [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
                 if excluded_tags_str
                 else []
             )
-
             if excluded_tags:
-                self.log(f"Excluding tags: {excluded_tags}", "info")
+                ctx.log(f"Excluding tags: {excluded_tags}", "info")
 
-            # Create and run the task with the already-connected StashInterface
-            task = StatsSummaryTask(
-                stash=self.stash_client,
-                llm_config=llm_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
+            return StatsSummaryTask(
+                stash=ctx.stash,
+                llm_config=text_llm.to_config(),
+                log_callback=ctx.log,
+                progress_callback=ctx.progress,
                 excluded_tags=excluded_tags,
             )
 
-            summary = task.run()
-
+        def on_result(_task: Any, summary: Any) -> None:
             # Output the summary
             self.log("=" * 50, "info")
             self.log("LIBRARY STATISTICS SUMMARY", "info")
             self.log("=" * 50, "info")
-            for line in summary.split("\n"):
+            for line in str(summary).split("\n"):
                 self.log(line, "info")
             self.log("=" * 50, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import Stash AI modules: {e}")
-            self.error("Make sure the stash_ai package is properly installed.")
-        except ConnectionError as e:
-            self.error(f"Connection error: {e}")
-        except RuntimeError as e:
-            self.error(f"Task failed: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_recommendations(self, args: dict[str, Any]) -> None:
         """
@@ -1024,13 +1038,8 @@ class MyPlugin(StashPlugin):
 
             result = task.run()
 
-            # Save result for frontend polling
-            if request_id:
-                assets_dir = os.path.join(PLUGIN_DIR, "assets")
-                os.makedirs(assets_dir, exist_ok=True)
-                result_path = os.path.join(assets_dir, f"tag_dedup_{request_id}.json")
-                with open(result_path, "w") as f:
-                    json.dump(result, f, indent=2)
+            # Save result for frontend polling via the dispatch seam's result store.
+            self._result_store().save(task.result_key, request_id, result)
 
             if result["status"] == "complete":
                 self.log(f"Found {len(result['candidates'])} duplicate tag candidates", "info")
@@ -1320,207 +1329,6 @@ class MyPlugin(StashPlugin):
 
         except Exception as e:
             self.log(f"Error listing sessions: {e}", "error")
-
-    def run_preference_trainer(self, task_name: str, args: dict[str, Any]) -> None:
-        """Run preference training tasks (start, compare, swipe, end)."""
-        try:
-            from stash_ai.embeddings.storage import EmbeddingStorage
-            from stash_ai.preferences.session import PreferenceSessionManager
-            from stash_ai.preferences.types import (
-                PreferenceSessionConfig,
-                SwipeDirection,
-            )
-
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get model_key from image embedding settings
-            from stash_ai.embeddings.config import EmbeddingConfig
-
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
-
-            storage = EmbeddingStorage(model_key=model_key)
-
-            manager = PreferenceSessionManager(
-                storage=storage,
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
-
-            request_id = args.get("request_id", "")
-            response = None
-
-            if task_name == "preference_start":
-                # Parse exploration_rate from args (0.0 to 1.0)
-                exploration_str = args.get("exploration_rate", "0.2")
-                try:
-                    exploration_rate = max(0.0, min(1.0, float(exploration_str)))
-                except ValueError:
-                    exploration_rate = 0.2
-
-                # Parse pure_random flag (bypasses cluster-based bootstrapping)
-                pure_random_str = args.get("pure_random", "false").lower()
-                pure_random = pure_random_str in ("true", "1", "yes")
-
-                session_config = PreferenceSessionConfig(
-                    mode=args.get("session_mode", "swipe"),
-                    batch_size=int(args.get("batch_size", "20")),
-                    model_key=model_key,
-                    exploration_rate=exploration_rate,
-                    pure_random=pure_random,
-                )
-                response = manager.start_session(session_config)
-                self.log(
-                    f"Preference session started: {response.session_id}, "
-                    f"{len(response.pairs)} pairs, phase={response.phase}",
-                    "info",
-                )
-
-            elif task_name == "preference_compare":
-                session_id = args.get("session_id", "")
-                scene_a_id = int(args.get("scene_a_id", "0"))
-                scene_b_id = int(args.get("scene_b_id", "0"))
-                winner_id = int(args.get("winner_id", "0"))
-                rt_str = args.get("response_time_ms", "")
-                response_time = int(rt_str) if rt_str else None
-
-                response = manager.record_comparison(
-                    session_id=session_id,
-                    scene_a_id=scene_a_id,
-                    scene_b_id=scene_b_id,
-                    winner_id=winner_id,
-                    response_time_ms=response_time,
-                )
-                self.log(
-                    f"Comparison recorded: {winner_id} preferred, "
-                    f"confidence={response.convergence.confidence_pct if response.convergence else '?'}%",
-                    "info",
-                )
-
-            elif task_name == "preference_swipe":
-                session_id = args.get("session_id", "")
-                scene_id = int(args.get("scene_id", "0"))
-                direction = SwipeDirection(args.get("direction", "skip"))
-                rt_str = args.get("response_time_ms", "")
-                response_time = int(rt_str) if rt_str else None
-
-                response = manager.record_swipe(
-                    session_id=session_id,
-                    scene_id=scene_id,
-                    direction=direction,
-                    response_time_ms=response_time,
-                )
-                self.log(
-                    f"Swipe recorded: scene {scene_id} = {direction.value}",
-                    "info",
-                )
-
-            elif task_name == "preference_end":
-                session_id = args.get("session_id", "")
-                response = manager.end_session(session_id)
-                self.log(
-                    f"Session ended: {response.n_comparisons} comparisons, "
-                    f"confidence={response.convergence.confidence_pct if response.convergence else '?'}%",
-                    "info",
-                )
-
-            elif task_name == "preference_stats":
-                response = manager.get_model_stats()
-                self.log(
-                    f"Preference stats: {response.n_comparisons} comparisons, "
-                    f"phase={response.phase}",
-                    "info",
-                )
-
-            elif task_name == "preference_reset":
-                response = manager.reset_model()
-                self.log("Preference model reset complete", "info")
-
-            # Save results under request_id for frontend polling
-            if response and request_id:
-                self._save_preference_result(response, request_id)
-
-        except ImportError as e:
-            self.error(f"Failed to import preference modules: {e}")
-        except Exception as e:
-            self.error(f"Preference trainer failed: {e}")
-
-    def _save_preference_result(self, response: Any, request_id: str) -> None:
-        """Save preference trainer response as JSON for frontend polling."""
-        import json as json_module
-        from dataclasses import fields
-
-        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
-        os.makedirs(assets_dir, exist_ok=True)
-
-        filepath = os.path.join(assets_dir, f"preference_trainer_{request_id}.json")
-
-        def _serialize(obj: Any) -> Any:
-            if hasattr(obj, "__dataclass_fields__"):
-                return {f.name: _serialize(getattr(obj, f.name)) for f in fields(obj)}
-            if isinstance(obj, list):
-                return [_serialize(item) for item in obj]
-            if isinstance(obj, dict):
-                return {k: _serialize(v) for k, v in obj.items()}
-            # Handle numpy types
-            try:
-                import numpy as np
-
-                if isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                if isinstance(obj, (np.floating, np.integer)):
-                    return obj.item()
-            except ImportError:
-                pass
-            return obj
-
-        try:
-            data = _serialize(response)
-            with open(filepath, "w", encoding="utf-8") as f:
-                json_module.dump(data, f, indent=2, default=str)
-            self.log(f"Results saved for frontend: preference_trainer_{request_id}.json", "debug")
-        except (OSError, TypeError) as e:
-            self.log(f"Failed to save preference result for frontend: {e}", "warning")
-
-    def run_preference_recs(self, args: dict[str, Any]) -> None:
-        """Run preference-based recommendations from the trained preference model."""
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.tasks.preference_recs import PreferenceRecsTask
-
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get model_key from image embedding settings
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
-
-            limit = int(args.get("limit", "24"))
-            mode = args.get("rec_mode", "discover")
-            request_id = args.get("request_id", "")
-
-            task = PreferenceRecsTask(
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
-
-            task.run(limit=limit, mode=mode, request_id=request_id)
-
-        except ImportError as e:
-            self.error(f"Failed to import preference recs modules: {e}")
-        except Exception as e:
-            self.error(f"Preference recs failed: {e}")
 
     def run_ask(self, args: dict[str, Any]) -> None:
         """
