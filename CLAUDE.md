@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Diagram
 
-**Last Updated:** 2026-02-15
+**Last Updated:** 2026-06-03
 
 ```
 See: docs/diagrams/architecture-post-cleanup.mmd
@@ -40,11 +40,12 @@ graph TB
     end
 
     subgraph Tasks["Task Handlers"]
+        Dispatch["dispatch.py"]
         SceneVision & EmbedScenes & Recommendations
     end
 
     StashPlugin --> PluginConfig
-    StashPlugin --> Tasks
+    StashPlugin --> Dispatch
     Tasks --> LLMRegistry
     Tasks --> Embeddings
 ```

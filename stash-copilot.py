@@ -30,6 +30,7 @@ except ImportError:
     pass  # Module may not be available in all contexts
 
 from stash_ai.stash_client import StashApiClient, StashClient  # noqa: E402
+from stash_ai.tasks.dispatch import TaskContext, dispatch  # noqa: E402
 
 
 class StashPlugin:
@@ -405,6 +406,40 @@ class MyPlugin(StashPlugin):
         else:
             self.error("scene_id argument required")
 
+    def _dispatch(
+        self,
+        args: dict[str, Any],
+        build_task: Callable[[TaskContext], Any],
+        *,
+        on_result: Callable[[Any, Any], None] | None = None,
+    ) -> None:
+        """Run ``build_task``'s task through the generic dispatch seam.
+
+        Resolves the plugin settings once, wires the standard
+        log/progress/stash dependencies into a :class:`TaskContext`, and
+        delegates construction, execution, and uniform error handling to
+        :func:`dispatch`. This is the single place per-task handlers get their
+        context, replacing the hand-rolled settings fetch + four-clause
+        ``try/except`` each used to repeat.
+        """
+
+        def build_context() -> TaskContext:
+            return TaskContext(
+                stash=self.stash_client,
+                log=self.log,
+                progress=self.progress,
+                plugin_settings=self.get_plugin_settings("stash-copilot"),
+                args=args,
+                request_id=str(args.get("request_id", "")),
+            )
+
+        dispatch(
+            log=self.log,
+            build_context=build_context,
+            build_task=build_task,
+            on_result=on_result,
+        )
+
     def run_eroscripts_validate_auth(self, args: dict[str, Any]) -> None:
         """Validate (or clear/re-check) the EroScripts session cookie."""
         try:
@@ -454,66 +489,54 @@ class MyPlugin(StashPlugin):
         """
         Run the AI-powered library statistics summary task.
 
+        Pilot for the dispatch seam (#4): construction, execution, and uniform
+        error handling now live in :func:`dispatch`; this handler only declares
+        how to build the task from the context and how to surface its output.
+
         Args:
             args: Task arguments containing LLM settings
         """
-        try:
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.config import get_text_llm_settings
             from stash_ai.tasks.stats_summary import StatsSummaryTask
 
-            self.log("Initializing Stash AI statistics summary...", "info")
-
-            # Fetch plugin settings from Stash via GraphQL
-            # The plugin ID is the yml filename without extension: "stash-copilot"
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            self.log(f"Plugin settings from Stash: {plugin_settings}", "debug")
+            ctx.log("Initializing Stash AI statistics summary...", "info")
+            ctx.log(f"Plugin settings from Stash: {ctx.plugin_settings}", "debug")
 
             # Get text LLM settings
-            text_llm = get_text_llm_settings(plugin_settings, args)
-            self.log(f"Using LLM provider: {text_llm.provider}", "info")
-            self.log(f"Using model: {text_llm.model}", "info")
-
-            llm_config = text_llm.to_config()
+            text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
+            ctx.log(f"Using LLM provider: {text_llm.provider}", "info")
+            ctx.log(f"Using model: {text_llm.model}", "info")
 
             # Parse excluded tags (comma-separated string to list)
-            excluded_tags_str = plugin_settings.get("excluded_tags", "")
+            excluded_tags_str = ctx.plugin_settings.get("excluded_tags", "")
             excluded_tags = (
                 [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
                 if excluded_tags_str
                 else []
             )
-
             if excluded_tags:
-                self.log(f"Excluding tags: {excluded_tags}", "info")
+                ctx.log(f"Excluding tags: {excluded_tags}", "info")
 
-            # Create and run the task with the already-connected StashInterface
-            task = StatsSummaryTask(
-                stash=self.stash_client,
-                llm_config=llm_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
+            return StatsSummaryTask(
+                stash=ctx.stash,
+                llm_config=text_llm.to_config(),
+                log_callback=ctx.log,
+                progress_callback=ctx.progress,
                 excluded_tags=excluded_tags,
             )
 
-            summary = task.run()
-
+        def on_result(_task: Any, summary: Any) -> None:
             # Output the summary
             self.log("=" * 50, "info")
             self.log("LIBRARY STATISTICS SUMMARY", "info")
             self.log("=" * 50, "info")
-            for line in summary.split("\n"):
+            for line in str(summary).split("\n"):
                 self.log(line, "info")
             self.log("=" * 50, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import Stash AI modules: {e}")
-            self.error("Make sure the stash_ai package is properly installed.")
-        except ConnectionError as e:
-            self.error(f"Connection error: {e}")
-        except RuntimeError as e:
-            self.error(f"Task failed: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_recommendations(self, args: dict[str, Any]) -> None:
         """
