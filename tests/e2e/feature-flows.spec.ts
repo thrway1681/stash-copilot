@@ -192,4 +192,51 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('Similar tab "Search by Frame": exiting mid-search drops the late result (cancellation guard)', async ({ page }) => {
+    // Regression for #95: the migrated frame search awaits dispatchTask (an
+    // uncancellable poll loop, unlike the old clearInterval-able setInterval).
+    // Clicking "Back to Similar" before the result lands must NOT let the late
+    // result re-render the frame-search view over the restored Similar view.
+    const pageErrors = await collectPageErrors(page);
+
+    await openSceneTab(page, 1, 'scene-copilot-similar');
+    const panel = page.locator('#scene-copilot-similar-panel');
+
+    // Let the auto find_similar settle so it isn't what we observe later.
+    await expect(panel.locator('.stash-copilot-sidebar-loading')).toBeHidden({ timeout: 20000 });
+
+    // Inject a seekable fake player (headless has none) — only a timestamp source.
+    await page.evaluate(() => {
+      let v = document.querySelector('video.vjs-tech');
+      if (!v) {
+        v = document.createElement('video');
+        v.className = 'vjs-tech';
+        document.body.appendChild(v);
+      }
+      Object.defineProperty(v, 'currentTime', { value: 1.5, configurable: true });
+      Object.defineProperty(v, 'readyState', { value: 4, configurable: true });
+    });
+
+    // startFrameSearch renders the loading-state "Back to Similar" synchronously,
+    // BEFORE its await — so it's clickable immediately. The stub delays
+    // find_similar_by_frame (sleep 2), so this back-click reliably lands first.
+    await panel.locator('.stash-copilot-frame-search-btn').click();
+    await panel.locator('.stash-copilot-back-to-similar').click();
+
+    // Exit restores the Similar controls right away.
+    await expect(panel.locator('.stash-copilot-sidebar-subtabs')).toBeVisible({ timeout: 5000 });
+
+    // Wait past the stub's delay so the now-stale dispatchTask result resolves.
+    // The token guard must drop it: the frame-search empty state must NOT appear
+    // and the Similar view must remain.
+    await page.waitForTimeout(3500);
+
+    await expect(
+      panel.locator('.stash-copilot-sidebar-empty', { hasText: 'No similar frames' })
+    ).toHaveCount(0);
+    await expect(panel.locator('.stash-copilot-sidebar-subtabs')).toBeVisible();
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });

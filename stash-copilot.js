@@ -9047,7 +9047,12 @@
         results: [],
         requestId: '',
         queryTimestamp: 0,
-        pollInterval: null
+        pollInterval: null,
+        // Generation token: bumped on every start and on exit. The migrated
+        // search awaits dispatchTask (an uncancellable poll loop, unlike the old
+        // clearInterval-able setInterval), so a late result is dropped by
+        // comparing the token captured before the await against the current one.
+        token: 0
     };
 
     // Get current tab state
@@ -12473,6 +12478,8 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         frameSearchState.active = true;
         frameSearchState.requestId = requestId;
         frameSearchState.queryTimestamp = timestamp;
+        // Capture this search's generation; exitFrameSearch / a new search bump it.
+        const myToken = ++frameSearchState.token;
 
         // Disable button immediately to prevent double-clicks
         const panel = document.getElementById('scene-copilot-similar-panel');
@@ -12529,6 +12536,12 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
                 timestamp: String(timestamp)
             });
 
+            // Cancellation guard: if the user clicked "Back to Similar"
+            // (exitFrameSearch) or kicked off a new search while this await was
+            // pending, the token advanced — drop this stale result so it can't
+            // clobber the view they navigated back to.
+            if (frameSearchState.token !== myToken) return;
+
             frameSearchState.pollInterval = null;
             if (data.status === 'error') {
                 frameSearchState.active = false;
@@ -12541,6 +12554,10 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
             frameSearchState.results = data.results || [];
             renderFrameSearchResults(data, panel);
         } catch (e) {
+            // Same cancellation guard for the failure path: a stale error must
+            // not overwrite the restored similar view or re-enable the button
+            // that exitFrameSearch already managed.
+            if (frameSearchState.token !== myToken) return;
             frameSearchState.active = false;
             const btn = panel.querySelector('.stash-copilot-frame-search-btn');
             if (btn) btn.disabled = false;
@@ -12622,6 +12639,11 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
     }
 
     function exitFrameSearch(sceneId, panel) {
+        // Invalidate any in-flight frame search so a late dispatchTask result
+        // can't re-render this view after the user navigated back (the migrated
+        // await loop isn't clearInterval-cancellable like the old poll was).
+        frameSearchState.token++;
+
         // Clear any running poll interval
         if (frameSearchState.pollInterval) {
             clearInterval(frameSearchState.pollInterval);
