@@ -3246,112 +3246,22 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_describe_performers(self, args: dict[str, Any]) -> None:
+        """Generate AI performer descriptions through the dispatch seam (#4, commit 4).
+
+        Log-only: ``DescribePerformerTask.from_context`` resolves the VLM config,
+        storage model_key, and task config, and caches the performer_id/force
+        selectors; ``run()`` describes one performer or all (writing descriptions
+        to the embeddings DB) and logs the summary; ``dispatch`` owns uniform
+        error handling (missing image-embedding config surfaces via its
+        RuntimeError branch).
         """
-        Generate AI-powered descriptions for performers using VLM.
 
-        Args:
-            args: Task arguments containing:
-                - performer_id: Optional specific performer ID
-                - force: "true" to regenerate existing descriptions
-        """
-        try:
-            from stash_ai.config import get_vision_llm_settings
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.tasks.describe_performer import (
-                DescribePerformerTask,
-                DescribePerformerTaskConfig,
-            )
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.describe_performer import DescribePerformerTask
 
-            self.log("Initializing performer description generation...", "info")
+            return DescribePerformerTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get vision LLM settings
-            vision_llm = get_vision_llm_settings(plugin_settings, args)
-            self.log(f"Using VLM: {vision_llm.provider}/{vision_llm.model}", "info")
-
-            llm_config = vision_llm.to_config()
-
-            # Get image embedding model key for storage
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if not image_provider or not image_model:
-                self.error(
-                    "Image embedding provider and model are required. "
-                    "Please configure image_embedding_provider and image_embedding_model in plugin settings."
-                )
-                return
-
-            embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
-            )
-            model_key = embedding_config.model_key
-
-            # Task config
-            frames_per_scene = int(args.get("frames_per_scene") or "4")
-            max_scenes = int(args.get("max_scenes") or "8")
-
-            task_config = DescribePerformerTaskConfig(
-                frames_per_scene=frames_per_scene,
-                max_scenes=max_scenes,
-            )
-
-            # Create task
-            task = DescribePerformerTask(
-                stash=self.stash_client,
-                llm_config=llm_config,
-                model_key=model_key,
-                task_config=task_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            # Check for specific performer or all performers
-            performer_id = args.get("performer_id")
-            force = str(args.get("force", "")).lower() == "true"
-
-            if performer_id:
-                self.log(f"Describing performer {performer_id}...", "info")
-                result = task.describe_performer(int(performer_id), force=force)
-
-                if result.get("success"):
-                    if result.get("skipped"):
-                        self.log("Skipped (already has description)", "info")
-                    else:
-                        self.log(
-                            f"Generated description for {result.get('performer_name')} "
-                            f"({result.get('frames_analyzed')} frames from {result.get('scenes_analyzed')} scenes)",
-                            "info",
-                        )
-                else:
-                    self.error(f"Failed: {result.get('error')}")
-            else:
-                self.log("Describing all performers with embeddings...", "info")
-                result = task.describe_all_performers(force=force)
-
-                self.log("=" * 50, "info")
-                self.log("PERFORMER DESCRIPTION COMPLETE", "info")
-                self.log("=" * 50, "info")
-                self.log(f"Total performers: {result.get('total_performers', 0)}", "info")
-                self.log(f"Described: {result.get('described', 0)}", "info")
-                self.log(f"Skipped: {result.get('skipped', 0)}", "info")
-                self.log(f"Errors: {result.get('errors', 0)}", "info")
-
-                if result.get("error_details"):
-                    for err in result["error_details"][:5]:
-                        self.log(f"  - {err}", "warning")
-
-        except ImportError as e:
-            self.error(f"Failed to import performer description modules: {e}")
-        except Exception as e:
-            import traceback
-
-            self.error(f"Performer description failed: {e}")
-            self.log(f"Traceback: {traceback.format_exc()}", "debug")
+        self._dispatch(args, build_task)
 
     def run_find_similar_performers(self, args: dict[str, Any]) -> None:
         """

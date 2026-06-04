@@ -16,6 +16,7 @@ from .frame_extractor import FrameExtractionConfig, FrameExtractor
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 # System prompt for performer description generation
@@ -102,6 +103,12 @@ class DescribePerformerTask:
         self.config = task_config or DescribePerformerTaskConfig()
         self.log = log_callback or (lambda msg, level: None)
         self.progress = progress_callback or (lambda cur, total: None)
+
+        # Run-time selectors resolved by ``from_context``; ``run()`` reads these
+        # to choose single-performer vs all-performers mode (the dispatch seam
+        # calls ``run()`` with no arguments).
+        self.performer_id: int | None = None
+        self.force: bool = False
 
         # Initialize storage
         self.storage = EmbeddingStorage(model_key=model_key)
@@ -231,6 +238,94 @@ class DescribePerformerTask:
                 self.log(f"Error extracting frame at {ts}s: {e}", "warning")
 
         return frames_base64
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "DescribePerformerTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the vision LLM config, the storage ``model_key`` (from the image
+        embedding settings), and the task config (frames/scenes from args), and
+        caches the ``performer_id``/``force`` run selectors for :meth:`run`.
+        Log-only: descriptions are written to the embeddings DB, so no
+        ``result_key`` is declared and no result file is written.
+        """
+        from ..config import get_vision_llm_settings
+        from ..embeddings.config import EmbeddingConfig
+
+        ctx.log("Initializing performer description generation...", "info")
+
+        vision_llm = get_vision_llm_settings(ctx.plugin_settings, ctx.args)
+        ctx.log(f"Using VLM: {vision_llm.provider}/{vision_llm.model}", "info")
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+        if not image_provider or not image_model:
+            raise RuntimeError(
+                "Image embedding provider and model are required. "
+                "Please configure image_embedding_provider and image_embedding_model in plugin settings."
+            )
+
+        model_key = EmbeddingConfig(
+            provider=image_provider,
+            model=image_model,
+            device=image_device,
+        ).model_key
+
+        task_config = DescribePerformerTaskConfig(
+            frames_per_scene=int(ctx.args.get("frames_per_scene") or "4"),
+            max_scenes=int(ctx.args.get("max_scenes") or "8"),
+        )
+
+        task = cls(
+            stash=ctx.stash,
+            llm_config=vision_llm.to_config(),
+            model_key=model_key,
+            task_config=task_config,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+
+        performer_id = ctx.args.get("performer_id")
+        task.performer_id = int(performer_id) if performer_id else None
+        task.force = str(ctx.args.get("force", "")).lower() == "true"
+        return task
+
+    def run(self) -> dict[str, Any]:
+        """Describe one performer or all (mode from the cached selectors). Log-only."""
+        if self.performer_id is not None:
+            self.log(f"Describing performer {self.performer_id}...", "info")
+            result = self.describe_performer(self.performer_id, force=self.force)
+
+            if result.get("success"):
+                if result.get("skipped"):
+                    self.log("Skipped (already has description)", "info")
+                else:
+                    self.log(
+                        f"Generated description for {result.get('performer_name')} "
+                        f"({result.get('frames_analyzed')} frames from {result.get('scenes_analyzed')} scenes)",
+                        "info",
+                    )
+            else:
+                # self.error in the old handler == log(msg, "error").
+                self.log(f"Failed: {result.get('error')}", "error")
+            return result
+
+        self.log("Describing all performers with embeddings...", "info")
+        result = self.describe_all_performers(force=self.force)
+
+        self.log("=" * 50, "info")
+        self.log("PERFORMER DESCRIPTION COMPLETE", "info")
+        self.log("=" * 50, "info")
+        self.log(f"Total performers: {result.get('total_performers', 0)}", "info")
+        self.log(f"Described: {result.get('described', 0)}", "info")
+        self.log(f"Skipped: {result.get('skipped', 0)}", "info")
+        self.log(f"Errors: {result.get('errors', 0)}", "info")
+
+        if result.get("error_details"):
+            for err in result["error_details"][:5]:
+                self.log(f"  - {err}", "warning")
+        return result
 
     def describe_performer(
         self,
