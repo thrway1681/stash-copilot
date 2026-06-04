@@ -849,203 +849,70 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_prepare_labeling_session(self, args: dict[str, Any]) -> None:
-        """Prepare a labeling session with uncertainty-sampled frames."""
-        request_id = args.get("request_id", "")
-        batch_size = int(args.get("batch_size", 200))
+        """Prepare a labeling session, via the dispatch seam (#4, commit 4).
 
-        self.log(
-            f"Preparing labeling session (batch_size={batch_size}), request_id={request_id}", "info"
-        )
+        Result-producing (task-internal writer): ``PrepareLabelingSessionTask``
+        syncs the tag vocabulary, samples an uncertainty batch, and writes its own
+        ``labeling_session_{request_id}.json`` on success or a specific error dict
+        on failure (declares ``result_key="labeling_session"``); ``dispatch`` owns
+        uniform error handling. (Slated for removal under #13.)
+        """
 
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.storage import EmbeddingStorage
-            from stash_ai.embeddings.tag_vocabulary import TagVocabulary
-            from stash_ai.tasks.labeling import LabelingTask
-            from stash_ai.tasks.labeling_types import LabelingConfig
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.labeling_actions import PrepareLabelingSessionTask
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
+            return PrepareLabelingSessionTask.from_context(ctx)
 
-            # Determine model key
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if image_provider and image_model:
-                embedding_config = EmbeddingConfig(
-                    provider=image_provider, model=image_model, device=image_device
-                )
-                model_key = embedding_config.model_key
-            else:
-                model_key = "siglip"
-
-            storage = EmbeddingStorage(model_key=model_key)
-
-            # Sync tag vocabulary before preparing session
-            self.log("Syncing tag vocabulary...", "info")
-            tag_vocab = TagVocabulary(storage=storage, model_key=model_key, log_callback=self.log)
-            stash_tags = [t["name"] for t in self.stash_client.find_tags(f={})]
-            tag_vocab.ensure_embeddings(stash_tags=stash_tags)
-
-            # Build labeling config
-            config = LabelingConfig(
-                batch_size=batch_size,
-                uncertainty_low=float(plugin_settings.get("label_uncertainty_low", 0.25)),
-                uncertainty_high=float(plugin_settings.get("label_uncertainty_high", 0.35)),
-                max_suggested_tags=int(plugin_settings.get("label_suggested_tags", 10)),
-                caption_template=plugin_settings.get(
-                    "label_caption_template", "a scene featuring {tags}"
-                ),
-            )
-
-            task = LabelingTask(
-                stash=self.stash_client,
-                storage=storage,
-                log_callback=self.log,
-                model_key=model_key,
-            )
-
-            result = task.prepare_session(config)
-
-            # Write result JSON
-            import json
-            from pathlib import Path
-
-            assets_dir = Path(__file__).parent / "assets"
-            assets_dir.mkdir(exist_ok=True)
-            result_file = assets_dir / f"labeling_session_{request_id}.json"
-            result_file.write_text(json.dumps(result, indent=2))
-
-            self.log(f"Labeling session written to {result_file}", "info")
-
-        except Exception as e:
-            self.log(f"Error preparing labeling session: {e}", "error")
-            import json
-            from pathlib import Path
-
-            assets_dir = Path(__file__).parent / "assets"
-            result_file = assets_dir / f"labeling_session_{request_id}.json"
-            result_file.write_text(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "session_id": "",
-                        "batch": [],
-                        "vocabulary": [],
-                        "error": str(e),
-                    }
-                )
-            )
+        self._dispatch(args, build_task)
 
     def run_sync_labeling_annotations(self, args: dict[str, Any]) -> None:
-        """Sync annotations from the labeling UI."""
-        request_id = args.get("request_id", "")
-        payload_json = args.get("payload", "{}")
+        """Sync annotations from the labeling UI, via the dispatch seam (#4, commit 4).
 
-        try:
-            import json
-            from pathlib import Path
+        Result-producing (task-internal writer): ``SyncLabelingAnnotationsTask``
+        applies the payload and writes ``labeling_sync_{request_id}.json`` on
+        success (logs only on error; declares ``result_key="labeling_sync"``);
+        ``dispatch`` owns uniform error handling. (Slated for removal under #13.)
+        """
 
-            from stash_ai.embeddings.storage import EmbeddingStorage
-            from stash_ai.tasks.labeling import LabelingTask
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.labeling_actions import SyncLabelingAnnotationsTask
 
-            payload = json.loads(payload_json)
-            storage = EmbeddingStorage()
+            return SyncLabelingAnnotationsTask.from_context(ctx)
 
-            task = LabelingTask(
-                stash=self.stash_client,
-                storage=storage,
-                log_callback=self.log,
-            )
-
-            task.sync_annotations(payload)
-
-            assets_dir = Path(__file__).parent / "assets"
-            result_file = assets_dir / f"labeling_sync_{request_id}.json"
-            result_file.write_text(json.dumps({"status": "complete"}))
-
-        except Exception as e:
-            self.log(f"Error syncing annotations: {e}", "error")
+        self._dispatch(args, build_task)
 
     def run_export_labeling_dataset(self, args: dict[str, Any]) -> None:
-        """Export labeled data as WebDataset."""
-        request_id = args.get("request_id", "")
-        include_negatives = args.get("include_negatives", "true").lower() == "true"
+        """Export labeled data as WebDataset, via the dispatch seam (#4, commit 4).
 
-        self.log(f"Exporting labeling dataset, request_id={request_id}", "info")
+        Result-producing (task-internal writer): ``ExportLabelingDatasetTask``
+        exports the dataset and writes its own ``labeling_export_{request_id}.json``
+        on success or a specific error dict on failure (declares
+        ``result_key="labeling_export"``); ``dispatch`` owns uniform error
+        handling. (Slated for removal under #13.)
+        """
 
-        try:
-            import json
-            from pathlib import Path
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.labeling_actions import ExportLabelingDatasetTask
 
-            from stash_ai.embeddings.storage import EmbeddingStorage
-            from stash_ai.tasks.labeling import LabelingTask
-            from stash_ai.tasks.labeling_types import LabelingConfig
+            return ExportLabelingDatasetTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            storage = EmbeddingStorage()
-            config = LabelingConfig.from_plugin_settings(plugin_settings)
-
-            task = LabelingTask(
-                stash=self.stash_client,
-                storage=storage,
-                log_callback=self.log,
-            )
-
-            result = task.export_dataset(config, include_negatives=include_negatives)
-
-            assets_dir = Path(__file__).parent / "assets"
-            result_file = assets_dir / f"labeling_export_{request_id}.json"
-            result_file.write_text(json.dumps(result, indent=2))
-
-            self.log(f"Export result written to {result_file}", "info")
-
-        except Exception as e:
-            self.log(f"Error exporting dataset: {e}", "error")
-            import json
-            from pathlib import Path
-
-            assets_dir = Path(__file__).parent / "assets"
-            result_file = assets_dir / f"labeling_export_{request_id}.json"
-            result_file.write_text(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "export_path": "",
-                        "total_images": 0,
-                        "total_tags": 0,
-                        "error": str(e),
-                    }
-                )
-            )
+        self._dispatch(args, build_task)
 
     def run_get_labeling_sessions(self, args: dict[str, Any]) -> None:
-        """List labeling sessions."""
-        request_id = args.get("request_id", "")
+        """List labeling sessions, via the dispatch seam (#4, commit 4).
 
-        try:
-            import json
-            from pathlib import Path
+        Result-producing (task-internal writer): ``GetLabelingSessionsTask`` lists
+        sessions and writes ``labeling_sessions_{request_id}.json`` on success
+        (logs only on error; declares ``result_key="labeling_sessions"``);
+        ``dispatch`` owns uniform error handling. (Slated for removal under #13.)
+        """
 
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.labeling_actions import GetLabelingSessionsTask
 
-            storage = EmbeddingStorage()
-            sessions = storage.list_labeling_sessions()
+            return GetLabelingSessionsTask.from_context(ctx)
 
-            assets_dir = Path(__file__).parent / "assets"
-            result_file = assets_dir / f"labeling_sessions_{request_id}.json"
-            result_file.write_text(
-                json.dumps(
-                    {
-                        "status": "complete",
-                        "sessions": sessions,
-                    },
-                    indent=2,
-                )
-            )
-
-        except Exception as e:
-            self.log(f"Error listing sessions: {e}", "error")
+        self._dispatch(args, build_task)
 
     def run_ask(self, args: dict[str, Any]) -> None:
         """Run the AI Ask task through the dispatch seam (#4, commit 4).
