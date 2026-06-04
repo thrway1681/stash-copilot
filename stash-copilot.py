@@ -1259,58 +1259,36 @@ class MyPlugin(StashPlugin):
             self.log(f"Error listing sessions: {e}", "error")
 
     def run_ask(self, args: dict[str, Any]) -> None:
-        """
-        Run the AI Ask task - answer questions using tools.
+        """Run the AI Ask task through the dispatch seam (#4, commit 4).
 
-        Args:
-            args: Task arguments containing the question and LLM settings
+        Result-producing: ``AskTask`` writes its own fixed-name
+        ``assets/last_ask.json`` (declares ``result_key="last_ask"``);
+        ``from_context`` resolves the text-LLM config + question, ``on_result``
+        logs the answer, and ``dispatch`` owns the uniform 4-clause error handling
+        this handler used to repeat. The empty-question guard stays here (before
+        the seam) so an empty question is a clean no-op, not a task error.
         """
-        try:
-            from stash_ai.config import get_text_llm_settings
+        question = args.get("question", "")
+        if not question:
+            self.error("No question provided")
+            return
+
+        self.log(f"AI Ask: {question}", "info")
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.ask import AskTask
 
-            question = args.get("question", "")
-            if not question:
-                self.error("No question provided")
-                return
+            return AskTask.from_context(ctx)
 
-            self.log(f"AI Ask: {question}", "info")
-
-            # Get plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get text LLM settings
-            text_llm = get_text_llm_settings(plugin_settings, args)
-            self.log(f"Using LLM: {text_llm.provider}/{text_llm.model}", "info")
-
-            llm_config = text_llm.to_config()
-
-            # Create and run the task
-            task = AskTask(
-                stash=self.stash_client,
-                llm_config=llm_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            answer = task.run(question)
-
-            # Output the answer
+        def on_result(_task: Any, answer: Any) -> None:
             self.log("=" * 50, "info")
             self.log("AI ANSWER", "info")
             self.log("=" * 50, "info")
-            for line in answer.split("\n"):
+            for line in str(answer).split("\n"):
                 self.log(line, "info")
             self.log("=" * 50, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import Stash AI modules: {e}")
-        except ConnectionError as e:
-            self.error(f"Connection error: {e}")
-        except RuntimeError as e:
-            self.error(f"Task failed: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_chat(self, args: dict[str, Any]) -> None:
         """

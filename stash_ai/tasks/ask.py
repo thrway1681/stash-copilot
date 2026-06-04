@@ -12,6 +12,7 @@ from ..prompts.loader import get_prompt
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 # Fallback system prompt (used if YAML file not found)
@@ -47,6 +48,12 @@ class AskTask:
     provide accurate answers based on actual library data.
     """
 
+    #: Frontend result-file key (declarative for the dispatch-seam guard). The
+    #: task writes its own fixed-name ``assets/last_ask.json`` via
+    #: :meth:`_save_result` rather than routing through ``ResultStore``, so the
+    #: UI's fixed-path polling contract is preserved.
+    result_key = "last_ask"
+
     def __init__(
         self,
         stash: "StashClient",
@@ -67,13 +74,40 @@ class AskTask:
         self.llm_config = llm_config
         self.log = log_callback or (lambda msg, level: None)
         self.progress = progress_callback or (lambda cur, total: None)
+        # Run param resolved by ``from_context``; ``run()`` falls back to it when
+        # called with no arguments (as the dispatch seam does).
+        self.question: str = ""
 
-    def run(self, question: str) -> str:
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "AskTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the text-LLM config (like ``StatsSummaryTask``) and caches the
+        ``question`` from args. Result-producing: declares ``result_key`` but
+        writes its own fixed-name file in :meth:`run` (see the class attr).
+        """
+        from ..config import get_text_llm_settings
+
+        text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
+        ctx.log(f"Using LLM: {text_llm.provider}/{text_llm.model}", "info")
+
+        task = cls(
+            stash=ctx.stash,
+            llm_config=text_llm.to_config(),
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+        task.question = ctx.args.get("question", "")
+        return task
+
+    def run(self, question: str | None = None) -> str:
         """
         Run the ask task with a user question.
 
         Args:
-            question: The user's question about their library
+            question: The user's question about their library. ``None`` falls
+                back to the ``from_context``-resolved value (so the dispatch seam
+                can call ``run()`` with no arguments).
 
         Returns:
             The agent's answer
@@ -82,6 +116,8 @@ class AskTask:
             ConnectionError: If LLM is not accessible
             RuntimeError: If the task fails
         """
+        if question is None:
+            question = self.question
         self.log(f"Processing question: {question}", "info")
         self.progress(0, 2)
 
