@@ -29,6 +29,7 @@ from .frame_extractor import (
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 @dataclass
@@ -134,6 +135,12 @@ class EmbedScenesTask:
         self.log = log_callback or (lambda msg, level: None)
         self.progress = progress_callback or (lambda cur, total: None)
 
+        # Run-time selectors resolved by ``from_context``; ``run()`` reads these
+        # to choose single-scene vs batch mode (the dispatch seam calls ``run()``
+        # with no arguments).
+        self.scene_id: int | None = None
+        self.force: bool = False
+
         # Initialize providers lazily
         self._vlm: Any | None = None
         self._embedder: Any | None = None
@@ -216,6 +223,143 @@ class EmbedScenesTask:
     def __del__(self) -> None:
         """Destructor - ensure resources are freed."""
         self.cleanup()
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "EmbedScenesTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Reproduces the handler's full config resolution — the CLIP-vs-VLM-text
+        decision (``use_clip``), the text/image :class:`EmbeddingConfig`s, the VLM
+        config, and :class:`EmbedConfig` — and caches the ``scene_id``/``force``
+        run selectors for :meth:`run`. Log-only: declares no ``result_key``; the
+        result is logged by the handler's ``on_result``, never written to a file.
+        """
+        from ..config import get_text_llm_settings, get_vision_llm_settings
+
+        ctx.log("Initializing scene embedding generation...", "info")
+        ctx.log(f"Plugin settings: {ctx.plugin_settings}", "debug")
+
+        # Image embedding config (CLIP/OpenCLIP/SigLIP) — checked first to decide
+        # whether a VLM is needed for visual embeddings.
+        image_embedding_config = None
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+
+        ctx.log(
+            f"Image embedding config: provider={image_provider}, model={image_model}, device={image_device}",
+            "info",
+        )
+        use_clip = bool(image_provider and image_model)
+
+        if use_clip:
+            image_embedding_config = EmbeddingConfig(
+                provider=cast("str", image_provider),
+                model=cast("str", image_model),
+                device=image_device,
+            )
+            ctx.log(
+                f"Using CLIP-style embeddings: {image_provider}/{image_model} on {image_device}",
+                "info",
+            )
+            ctx.log(
+                "VLM will NOT be used for visual embeddings (CLIP embeds images directly)",
+                "info",
+            )
+        else:
+            ctx.log(
+                "No image embedder configured - will use VLM text descriptions for visual embeddings",
+                "info",
+            )
+
+        # Text LLM settings (for the base_url used by the Ollama embedding model).
+        text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
+
+        # Text embedding model (metadata: performers, tags, studio). Only needed
+        # when NOT using CLIP (CLIP embeds text too).
+        embedding_model = (
+            ctx.args.get("embedding_model")
+            or ctx.plugin_settings.get("embedding_model")
+            or "nomic-embed-text"
+        )
+
+        if use_clip:
+            ctx.log(
+                f"Using {image_provider}/{image_model} for both visual AND metadata embeddings",
+                "info",
+            )
+            embedding_config = EmbeddingConfig(
+                provider=cast("str", image_provider),
+                model=cast("str", image_model),
+                device=image_device,
+            )
+        else:
+            ctx.log(f"Using Ollama text embedding model: {embedding_model}", "info")
+            embedding_config = EmbeddingConfig(
+                provider="ollama",
+                model=embedding_model,
+                base_url=text_llm.base_url,
+            )
+
+        # Vision LLM — only a fallback when CLIP is not configured.
+        vision_llm = get_vision_llm_settings(ctx.plugin_settings, ctx.args)
+        vlm_config = vision_llm.to_config()
+        if not use_clip:
+            ctx.log(
+                f"VLM for visual descriptions: {vision_llm.provider}/{vision_llm.model}", "info"
+            )
+
+        visual_weight = float(
+            ctx.args.get("visual_weight") or ctx.plugin_settings.get("embed_visual_weight") or "0.7"
+        )
+
+        # Frame extraction settings (shared with the vision task).
+        frame_interval = float(ctx.plugin_settings.get("vision_frame_interval") or "10")
+        fps_rate = 1.0 / frame_interval
+        min_frames = int(ctx.plugin_settings.get("vision_min_frames") or "1")
+        max_frames = int(ctx.plugin_settings.get("vision_max_frames") or "0")
+        num_workers = int(ctx.plugin_settings.get("embed_num_workers") or "2")
+
+        embed_config = EmbedConfig(
+            visual_weight=visual_weight,
+            use_cached_descriptions=True,
+            fps_rate=fps_rate,
+            min_frames=min_frames,
+            max_frames=max_frames,
+            num_workers=num_workers,
+        )
+
+        ctx.log(f"Visual embedding weight: {visual_weight}", "info")
+        ctx.log(
+            f"Frame extraction: interval={frame_interval}s (fps={fps_rate}), min={min_frames}, max={max_frames}",
+            "info",
+        )
+        ctx.log(f"Scene workers: {num_workers}", "info")
+
+        task = cls(
+            stash=ctx.stash,
+            vlm_config=vlm_config,
+            embedding_config=embedding_config,
+            image_embedding_config=image_embedding_config,
+            embed_config=embed_config,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+
+        # Single-scene mode iff a truthy scene_id arg was supplied (int("0")==0 is
+        # still single-scene, matching the old handler's `if scene_id:` + int()).
+        scene_id = ctx.args.get("scene_id")
+        task.scene_id = int(scene_id) if scene_id else None
+        task.force = ctx.args.get("force", "").lower() == "true"
+        return task
+
+    def run(self) -> dict[str, Any]:
+        """Embed a single scene or all scenes (mode from the cached selectors). Log-only."""
+        if self.scene_id is not None:
+            self.log(f"Embedding single scene: {self.scene_id}", "info")
+            return self.embed_scene(self.scene_id, force=self.force, success_tag="Embedded")
+        self.log("Embedding all scenes...", "info")
+        return self.embed_all(force=self.force, success_tag="Embedded")
 
     def embed_scene(
         self,

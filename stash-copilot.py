@@ -1633,166 +1633,32 @@ class MyPlugin(StashPlugin):
             self.error(f"Unexpected error: {e}")
 
     def run_embed_scenes(self, args: dict[str, Any]) -> None:
-        """
-        Run the scene embedding generation task.
+        """Run scene embedding generation through the dispatch seam (#4, commit 4).
 
-        Args:
-            args: Task arguments containing optional scene_id and force flag
+        Log-only: ``EmbedScenesTask.from_context`` resolves the full embedding
+        config (the CLIP-vs-VLM-text path) and the scene_id/force selectors from
+        the ``TaskContext``; ``run()`` embeds one scene or all; ``on_result`` logs
+        the result banner; ``dispatch`` owns the uniform 4-clause error handling
+        this handler used to repeat.
         """
         self.log("=== EMBED SCENES TASK STARTED ===", "info")
         self.log(f"Args received: {args}", "debug")
 
-        try:
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.embed_scenes import EmbedScenesTask
+
+            return EmbedScenesTask.from_context(ctx)
+
+        def on_result(_task: Any, result: Any) -> None:
             import json as json_module
 
-            from stash_ai.config import get_text_llm_settings, get_vision_llm_settings
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.tasks.embed_scenes import EmbedConfig, EmbedScenesTask
-
-            self.log("Initializing scene embedding generation...", "info")
-
-            # Get plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            self.log(f"Plugin settings: {plugin_settings}", "debug")
-
-            # Image embedding config (CLIP/OpenCLIP/SigLIP) - check first to determine if VLM is needed
-            image_embedding_config = None
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            self.log(
-                f"Image embedding config: provider={image_provider}, model={image_model}, device={image_device}",
-                "info",
-            )
-            use_clip = bool(image_provider and image_model)
-
-            if use_clip:
-                image_embedding_config = EmbeddingConfig(
-                    provider=cast("str", image_provider),
-                    model=cast("str", image_model),
-                    device=image_device,
-                )
-                self.log(
-                    f"Using CLIP-style embeddings: {image_provider}/{image_model} on {image_device}",
-                    "info",
-                )
-                self.log(
-                    "VLM will NOT be used for visual embeddings (CLIP embeds images directly)",
-                    "info",
-                )
-            else:
-                self.log(
-                    "No image embedder configured - will use VLM text descriptions for visual embeddings",
-                    "info",
-                )
-
-            # Get text LLM settings (for base_url used by Ollama embedding model)
-            text_llm = get_text_llm_settings(plugin_settings, args)
-
-            # Text embedding model config (for metadata: performers, tags, studio)
-            # Only needed if NOT using CLIP (CLIP can embed text too)
-            embedding_model = (
-                args.get("embedding_model")
-                or plugin_settings.get("embedding_model")
-                or "nomic-embed-text"
-            )
-
-            if use_clip:
-                # When using CLIP, we use CLIP for both image and text embeddings
-                # No Ollama text embedding needed
-                self.log(
-                    f"Using {image_provider}/{image_model} for both visual AND metadata embeddings",
-                    "info",
-                )
-                embedding_config = EmbeddingConfig(
-                    provider=cast("str", image_provider),
-                    model=cast("str", image_model),
-                    device=image_device,
-                )
-            else:
-                self.log(f"Using Ollama text embedding model: {embedding_model}", "info")
-                embedding_config = EmbeddingConfig(
-                    provider="ollama",
-                    model=embedding_model,
-                    base_url=text_llm.base_url,
-                )
-
-            # Get vision LLM settings - only needed as fallback if CLIP not configured
-            vision_llm = get_vision_llm_settings(plugin_settings, args)
-            vlm_config = vision_llm.to_config()
-            if not use_clip:
-                self.log(
-                    f"VLM for visual descriptions: {vision_llm.provider}/{vision_llm.model}", "info"
-                )
-
-            # Embedding task config
-            visual_weight = float(
-                args.get("visual_weight") or plugin_settings.get("embed_visual_weight") or "0.7"
-            )
-
-            # Get frame extraction settings (shared with vision task)
-            frame_interval = float(plugin_settings.get("vision_frame_interval") or "10")
-            fps_rate = 1.0 / frame_interval  # Convert interval to fps
-            min_frames = int(plugin_settings.get("vision_min_frames") or "1")
-            max_frames = int(plugin_settings.get("vision_max_frames") or "0")
-
-            # Parallel processing settings
-            num_workers = int(plugin_settings.get("embed_num_workers") or "2")
-
-            embed_config = EmbedConfig(
-                visual_weight=visual_weight,
-                use_cached_descriptions=True,
-                fps_rate=fps_rate,
-                min_frames=min_frames,
-                max_frames=max_frames,
-                num_workers=num_workers,
-            )
-
-            self.log(f"Visual embedding weight: {visual_weight}", "info")
-            self.log(
-                f"Frame extraction: interval={frame_interval}s (fps={fps_rate}), min={min_frames}, max={max_frames}",
-                "info",
-            )
-            self.log(f"Scene workers: {num_workers}", "info")
-
-            # Create task
-            task = EmbedScenesTask(
-                stash=self.stash_client,
-                vlm_config=vlm_config,
-                embedding_config=embedding_config,
-                image_embedding_config=image_embedding_config,
-                embed_config=embed_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            # Check for single scene or batch mode
-            scene_id = args.get("scene_id")
-            force = args.get("force", "").lower() == "true"
-
-            if scene_id:
-                self.log(f"Embedding single scene: {scene_id}", "info")
-                result = task.embed_scene(int(scene_id), force=force, success_tag="Embedded")
-            else:
-                self.log("Embedding all scenes...", "info")
-                result = task.embed_all(force=force, success_tag="Embedded")
-
-            # Output result
             self.log("=" * 50, "info")
             self.log("EMBEDDING RESULT", "info")
             self.log("=" * 50, "info")
             self.log(json_module.dumps(result, indent=2), "info")
             self.log("=" * 50, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import embedding modules: {e}")
-        except ConnectionError as e:
-            self.error(f"Connection error: {e}")
-        except RuntimeError as e:
-            self.error(f"Task failed: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_find_similar(self, args: dict[str, Any]) -> None:
         """
