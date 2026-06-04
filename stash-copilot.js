@@ -68,7 +68,7 @@
         searchScenesByText:  { name: 'Search Scenes by Text', resultKey: 'search_results',   keying: 'request_id', defaultArgs: { limit: '240', offset: '0' }, pollTimeout: 60000 },
 
         // ---- tag gaps / suggestions / dedup ----
-        detectTagGaps:       { name: 'Detect Tag Gaps',      resultKey: 'tag_gaps',        keying: 'request_id', defaultArgs: { force: 'false' }, pollTimeout: 60000 },
+        detectTagGaps:       { name: 'Detect Tag Gaps',      resultKey: 'tag_gaps',        keying: 'request_id', defaultArgs: { force: 'false' }, pollTimeout: 600000 },
         getSceneTagGaps:     { name: 'Get Scene Tag Gaps',   resultKey: 'tag_gaps_scene',  keying: 'request_id', defaultArgs: {}, pollTimeout: 30000 },
         previewTagImpact:    { name: 'Preview Tag Impact',   resultKey: 'tag_preview',     keying: 'request_id', defaultArgs: {}, pollTimeout: 15000 },
         getTagSuggestions:   { name: 'Get Tag Suggestions',  resultKey: 'tag_suggestions', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
@@ -6664,77 +6664,58 @@
         detectBtn.innerHTML = '<span class="stash-copilot-spinner"></span> Detecting...';
         statusEl.textContent = 'Analyzing frames against tag embeddings...';
         if (emptyEl) emptyEl.style.display = 'none';
-        const requestId = `tag_gaps_${Date.now()}`;
-        state.tagGapsRequestId = requestId;
         try {
             const forceCheck = modal.querySelector('.stash-copilot-tag-gaps-force-check');
             const force = forceCheck && forceCheck.checked ? 'true' : 'false';
-            await runPluginTask('Detect Tag Gaps', { request_id: requestId, force: force });
-            pollTagGapsResults(modal, requestId);
+
+            // dispatchTask (#5) owns invocation + polling. Detect is long-running
+            // (10min budget from the registry); 'processing' streams a progress bar.
+            const data = await dispatchTask('detectTagGaps', { force }, {
+                isDone: (d) => d.status === 'complete' || d.status === 'error',
+                onPoll: (d) => {
+                    if (d.status !== 'processing') return;
+                    const progressEl = modal.querySelector('.stash-copilot-tag-gaps-progress');
+                    const barEl = modal.querySelector('.stash-copilot-tag-gaps-progress-bar');
+                    const textEl = modal.querySelector('.stash-copilot-tag-gaps-progress-text');
+                    if (progressEl) progressEl.style.display = 'flex';
+                    if (barEl) barEl.style.width = `${d.progress || 0}%`;
+                    if (textEl) {
+                        let msg = d.status_message || 'Processing...';
+                        if (d.scenes_done != null && d.scenes_total != null) {
+                            msg += ` (${d.scenes_done}/${d.scenes_total} scenes)`;
+                        }
+                        textEl.textContent = msg;
+                    }
+                    const st = modal.querySelector('.stash-copilot-tag-gaps-status');
+                    if (st) st.textContent = d.status_message || 'Processing...';
+                }
+            });
+
+            const progressEl = modal.querySelector('.stash-copilot-tag-gaps-progress');
+            if (progressEl) progressEl.style.display = 'none';
+
+            if (data.status === 'error') {
+                state.tagGapsLoading = false;
+                detectBtn.disabled = false;
+                detectBtn.textContent = 'Detect Tag Gaps';
+                statusEl.textContent = `Error: ${data.error || 'Unknown'}`;
+                return;
+            }
+
+            state.tagGapsData = data;
+            state.tagGapsLoading = false;
+            await renderTagGapsResults(modal, data);
         } catch (e) {
             log(`Detect Tag Gaps error: ${e.message}`, 'error');
             state.tagGapsLoading = false;
             detectBtn.disabled = false;
             detectBtn.textContent = 'Detect Tag Gaps';
-            statusEl.textContent = `Error: ${e.message}`;
+            const progressEl = modal.querySelector('.stash-copilot-tag-gaps-progress');
+            if (progressEl) progressEl.style.display = 'none';
+            statusEl.textContent = /timed out/i.test(e.message || '')
+                ? 'Timed out waiting for results'
+                : `Error: ${e.message}`;
         }
-    }
-
-    function pollTagGapsResults(modal, requestId) {
-        const resultFile = `/plugin/stash-copilot/assets/tag_gaps_${requestId}.json`;
-        const interval = setInterval(async () => {
-            if (state.tagGapsRequestId !== requestId) {
-                clearInterval(interval);
-                return;
-            }
-            try {
-                const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data.status === 'complete') {
-                        clearInterval(interval);
-                        state.tagGapsData = data;
-                        state.tagGapsLoading = false;
-                        const progressEl = modal.querySelector('.stash-copilot-tag-gaps-progress');
-                        if (progressEl) progressEl.style.display = 'none';
-                        await renderTagGapsResults(modal, data);
-                    } else if (data.status === 'error') {
-                        clearInterval(interval);
-                        state.tagGapsLoading = false;
-                        const progressEl = modal.querySelector('.stash-copilot-tag-gaps-progress');
-                        if (progressEl) progressEl.style.display = 'none';
-                        const btn = modal.querySelector('.stash-copilot-tag-gaps-detect-btn');
-                        const st = modal.querySelector('.stash-copilot-tag-gaps-status');
-                        if (btn) { btn.disabled = false; btn.textContent = 'Detect Tag Gaps'; }
-                        if (st) st.textContent = `Error: ${data.error || 'Unknown'}`;
-                    } else if (data.status === 'processing') {
-                        const progressEl = modal.querySelector('.stash-copilot-tag-gaps-progress');
-                        const barEl = modal.querySelector('.stash-copilot-tag-gaps-progress-bar');
-                        const textEl = modal.querySelector('.stash-copilot-tag-gaps-progress-text');
-                        if (progressEl) progressEl.style.display = 'flex';
-                        if (barEl) barEl.style.width = `${data.progress || 0}%`;
-                        if (textEl) {
-                            let msg = data.status_message || 'Processing...';
-                            if (data.scenes_done != null && data.scenes_total != null) {
-                                msg += ` (${data.scenes_done}/${data.scenes_total} scenes)`;
-                            }
-                            textEl.textContent = msg;
-                        }
-                        const statusEl = modal.querySelector('.stash-copilot-tag-gaps-status');
-                        if (statusEl) statusEl.textContent = data.status_message || 'Processing...';
-                    }
-                }
-            } catch (e) { /* not ready yet */ }
-        }, 1500);
-
-        setTimeout(() => {
-            clearInterval(interval);
-            if (state.tagGapsLoading) {
-                state.tagGapsLoading = false;
-                const statusEl = modal.querySelector('.stash-copilot-tag-gaps-status');
-                if (statusEl) statusEl.textContent = 'Timed out waiting for results';
-            }
-        }, 600000); // 10 min timeout
     }
 
     async function renderTagGapsResults(modal, data) {

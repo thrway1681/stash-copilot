@@ -117,4 +117,26 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('AI Insights modal: request_id-keyed detect_tag_gaps resolves via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    // The plugin injects an "AI Insights" navbar button that opens a modal.
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    // Switch to the Tag Gaps tab and run detection (request_id-keyed -> tag_gaps_*).
+    await page.locator('.stash-copilot-insights-tab[data-tab="tag_gaps"]').click();
+    const detectBtn = page.locator('.stash-copilot-tag-gaps-detect-btn');
+    await detectBtn.click();
+
+    // The fixture (status:complete, empty scenes) resolves to the summary + the
+    // button flipping to "Re-detect".
+    await expect(detectBtn).toHaveText(/Re-detect/, { timeout: 20000 });
+    await expect(page.locator('.stash-copilot-tag-gaps-summary')).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });
