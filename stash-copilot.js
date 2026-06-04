@@ -226,7 +226,6 @@
         peakTotalPages: 1,
         isGeneratingPeak: false,
         peakRequestId: null,
-        peakPollInterval: null,
         // Taste Map state
         tasteMapData: null,
         tasteMapRequestId: null,
@@ -1384,9 +1383,13 @@
 
         if (!generateBtn || !contentContainer) return;
 
-        // Generate unique request ID
+        // Generation token. state.peakRequestId is also nulled on navigate-away
+        // (closeInsightsModal / switchInsightsTab) so a late result can't
+        // re-render an abandoned Peak tab (the migrated await is uncancellable,
+        // unlike the old clearInterval-able poll — PR #95 pattern).
         const requestId = `peak_${Date.now()}`;
         state.peakRequestId = requestId;
+        const myRequestId = requestId;
         state.isGeneratingPeak = true;
 
         // Update UI
@@ -1399,98 +1402,47 @@
             </div>
         `;
 
+        const resetButton = () => {
+            const btn = dropdown.querySelector('.stash-copilot-peak-generate-btn');
+            if (btn) { btn.disabled = false; btn.textContent = 'Generate'; }
+        };
+
         try {
-            // Build task parameters
-            const taskParams = {
+            // dispatchTask (#5) owns invocation + polling: recsPeak is
+            // request_id-keyed -> recommendations_{request_id}.json (60s budget).
+            // isDone is status-only because the recs result file always carries a
+            // `results` array, so the default predicate would resolve early.
+            const data = await dispatchTask('recsPeak', {
                 request_id: requestId,
-                limit: '60',  // 5 pages x 12 per page
-                scoring_method: 'base_weighted'
-            };
+                limit: '60'  // 5 pages x 12 per page
+            }, {
+                pollTimeout: 60000,
+                isDone: (d) => d && (d.status === 'complete' || d.status === 'error')
+            });
 
-            await runPluginTask('Get Recommendations (Peak Moments)', taskParams);
-            log(`Peak Moments task started (request_id: ${requestId})`);
+            // Cancellation guard: a new Generate or a navigate-away invalidated
+            // this run — drop the stale result.
+            if (state.peakRequestId !== myRequestId) return;
 
-            // Start polling for results
-            pollPeakResults(dropdown, requestId);
-
-        } catch (error) {
-            log(`Error starting Peak Moments: ${error.message}`, 'error');
             state.isGeneratingPeak = false;
-            generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate';
-            contentContainer.innerHTML = `
-                <p class="stash-copilot-peak-error">Failed to generate recommendations. Please try again.</p>
-            `;
-        }
-    }
+            resetButton();
 
-    /**
-     * Poll for Peak Moments results
-     */
-    function pollPeakResults(dropdown, requestId) {
-        if (state.peakPollInterval) {
-            clearInterval(state.peakPollInterval);
-        }
-
-        let attempts = 0;
-        const maxAttempts = 300; // 300 * 200ms = 60 seconds max
-
-        state.peakPollInterval = setInterval(async () => {
-            attempts++;
-
-            try {
-                const response = await fetch(`/plugin/stash-copilot/assets/recommendations_${requestId}.json?t=${Date.now()}`);
-
-                if (response.ok) {
-                    const data = await response.json();
-
-                    if (data.status === 'complete' || data.status === 'error') {
-                        clearInterval(state.peakPollInterval);
-                        state.peakPollInterval = null;
-                        state.isGeneratingPeak = false;
-
-                        // Update generate button
-                        const generateBtn = dropdown.querySelector('.stash-copilot-peak-generate-btn');
-                        if (generateBtn) {
-                            generateBtn.disabled = false;
-                            generateBtn.textContent = 'Generate';
-                        }
-
-                        if (data.status === 'error') {
-                            const contentContainer = dropdown.querySelector('.stash-copilot-peak-content');
-                            contentContainer.innerHTML = `
-                                <p class="stash-copilot-peak-error">${data.error || 'An error occurred'}</p>
-                            `;
-                            return;
-                        }
-
-                        // Render results
-                        renderPeakResults(dropdown, data);
-                    }
-                }
-            } catch (e) {
-                // Network error - continue polling
-                log(`Peak poll error: ${e.message}`, 'debug');
+            if (data.status === 'error') {
+                const c = dropdown.querySelector('.stash-copilot-peak-content');
+                if (c) c.innerHTML = `<p class="stash-copilot-peak-error">${data.error || 'An error occurred'}</p>`;
+                return;
             }
-
-            // Timeout check
-            if (attempts >= maxAttempts) {
-                clearInterval(state.peakPollInterval);
-                state.peakPollInterval = null;
-                state.isGeneratingPeak = false;
-
-                const generateBtn = dropdown.querySelector('.stash-copilot-peak-generate-btn');
-                if (generateBtn) {
-                    generateBtn.disabled = false;
-                    generateBtn.textContent = 'Generate';
-                }
-
-                const contentContainer = dropdown.querySelector('.stash-copilot-peak-content');
-                contentContainer.innerHTML = `
-                    <p class="stash-copilot-peak-error">Request timed out. Please try again.</p>
-                `;
-            }
-        }, 200);
+            renderPeakResults(dropdown, data);
+        } catch (error) {
+            if (state.peakRequestId !== myRequestId) return;
+            state.isGeneratingPeak = false;
+            resetButton();
+            // Preserve the original distinction: poll timeout vs task-start failure.
+            const timedOut = /timed out/i.test(error.message || '');
+            log(`Peak Moments error: ${error.message}`, 'error');
+            const c = dropdown.querySelector('.stash-copilot-peak-content');
+            if (c) c.innerHTML = `<p class="stash-copilot-peak-error">${timedOut ? 'Request timed out. Please try again.' : 'Failed to generate recommendations. Please try again.'}</p>`;
+        }
     }
 
     /**
@@ -4161,6 +4113,10 @@
         const modal = document.getElementById('stash-copilot-insights-modal');
         if (!modal) return;
 
+        // Invalidate any in-flight Peak generation so a late dispatchTask result
+        // can't re-render / mutate state after the modal is gone (PR #95 pattern).
+        state.peakRequestId = null;
+
         // Add closing class for exit animation
         modal.classList.remove('open');
         modal.classList.add('closing');
@@ -4970,6 +4926,10 @@
     }
 
     function switchInsightsTab(modal, tabName) {
+        // Switching tabs invalidates any in-flight Peak generation so its late
+        // result can't re-render the Peak tab the user navigated away from.
+        state.peakRequestId = null;
+
         setActiveTab(tabName);
         modal.setAttribute('data-active-tab', tabName);
 

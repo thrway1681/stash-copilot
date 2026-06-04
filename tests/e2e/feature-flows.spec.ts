@@ -305,6 +305,57 @@ test.describe('feature flows (stub backend)', () => {
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 
+  test('AI Insights modal: request_id-keyed Peak Moments (recsPeak) resolves via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    await page.locator('.stash-copilot-insights-tab[data-tab="peak"]').click();
+    await page.locator('.stash-copilot-peak-generate-btn').click();
+
+    // recsPeak is request_id-keyed -> recommendations_<rid>.json; the fixture's
+    // results render as peak cards once dispatchTask resolves.
+    await expect(page.locator('.stash-copilot-peak-content .stash-copilot-peak-results')).toBeVisible({
+      timeout: 20000,
+    });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
+  test('AI Insights modal: Peak generation switched-away mid-flight is dropped (cancellation guard)', async ({ page }) => {
+    // The migrated Peak generation awaits dispatchTask (uncancellable). Switching
+    // tabs nulls state.peakRequestId, so a late result must be dropped instead of
+    // re-rendering / mutating the Peak tab the user left. The stub delays
+    // recommendations (sleep 2) to make this race deterministic.
+    const pageErrors = await collectPageErrors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    await page.locator('.stash-copilot-insights-tab[data-tab="peak"]').click();
+    await page.locator('.stash-copilot-peak-generate-btn').click();
+
+    // Generation started (loading state shown synchronously, before the await).
+    await expect(page.locator('.stash-copilot-peak-content .stash-copilot-peak-loading')).toBeVisible({
+      timeout: 5000,
+    });
+
+    // Navigate away before the stub's 2s delay lands.
+    await page.locator('.stash-copilot-insights-tab[data-tab="summary"]').click();
+
+    // Wait past the delay so the now-stale result resolves; the guard must drop
+    // it — the Peak panel must NOT have rendered results.
+    await page.waitForTimeout(3500);
+    await expect(page.locator('.stash-copilot-peak-content .stash-copilot-peak-results')).toHaveCount(0);
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
   test('Tag dedup page: request_id-keyed find_duplicate_tags + merge_tags resolve via the stub', async ({ page }) => {
     const pageErrors = await collectPageErrors(page);
 
