@@ -1611,7 +1611,7 @@
         embedBtn.innerHTML = '<span class="stash-copilot-spinner"></span> Starting...';
 
         try {
-            await runPluginTask('Embed O-Moments', {});
+            await dispatchTask('embedOmoments', {});
             embedBtn.innerHTML = '✓ Task Started';
 
             // Show hint to check Stash tasks
@@ -3888,7 +3888,7 @@
 
         // Clear server-side history
         try {
-            await runPluginTask('Clear Chat', {});
+            await dispatchTask('clearChat', {});
             log('Chat history cleared');
         } catch (error) {
             log('Failed to clear chat history on server: ' + error.message, 'error');
@@ -4910,7 +4910,7 @@
                 peakEmbedBtn.disabled = true;
                 peakEmbedBtn.textContent = 'Starting...';
                 try {
-                    await runPluginTask('Embed O-Moments', {});
+                    await dispatchTask('embedOmoments', {});
                     peakEmbedBtn.textContent = 'Running...';
                     // Poll for completion
                     setTimeout(() => {
@@ -7887,7 +7887,7 @@
         const requestId = `sync_${Date.now()}`;
 
         try {
-            await runPluginTask('Sync Labeling Annotations', {
+            await dispatchTask('syncLabelingAnnotations', {
                 request_id: requestId,
                 payload: JSON.stringify(payload),
             });
@@ -13487,7 +13487,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
     async function runDescribePerformer(performerId) {
         try {
             log(`Starting describe performer task for ${performerId}`);
-            await runPluginTask('Describe Performer', {
+            await dispatchTask('describePerformer', {
                 performer_id: performerId.toString(),
                 force: 'true'
             });
@@ -13901,8 +13901,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
 
         try {
             const requestId = `dismiss_${Date.now()}`;
-            await runPluginTask('Dismiss Tag Merge', {
-                mode: 'dismiss_tag_merge',
+            await dispatchTask('dismissTagMerge', {
                 tag_a_name: candidate.tag_a.name,
                 tag_b_name: candidate.tag_b.name,
                 request_id: requestId,
@@ -14108,7 +14107,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
             clearBtn.disabled = true;
             clearBtn.textContent = '...';
             try {
-                await runPluginTask('Clear Dismissed Tags', { scene_id: String(sceneId) });
+                await dispatchTask('clearDismissedTags', { scene_id: String(sceneId) });
                 clearBtn.textContent = '✓';
                 setTimeout(() => {
                     clearBtn.textContent = '↻';
@@ -14334,7 +14333,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
                 btn.innerHTML = '<span class="btn-icon">...</span>';
 
                 try {
-                    await runPluginTask('Dismiss Suggested Tag', {
+                    await dispatchTask('dismissSuggestedTag', {
                         scene_id: String(sceneId),
                         tag_id: String(tagId)
                     });
