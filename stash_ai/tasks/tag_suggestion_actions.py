@@ -1,10 +1,10 @@
 """Tag-suggestion action tasks — log-only, side-effecting dispatch-seam tasks.
 
-These back the dismissed-tag actions on the scene Tags tab. Each is a small
-``SelfBuildingTask``: log-only (no ``result_key`` / ``ResultStore``), it performs
-an :class:`EmbeddingStorage` side effect and logs the outcome. Sibling actions
-(``apply_suggested_tag``, ``clear_dismissed_tags``) join this module as they
-migrate under #4, commit 4.
+These back the tag-suggestion actions on the scene Tags tab (apply / dismiss /
+clear). Each is a small ``SelfBuildingTask``: log-only (no ``result_key`` /
+``ResultStore``), performing a Stash or :class:`EmbeddingStorage` side effect and
+logging the outcome. ``clear_dismissed_tags`` joins this module as it migrates
+under #4, commit 4.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from stash_ai.embeddings.storage import EmbeddingStorage
 
 if TYPE_CHECKING:
+    from ..stash_client import StashClient
     from .dispatch import TaskContext
 
 
@@ -57,3 +58,75 @@ class DismissSuggestedTagTask:
             return
         self.storage.save_dismissed_tag(self.scene_id, self.tag_id)
         self.log(f"Dismissed tag {self.tag_id} for scene {self.scene_id}", "info")
+
+
+class ApplySuggestedTagTask:
+    """Apply a suggested tag to a scene via Stash (log-only).
+
+    Reads the scene's current tags, adds ``tag_id`` if not already present
+    (idempotent), and writes them back with ``sceneUpdate``. Log-only: no
+    ``result_key`` — the frontend calls it fire-and-forget. Touches no
+    embeddings, so unlike its sibling tasks it needs only the Stash client.
+    """
+
+    def __init__(
+        self,
+        stash: StashClient,
+        log_callback: Callable[[str, str], None] | None = None,
+        scene_id: int = 0,
+        tag_id: int = 0,
+    ) -> None:
+        self.stash = stash
+        self.log = log_callback or (lambda msg, level: None)
+        self.scene_id = scene_id
+        self.tag_id = tag_id
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> ApplySuggestedTagTask:
+        """Build from the standard :class:`TaskContext`.
+
+        ``scene_id`` / ``tag_id`` come from ``ctx.args``; the missing-arg guard
+        stays in :meth:`run` (dispatch always calls ``run()``) to preserve the
+        no-op-on-missing behavior. Reads nothing from plugin settings.
+        """
+        return cls(
+            stash=ctx.stash,
+            log_callback=ctx.log,
+            scene_id=int(ctx.args.get("scene_id", 0)),
+            tag_id=int(ctx.args.get("tag_id", 0)),
+        )
+
+    def run(self) -> None:
+        """Add the tag to the scene if missing; no-op + log on missing args / already-present."""
+        if not self.scene_id or not self.tag_id:
+            self.log("Missing scene_id or tag_id", "error")
+            return
+
+        # Get current tags
+        result = self.stash.call_GQL(
+            """
+            query FindScene($id: ID!) {
+                findScene(id: $id) { tags { id } }
+            }
+            """,
+            {"id": str(self.scene_id)},
+        )
+
+        current_ids = [int(t["id"]) for t in result["findScene"]["tags"]]
+        if self.tag_id in current_ids:
+            self.log("Tag already on scene", "info")
+            return
+
+        new_ids = current_ids + [self.tag_id]
+
+        # Update scene
+        self.stash.call_GQL(
+            """
+            mutation SceneUpdate($input: SceneUpdateInput!) {
+                sceneUpdate(input: $input) { id }
+            }
+            """,
+            {"input": {"id": str(self.scene_id), "tag_ids": [str(i) for i in new_ids]}},
+        )
+
+        self.log(f"Applied tag {self.tag_id} to scene {self.scene_id}", "info")

@@ -889,46 +889,20 @@ class MyPlugin(StashPlugin):
             self.error(f"Get tag suggestions failed: {e}")
 
     def run_apply_suggested_tag(self, args: dict[str, Any]) -> None:
-        """Apply a suggested tag to a scene."""
-        scene_id = int(args.get("scene_id", 0))
-        tag_id = int(args.get("tag_id", 0))
+        """Apply a suggested tag to a scene, through the dispatch seam (#4, commit 4).
 
-        if not scene_id or not tag_id:
-            self.log("Missing scene_id or tag_id", "error")
-            return
+        Log-only side effect: ``ApplySuggestedTagTask`` reads the scene's tags,
+        adds the suggested one if missing (idempotent), and writes back via
+        ``sceneUpdate``; the missing-arg guard and idempotency check live in its
+        ``run()``, and ``dispatch`` owns uniform error handling.
+        """
 
-        try:
-            # Get current tags
-            result = self.stash_client.call_GQL(
-                """
-                query FindScene($id: ID!) {
-                    findScene(id: $id) { tags { id } }
-                }
-                """,
-                {"id": str(scene_id)},
-            )
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.tag_suggestion_actions import ApplySuggestedTagTask
 
-            current_ids = [int(t["id"]) for t in result["findScene"]["tags"]]
-            if tag_id in current_ids:
-                self.log("Tag already on scene", "info")
-                return
+            return ApplySuggestedTagTask.from_context(ctx)
 
-            new_ids = current_ids + [tag_id]
-
-            # Update scene
-            self.stash_client.call_GQL(
-                """
-                mutation SceneUpdate($input: SceneUpdateInput!) {
-                    sceneUpdate(input: $input) { id }
-                }
-                """,
-                {"input": {"id": str(scene_id), "tag_ids": [str(i) for i in new_ids]}},
-            )
-
-            self.log(f"Applied tag {tag_id} to scene {scene_id}", "info")
-
-        except Exception as e:
-            self.log(f"Failed to apply tag: {e}", "error")
+        self._dispatch(args, build_task)
 
     def run_dismiss_suggested_tag(self, args: dict[str, Any]) -> None:
         """Dismiss a tag suggestion for a scene, through the dispatch seam (#4, commit 4).
