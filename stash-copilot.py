@@ -1849,145 +1849,30 @@ class MyPlugin(StashPlugin):
             return {}
 
     def run_frame_analysis(self, args: dict[str, Any]) -> None:
+        """Run intra-scene frame analysis through the dispatch seam (#4, commit 4).
+
+        Analyzes frame-to-frame similarity (PCA/t-SNE/UMAP) and selects
+        representative frames. ``FrameAnalysisTask.from_context`` resolves the
+        embedding / frame-extraction / analysis config; ``run()`` writes its own
+        per-scene analysis files; ``on_result`` logs the summary; ``dispatch`` owns
+        uniform error handling. The missing-scene_id guard + the initial logs stay
+        here (before the seam).
         """
-        Run frame embedding analysis for a scene.
+        scene_id = args.get("scene_id")
+        if not scene_id:
+            self.error("scene_id is required")
+            return
 
-        Analyzes frame-to-frame similarity within a scene using dimensionality
-        reduction (PCA, t-SNE, UMAP) and selects representative frames.
+        selection_method_arg = args.get("selection_method", "not provided")
+        self.log(f"Starting frame analysis for scene {scene_id}...", "info")
+        self.log(f"Selection method from args: {selection_method_arg}", "debug")
 
-        Args:
-            args: Task arguments containing scene_id and optional parameters
-        """
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.tasks.frame_analysis import (
-                FrameAnalysisConfig,
-                FrameAnalysisTask,
-            )
-            from stash_ai.tasks.frame_extractor import FrameExtractionConfig
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.frame_analysis import FrameAnalysisTask
 
-            scene_id = args.get("scene_id")
-            if not scene_id:
-                self.error("scene_id is required")
-                return
+            return FrameAnalysisTask.from_context(ctx)
 
-            selection_method_arg = args.get("selection_method", "not provided")
-            self.log(f"Starting frame analysis for scene {scene_id}...", "info")
-            self.log(f"Selection method from args: {selection_method_arg}", "debug")
-
-            # Get plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Image embedding config (required for frame analysis)
-            image_provider = plugin_settings.get("image_embedding_provider") or "openclip"
-            image_model = plugin_settings.get("image_embedding_model") or "ViT-B-32"
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            image_embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
-            )
-            self.log(
-                f"Using image embedder: {image_provider}/{image_model} on {image_device}", "info"
-            )
-
-            # Frame extraction config
-            frame_interval = float(
-                args.get("frame_interval") or plugin_settings.get("vision_frame_interval") or "10"
-            )
-            min_frames = int(
-                args.get("min_frames") or plugin_settings.get("vision_min_frames") or "1"
-            )
-
-            # FrameExtractionConfig is fps-based; convert the seconds interval
-            # (e.g. 10s -> 0.1 fps). Guard against a zero/negative interval.
-            frame_config = FrameExtractionConfig(
-                fps_rate=(1.0 / frame_interval) if frame_interval > 0 else 0.1,
-                min_frames=min_frames,
-                max_frames=0,  # No limit for analysis
-                frame_width=640,
-            )
-
-            # Analysis config
-            n_representative = int(
-                args.get("n_representative")
-                or plugin_settings.get("frame_analysis_n_frames")
-                or "8"
-            )
-            selection_method_str = (
-                args.get("selection_method")
-                or plugin_settings.get("frame_analysis_method")
-                or "kmeans"
-            )
-            # Validate selection method
-            valid_methods = ("kmeans", "maximin", "coverage")
-            if selection_method_str not in valid_methods:
-                self.log(
-                    f"Invalid selection method '{selection_method_str}', using 'kmeans'", "warning"
-                )
-                selection_method_str = "kmeans"
-
-            self.log(f"Using selection method: {selection_method_str}", "info")
-
-            # Dynamic frame count settings
-            dynamic_frame_count_str = (
-                plugin_settings.get("frame_analysis_dynamic") or "true"
-            ).lower()
-            dynamic_frame_count = dynamic_frame_count_str in ("true", "1", "yes")
-
-            frames_per_minute = float(
-                plugin_settings.get("frame_analysis_frames_per_minute") or "1.0"
-            )
-            dynamic_min_frames = int(plugin_settings.get("frame_analysis_min_frames") or "4")
-            dynamic_max_frames = int(plugin_settings.get("frame_analysis_max_frames") or "50")
-
-            # Compare methods setting
-            compare_methods_str = (plugin_settings.get("frame_analysis_compare") or "true").lower()
-            compare_methods = compare_methods_str in ("true", "1", "yes")
-
-            # Type narrowing for Literal type
-            from typing import Literal, cast
-
-            selection_method = cast(
-                "Literal['kmeans', 'maximin', 'coverage']", selection_method_str
-            )
-
-            analysis_config = FrameAnalysisConfig(
-                n_representative=n_representative,
-                selection_method=selection_method,
-                reduction_methods=["pca", "tsne", "umap"],
-                dynamic_frame_count=dynamic_frame_count,
-                frames_per_minute=frames_per_minute,
-                min_frames=dynamic_min_frames,
-                max_frames=dynamic_max_frames,
-                compare_methods=compare_methods,
-            )
-
-            if dynamic_frame_count:
-                self.log(
-                    f"Analysis config: dynamic frames ({frames_per_minute}/min, "
-                    f"min={dynamic_min_frames}, max={dynamic_max_frames}), "
-                    f"method={selection_method}",
-                    "info",
-                )
-            else:
-                self.log(
-                    f"Analysis config: {n_representative} frames, method={selection_method}", "info"
-                )
-
-            # Create and run task
-            task = FrameAnalysisTask(
-                stash=self.stash_client,
-                image_embedding_config=image_embedding_config,
-                analysis_config=analysis_config,
-                frame_config=frame_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            result = task.run(int(scene_id))
-
+        def on_result(_task: Any, result: Any) -> None:
             if result:
                 self.log("=" * 50, "info")
                 self.log("FRAME ANALYSIS COMPLETE", "info")
@@ -2008,13 +1893,7 @@ class MyPlugin(StashPlugin):
             else:
                 self.error("Frame analysis failed")
 
-        except ImportError as e:
-            self.error(f"Failed to import frame analysis modules: {e}")
-        except Exception as e:
-            import traceback
-
-            self.error(f"Frame analysis error: {e}")
-            self.log(f"Traceback: {traceback.format_exc()}", "debug")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def check_frame_analysis(self, args: dict[str, Any]) -> None:
         """

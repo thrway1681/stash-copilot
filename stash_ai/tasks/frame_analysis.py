@@ -17,6 +17,7 @@ from .frame_extractor import ExtractedFrame, FrameExtractionConfig, FrameExtract
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 class FrameEmbedding(TypedDict):
@@ -775,16 +776,124 @@ class FrameAnalysisTask:
             config=self.analysis_config,
         )
 
-    def run(self, scene_id: int) -> FrameAnalysisResult | None:
+        # Run selector resolved by ``from_context``; ``run()`` falls back to it.
+        self.scene_id: int = 0
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "FrameAnalysisTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Reproduces the handler's full config resolution — the image-embedding
+        config (defaults ``openclip``/``ViT-B-32``), the fps-based frame-extraction
+        config, and the analysis config (selection-method validation + the
+        dynamic-frame-count settings) — with the same log lines, and caches the
+        ``scene_id`` run selector. Not a ``ResultStore`` task: ``run()`` writes its
+        own per-scene ``analysis_summary.json`` / ``analysis_status.json`` under
+        ``assets/frame_analysis_{scene_id}/``, so no ``result_key`` is declared
+        (log-only from the seam's perspective; the handler only logs a summary).
+        """
+        ps = ctx.plugin_settings
+        args = ctx.args
+
+        # Image embedding config (required for frame analysis).
+        image_provider = ps.get("image_embedding_provider") or "openclip"
+        image_model = ps.get("image_embedding_model") or "ViT-B-32"
+        image_device = ps.get("image_embedding_device") or "auto"
+        image_embedding_config = EmbeddingConfig(
+            provider=image_provider,
+            model=image_model,
+            device=image_device,
+        )
+        ctx.log(f"Using image embedder: {image_provider}/{image_model} on {image_device}", "info")
+
+        # Frame extraction config (fps-based; convert the seconds interval).
+        frame_interval = float(
+            args.get("frame_interval") or ps.get("vision_frame_interval") or "10"
+        )
+        min_frames = int(args.get("min_frames") or ps.get("vision_min_frames") or "1")
+        frame_config = FrameExtractionConfig(
+            fps_rate=(1.0 / frame_interval) if frame_interval > 0 else 0.1,
+            min_frames=min_frames,
+            max_frames=0,  # No limit for analysis
+            frame_width=640,
+        )
+
+        # Analysis config.
+        n_representative = int(
+            args.get("n_representative") or ps.get("frame_analysis_n_frames") or "8"
+        )
+        selection_method_str = (
+            args.get("selection_method") or ps.get("frame_analysis_method") or "kmeans"
+        )
+        valid_methods = ("kmeans", "maximin", "coverage")
+        if selection_method_str not in valid_methods:
+            ctx.log(f"Invalid selection method '{selection_method_str}', using 'kmeans'", "warning")
+            selection_method_str = "kmeans"
+        ctx.log(f"Using selection method: {selection_method_str}", "info")
+
+        dynamic_frame_count = (ps.get("frame_analysis_dynamic") or "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+        frames_per_minute = float(ps.get("frame_analysis_frames_per_minute") or "1.0")
+        dynamic_min_frames = int(ps.get("frame_analysis_min_frames") or "4")
+        dynamic_max_frames = int(ps.get("frame_analysis_max_frames") or "50")
+        compare_methods = (ps.get("frame_analysis_compare") or "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+        selection_method = cast("Literal['kmeans', 'maximin', 'coverage']", selection_method_str)
+        analysis_config = FrameAnalysisConfig(
+            n_representative=n_representative,
+            selection_method=selection_method,
+            reduction_methods=["pca", "tsne", "umap"],
+            dynamic_frame_count=dynamic_frame_count,
+            frames_per_minute=frames_per_minute,
+            min_frames=dynamic_min_frames,
+            max_frames=dynamic_max_frames,
+            compare_methods=compare_methods,
+        )
+
+        if dynamic_frame_count:
+            ctx.log(
+                f"Analysis config: dynamic frames ({frames_per_minute}/min, "
+                f"min={dynamic_min_frames}, max={dynamic_max_frames}), "
+                f"method={selection_method}",
+                "info",
+            )
+        else:
+            ctx.log(
+                f"Analysis config: {n_representative} frames, method={selection_method}", "info"
+            )
+
+        task = cls(
+            stash=ctx.stash,
+            image_embedding_config=image_embedding_config,
+            analysis_config=analysis_config,
+            frame_config=frame_config,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+        task.scene_id = int(args.get("scene_id", 0))
+        return task
+
+    def run(self, scene_id: int | None = None) -> FrameAnalysisResult | None:
         """
         Run frame analysis for a scene.
 
         Args:
-            scene_id: Scene ID to analyze
+            scene_id: Scene ID to analyze. ``None`` falls back to the
+                ``from_context``-resolved value (so the dispatch seam can call
+                ``run()`` with no arguments).
 
         Returns:
             FrameAnalysisResult or None if failed
         """
+        if scene_id is None:
+            scene_id = self.scene_id
         self.log(f"Starting frame analysis for scene {scene_id}", "info")
         self.progress(0, 100)
 
