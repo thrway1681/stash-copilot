@@ -5,7 +5,7 @@ import os
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..config import LLMConfig
 from ..embeddings.config import EmbeddingConfig
@@ -16,6 +16,7 @@ from ..tools import get_all_tools
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 # Fallback system prompt - kept for reference and fallback if YAML not found
@@ -526,6 +527,11 @@ class ChatTask:
         self.log = log_callback or (lambda msg, level: None)
         self.progress = progress_callback or (lambda cur, total: None)
 
+        # Run params resolved by ``from_context``; ``run()`` falls back to these
+        # when called with no arguments (as the dispatch seam does).
+        self.message: str = ""
+        self.conversation_id: str | None = None
+
         # Initialize LLM provider
         self.llm = get_provider(llm_config)
 
@@ -545,17 +551,79 @@ class ChatTask:
         os.makedirs(assets_dir, exist_ok=True)
         return assets_dir
 
-    def run(self, message: str, conversation_id: str | None = None) -> str:
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "ChatTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the text-LLM config (with the LOAD-BEARING ``max_tokens=8192``
+        that keeps tool-call argument payloads from truncating), the optional
+        image-embedding config for text-based scene search, and the excluded-tags
+        list, and caches the message/conversation_id run selectors. Log-only:
+        persists ``chat_history.json`` internally, so declares no ``result_key``.
+        """
+        from ..config import get_text_llm_settings
+
+        text_llm = get_text_llm_settings(ctx.plugin_settings, ctx.args)
+        ctx.log(f"Using LLM: {text_llm.provider}/{text_llm.model}", "info")
+
+        # Chat needs higher max_tokens than the 1024 default: tool calls may carry
+        # large argument payloads (e.g. hundreds of scene IDs); at 1024 the
+        # response truncates mid-tool-call and arguments arrive as empty strings.
+        llm_config = text_llm.to_config(max_tokens=8192)
+
+        # Image embedding config enables text-based scene search.
+        embedding_config = None
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+        if image_provider and image_model:
+            embedding_config = EmbeddingConfig(
+                provider=cast("str", image_provider),
+                model=cast("str", image_model),
+                device=image_device,
+            )
+            ctx.log(f"Text search enabled with: {image_provider}/{image_model}", "debug")
+
+        # Parse excluded tags (comma-separated string to list).
+        excluded_tags_str = ctx.plugin_settings.get("excluded_tags", "")
+        excluded_tags = (
+            [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
+            if excluded_tags_str
+            else []
+        )
+        if excluded_tags:
+            ctx.log(f"Excluding tags from AI tools: {excluded_tags}", "debug")
+
+        task = cls(
+            stash=ctx.stash,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+            excluded_tags=excluded_tags,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+        task.message = ctx.args.get("message", "")
+        task.conversation_id = ctx.args.get("conversation_id")
+        return task
+
+    def run(self, message: str | None = None, conversation_id: str | None = None) -> str:
         """
         Process a chat message.
 
         Args:
-            message: The user's message
-            conversation_id: Optional existing conversation ID to continue
+            message: The user's message. ``None`` falls back to the
+                ``from_context``-resolved value (so the dispatch seam can call
+                ``run()`` with no arguments).
+            conversation_id: Optional existing conversation ID to continue.
+                ``None`` falls back to the ``from_context``-resolved value.
 
         Returns:
             The assistant's response
         """
+        if message is None:
+            message = self.message
+        if conversation_id is None:
+            conversation_id = self.conversation_id
         self.log(f"Chat message received: {message[:100]}...", "info")
         self.progress(0, 3)
 
