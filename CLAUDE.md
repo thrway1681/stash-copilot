@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Diagram
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-04
 
 ```
 See: docs/diagrams/architecture-post-cleanup.mmd
@@ -39,9 +39,11 @@ graph TB
         OpenCLIP --> EmbedStorage --> FrameSearch
     end
 
-    subgraph Tasks["Task Handlers"]
-        Dispatch["dispatch.py"]
-        SceneVision & EmbedScenes & Recommendations
+    subgraph Tasks["Task Handlers (dispatch seam — #4)"]
+        Dispatch["dispatch()"] --> TaskContext
+        Dispatch --> FromContext["Task.from_context()"]
+        FromContext --> SceneVision & EmbedScenes & Recommendations & SearchTasks["Find/Search"]
+        Recommendations & SearchTasks --> ResultStore
     end
 
     StashPlugin --> PluginConfig
@@ -49,6 +51,8 @@ graph TB
     Tasks --> LLMRegistry
     Tasks --> Embeddings
 ```
+
+> Every task mode routes through the single `dispatch()` seam: it builds a `TaskContext`, constructs the task via `Task.from_context`, runs it, and (for result-producing tasks) persists the result via `ResultStore` (`assets/{result_key}_{request_id}.json`). The only modes that bypass the seam are the demo/hook handlers `process_all` and `process_scene`.
 
 > **IMPORTANT**: When making structural changes to the codebase (adding/removing modules, changing data flow, modifying provider patterns), you MUST update this diagram and the full diagram at `docs/diagrams/architecture-post-cleanup.mmd`.
 

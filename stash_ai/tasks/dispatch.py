@@ -71,6 +71,17 @@ class SelfBuildingTask(RunnableTask, Protocol):
 TaskT = TypeVar("TaskT", bound=RunnableTask)
 
 
+def _attribution(task_label: str) -> str:
+    """Error-message prefix naming the failing task, or empty if it never built.
+
+    A build-phase failure (bad import, missing connection) happens before the
+    task object exists, so there is no class name to attribute — those stay
+    unprefixed. Once construction succeeds, every later failure is tagged with
+    ``[TaskClassName]`` so the uniform log line still says *which* task failed.
+    """
+    return f"[{task_label}] " if task_label else ""
+
+
 def dispatch(
     *,
     log: LogCallback,
@@ -84,7 +95,9 @@ def dispatch(
     result to ``on_result`` if given. Every error branch the per-handler
     ``try/except`` used to repeat (import, connection, runtime, last-resort)
     lives here once. Failures are logged via ``log`` and never re-raised, so a
-    failing task never crashes the plugin's dispatch loop.
+    failing task never crashes the plugin's dispatch loop. Once the task is
+    constructed, error lines are prefixed with its class name (``[TaskName]``)
+    so the uniform handler still attributes the failure to a specific task.
 
     Args:
         log: Logger used for error reporting; always available even if building
@@ -96,9 +109,14 @@ def dispatch(
         on_result: Optional sink for the task and its return value (e.g. logging
             the output). Runs inside the same error boundary.
     """
+    # Class name of the constructed task, for error attribution. Empty until
+    # build_task succeeds, so build-phase failures (import/connection) stay
+    # unattributed — there is no task object to name yet.
+    task_label = ""
     try:
         ctx = build_context()
         task = build_task(ctx)
+        task_label = type(task).__name__
         result = task.run()
         if on_result is not None:
             on_result(task, result)
@@ -106,9 +124,9 @@ def dispatch(
         log(f"Failed to import Stash AI modules: {e}", "error")
         log("Make sure the stash_ai package is properly installed.", "error")
     except ConnectionError as e:
-        log(f"Connection error: {e}", "error")
+        log(f"{_attribution(task_label)}Connection error: {e}", "error")
     except RuntimeError as e:
-        log(f"Task failed: {e}", "error")
+        log(f"{_attribution(task_label)}Task failed: {e}", "error")
     except Exception as e:
         # Uniform last-resort handler: any task failure is logged, never raised.
-        log(f"Unexpected error: {e}", "error")
+        log(f"{_attribution(task_label)}Unexpected error: {e}", "error")

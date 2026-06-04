@@ -51,13 +51,18 @@ graph TB
         Clusters["ClusterEngine"]
     end
 
-    subgraph Tasks["Task Handlers"]
-        Dispatch["dispatch.py"]
+    subgraph Tasks["Task Handlers (dispatch seam — #4)"]
+        Dispatch["dispatch()"]
+        TaskContext["TaskContext"]
+        SelfBuilding["Task.from_context()"]
+        ResultStore["ResultStore"]
         SceneVision["SceneVisionTask"]
         EmbedScenes["EmbedScenesTask"]
         RecTask["RecommendationsTask"]
         ChatTask["ChatTask"]
         FrameAnalysis["FrameAnalysisTask"]
+        SearchTasks["Find/Search Tasks"]
+        ActionTasks["Labeling / EroScripts adapters"]
     end
 
     subgraph Tools["LLM Tools"]
@@ -103,14 +108,28 @@ graph TB
     RecEngine --> Clusters
     RecEngine --> EmbedStorage
 
-    %% Task dispatch — StashPlugin routes through dispatch.py seam (commit 1 of #4)
+    %% Task dispatch — EVERY mode routes through the dispatch() seam (#4):
+    %% build a TaskContext, construct the task via Task.from_context, run it,
+    %% and (for result-producing tasks) persist via ResultStore.
     StashPlugin --> Dispatch
+    Dispatch --> TaskContext
+    Dispatch --> SelfBuilding
+    SelfBuilding --> SceneVision
+    SelfBuilding --> EmbedScenes
+    SelfBuilding --> RecTask
+    SelfBuilding --> ChatTask
+    SelfBuilding --> FrameAnalysis
+    SelfBuilding --> SearchTasks
+    SelfBuilding --> ActionTasks
+    SearchTasks --> ResultStore
+    RecTask --> ResultStore
     SceneVision --> LLMRegistry
     SceneVision --> Tools
     EmbedScenes --> EmbedRegistry
     RecTask --> RecEngine
     ChatTask --> LLMRegistry
     FrameAnalysis --> LLMRegistry
+    SearchTasks --> EmbedStorage
 
     %% Tools
     DatabaseTool --> StashDB
@@ -146,7 +165,7 @@ graph TB
     class LLMRegistry,OllamaProvider,OpenRouterProvider,AnthropicProvider,OpenAIProvider,ModelCaps llm
     class EmbedRegistry,OpenCLIP,EmbedStorage,FrameSearch embeddings
     class RecEngine,Engagement,Profile,Clusters recommendations
-    class Dispatch,SceneVision,EmbedScenes,RecTask,ChatTask,FrameAnalysis tasks
+    class Dispatch,TaskContext,SelfBuilding,ResultStore,SceneVision,EmbedScenes,RecTask,ChatTask,FrameAnalysis,SearchTasks,ActionTasks tasks
     class StashDB,PluginDB,Aggregators data
     class DatabaseTool,EmbeddingsTool,VisionTool tools
     class StashCopilotError,LLMError,VisionError,EmbeddingError,StorageError,TaskError exceptions
