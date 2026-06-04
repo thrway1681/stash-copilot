@@ -8,6 +8,94 @@
     const CHAT_FILE = '/plugin/stash-copilot/assets/chat_history.json';
     const SCENE_VISION_PATH = '/plugin/stash-copilot/assets/scene_vision';
 
+    // ===================================================================
+    // Cross-stack task contract (issue #5, commit 1)
+    // -------------------------------------------------------------------
+    // The single source of truth binding a frontend action to its backend
+    // task. Until now the Stash task name and the result-file key it polls
+    // were duplicated as string literals across ~30 call sites (each with its
+    // own hand-rolled fetch/poll loop), the stash-copilot.yml task buttons,
+    // and the backend `result_key` (ResultStore). This registry declares each
+    // task once; `dispatchTask()` (commit 2) will route every invocation +
+    // poll through it, and a cross-stack guard test (commit 5) asserts this
+    // registry, the yml buttons, and the backend result keys all agree.
+    //
+    // Keyed per display-name/feature, NOT per backend mode: several entries
+    // deliberately share a `resultKey` (e.g. the recommendations variants) and
+    // differ only in `defaultArgs`.
+    //
+    // Fields (kept to simple data so the Python guard can parse the literal):
+    //   name        EXACT stash-copilot.yml task name passed to runPluginTask.
+    //   resultKey   backend `result_key` (the polled {key}_{id}.json stem), OR
+    //               a fixed-file stem when `keying` is 'fixed', OR null for
+    //               fire-and-forget tasks that poll nothing.
+    //   keying      how the result filename is derived:
+    //                 'request_id' -> `${resultKey}_${args.request_id}` (default)
+    //                 'scene_id'   -> `${resultKey}_${args.scene_id}`
+    //                 'fixed'      -> `${resultKey}` is the whole stem
+    //                 'none'       -> no result file (fire-and-forget)
+    //   defaultArgs args merged under caller args at dispatch time.
+    //   pollTimeout ms budget for the poll loop (mirrors the old attempts*interval).
+    //   poll        set false when the BACKEND writes a result file but the
+    //               frontend intentionally does not poll it (documented asymmetry).
+    //
+    // Per-task terminal-state predicates (some tasks finish on data.has_data,
+    // 'no_embeddings', 'idle', or results-length rather than status) are NOT in
+    // this data object — they are passed per call site via dispatchTask's
+    // opts.isDone, so the registry stays trivially parseable.
+    //
+    // EXCLUDED by design: the eroscripts_* tasks (own EROS_ASSET_BASE subdir +
+    // eroRunAndPoll loop + spin-off lifecycle) and yml-only/manual tasks that
+    // the frontend never invokes (e.g. Get Recommendations Performer-Based;
+    // Time Decay is a scoring_method arg on Discover/Re-watch, not a task).
+    // The guard still cross-checks the eroscripts backend keys on the yml side.
+    const TASKS = {
+        // ---- recommendations (shared mode + resultKey; per-feature defaultArgs) ----
+        recsDiscover:        { name: 'Get Recommendations (Discover)',     resultKey: 'recommendations', keying: 'request_id', defaultArgs: { rec_mode: 'discover_new', scoring_method: 'base_weighted', limit: '20' }, pollTimeout: 60000 },
+        recsRewatch:         { name: 'Get Recommendations (Re-watch)',     resultKey: 'recommendations', keying: 'request_id', defaultArgs: { rec_mode: 'rewatch',      scoring_method: 'base_weighted', limit: '20' }, pollTimeout: 60000 },
+        recsPeak:            { name: 'Get Recommendations (Peak Moments)', resultKey: 'recommendations', keying: 'request_id', defaultArgs: { rec_mode: 'o_moments',    scoring_method: 'base_weighted', limit: '20' }, pollTimeout: 60000 },
+
+        // ---- chat (fixed-name file; backend persists it, declares no result_key) ----
+        chat:                { name: 'Chat',       resultKey: 'chat_history', keying: 'fixed', defaultArgs: {}, pollTimeout: 120000 },
+        clearChat:           { name: 'Clear Chat', resultKey: null,           keying: 'none',  defaultArgs: {} },
+
+        // ---- insights ----
+        generateSummary:     { name: 'Generate Library Summary', resultKey: 'last_summary', keying: 'fixed', defaultArgs: {}, pollTimeout: 60000 },
+        buildTasteMap:       { name: 'Build Taste Map', resultKey: 'taste_map', keying: 'request_id', defaultArgs: { top_scenes: '200', scoring_method: 'base_weighted' }, pollTimeout: 60000 },
+
+        // ---- search ----
+        getEmbeddingModels:  { name: 'Get Embedding Models',  resultKey: 'embedding_models', keying: 'request_id', defaultArgs: {}, pollTimeout: 6000 },
+        searchScenesByText:  { name: 'Search Scenes by Text', resultKey: 'search_results',   keying: 'request_id', defaultArgs: { limit: '240', offset: '0' }, pollTimeout: 60000 },
+
+        // ---- tag gaps / suggestions / dedup ----
+        detectTagGaps:       { name: 'Detect Tag Gaps',      resultKey: 'tag_gaps',        keying: 'request_id', defaultArgs: { force: 'false' }, pollTimeout: 60000 },
+        getSceneTagGaps:     { name: 'Get Scene Tag Gaps',   resultKey: 'tag_gaps_scene',  keying: 'request_id', defaultArgs: {}, pollTimeout: 6000 },
+        previewTagImpact:    { name: 'Preview Tag Impact',   resultKey: 'tag_preview',     keying: 'request_id', defaultArgs: {}, pollTimeout: 15000 },
+        getTagSuggestions:   { name: 'Get Tag Suggestions',  resultKey: 'tag_suggestions', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
+        dismissSuggestedTag: { name: 'Dismiss Suggested Tag', resultKey: null, keying: 'none', defaultArgs: {} },
+        clearDismissedTags:  { name: 'Clear Dismissed Tags',  resultKey: null, keying: 'none', defaultArgs: {} },
+        findDuplicateTags:   { name: 'Find Duplicate Tags',   resultKey: 'tag_dedup', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
+        mergeTags:           { name: 'Merge Tags',            resultKey: 'tag_merge', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
+        // backend writes tag_dismiss_{request_id}.json, but the frontend treats this as fire-and-forget:
+        dismissTagMerge:     { name: 'Dismiss Tag Merge',     resultKey: 'tag_dismiss', keying: 'request_id', defaultArgs: {}, poll: false },
+
+        // ---- labeling ----
+        prepareLabelingSession:  { name: 'Prepare Labeling Session', resultKey: 'labeling_session',  keying: 'request_id', defaultArgs: { batch_size: '200' }, pollTimeout: 300000 },
+        // backend declares labeling_sync, but the frontend treats sync as fire-and-forget:
+        syncLabelingAnnotations: { name: 'Sync Labeling Annotations', resultKey: 'labeling_sync',     keying: 'request_id', defaultArgs: {}, poll: false },
+        exportLabelingDataset:   { name: 'Export Labeling Dataset',   resultKey: 'labeling_export',   keying: 'request_id', defaultArgs: { include_negatives: 'true' }, pollTimeout: 60000 },
+        getLabelingSessions:     { name: 'Get Labeling Sessions',     resultKey: 'labeling_sessions', keying: 'request_id', defaultArgs: {}, pollTimeout: 15000 },
+
+        // ---- similarity (similar_results is keyed by scene_id; request_id is an echo-back token) ----
+        findSimilarScenes:     { name: 'Find Similar Scenes',     resultKey: 'similar_results',    keying: 'scene_id',   defaultArgs: { limit: '10' }, pollTimeout: 60000 },
+        findSimilarByFrame:    { name: 'Find Similar by Frame',   resultKey: 'frame_search',       keying: 'request_id', defaultArgs: { limit: '20' }, pollTimeout: 60000 },
+        findSimilarPerformers: { name: 'Find Similar Performers', resultKey: 'similar_performers', keying: 'request_id', defaultArgs: { limit: '20' }, pollTimeout: 60000 },
+
+        // ---- fire-and-forget ----
+        describePerformer:   { name: 'Describe Performer', resultKey: null, keying: 'none', defaultArgs: { force: 'true' } },
+        embedOmoments:       { name: 'Embed O-Moments',    resultKey: null, keying: 'none', defaultArgs: {} },
+    };
+
     // State management
     const state = {
         initialized: false,
