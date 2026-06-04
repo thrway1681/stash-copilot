@@ -3209,79 +3209,34 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_embed_cached_frames(self, args: dict[str, Any]) -> None:
-        """
-        Run the cached frames embedding task.
+        """Run the cached-frames embedding backfill through the dispatch seam (#4, commit 4).
 
-        Backfills frame embeddings for scenes that have frames cached
-        but were embedded before individual frame storage was implemented.
-        This enables smart frame selection for VLM analysis.
-
-        Args:
-            args: Task arguments containing optional scene_id and force flag
+        Backfills frame embeddings for scenes whose frames were cached before
+        individual frame storage existed (enables smart frame selection for VLM
+        analysis). Log-only: ``EmbedCachedFramesTask`` resolves its config + the
+        force/scene_id selectors from the ``TaskContext`` in ``from_context``;
+        ``on_result`` logs the summary; ``dispatch`` owns uniform error handling
+        (missing image-embedding config surfaces via its RuntimeError branch).
         """
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.embed_cached_frames import EmbedCachedFramesTask
 
-            self.log("Initializing cached frame embedding backfill...", "info")
+            return EmbedCachedFramesTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get image embedding config
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if not image_provider or not image_model:
-                self.error(
-                    "Image embedding provider and model are required for frame embedding. "
-                    "Please configure image_embedding_provider and image_embedding_model in plugin settings."
-                )
+        def on_result(_task: Any, result: Any) -> None:
+            if not result:
                 return
-
-            # Build embedding config
-            embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
-            )
-
-            # Parallel processing settings (reuse embed_num_workers from main embedding task)
-            num_workers = int(plugin_settings.get("embed_num_workers") or "2")
-
-            self.log(f"Using {image_provider}/{image_model} for frame embeddings", "info")
-            self.log(f"Scene workers: {num_workers}", "info")
-
-            # Create task
-            task = EmbedCachedFramesTask(
-                stash=self.stash_client,
-                embedding_config=embedding_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                num_workers=num_workers,
-            )
-
-            # Check for specific scene or all scenes
-            scene_id_str = args.get("scene_id")
-            scene_id = int(scene_id_str) if scene_id_str else None
-            force = str(args.get("force", "")).lower() == "true"
-
-            result = task.run(force=force, scene_id=scene_id)
-
             self.log("Embed Cached Frames complete:", "info")
             self.log(f"  Total: {result.get('total', 0)}", "info")
             self.log(f"  Processed: {result.get('processed', 0)}", "info")
             self.log(f"  Skipped: {result.get('skipped', 0)}", "info")
             self.log(f"  Errors: {result.get('errors', 0)}", "info")
-
             if result.get("error_details"):
                 for err in result["error_details"][:5]:
                     self.log(f"  - {err}", "warning")
 
-        except ImportError as e:
-            self.error(f"Failed to import embed cached frames modules: {e}")
-        except Exception as e:
-            self.error(f"Embed cached frames failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def _cleanup_deleted_scene(self, scene_id: int) -> None:
         """

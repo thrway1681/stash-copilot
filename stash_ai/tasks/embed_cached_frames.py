@@ -19,6 +19,7 @@ from ..embeddings.storage import EmbeddingStorage
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 class EmbedCachedFramesTask:
@@ -57,6 +58,11 @@ class EmbedCachedFramesTask:
         self.progress = progress_callback or (lambda cur, total: None)
         self.num_workers = num_workers
 
+        # Run-time selectors resolved by ``from_context``; ``run()`` falls back to
+        # these when called with no arguments (as the dispatch seam does).
+        self.force: bool = False
+        self.scene_id: int | None = None
+
         # Initialize storage with model key
         self.storage = EmbeddingStorage(model_key=embedding_config.model_key)
 
@@ -91,21 +97,73 @@ class EmbedCachedFramesTask:
         """Destructor - ensure resources are freed."""
         self.cleanup()
 
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "EmbedCachedFramesTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding config + worker count from plugin settings
+        (raising on missing provider/model so dispatch surfaces it) and caches the
+        ``force`` / ``scene_id`` run selectors for :meth:`run`. Log-only: declares
+        no ``result_key`` — the handler logs the summary via ``on_result`` and no
+        result file is written.
+        """
+        ctx.log("Initializing cached frame embedding backfill...", "info")
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+        if not image_provider or not image_model:
+            raise RuntimeError(
+                "Image embedding provider and model are required for frame embedding. "
+                "Please configure image_embedding_provider and image_embedding_model in plugin settings."
+            )
+
+        embedding_config = EmbeddingConfig(
+            provider=image_provider,
+            model=image_model,
+            device=image_device,
+        )
+        # Reuse embed_num_workers from the main embedding task.
+        num_workers = int(ctx.plugin_settings.get("embed_num_workers") or "2")
+
+        ctx.log(f"Using {image_provider}/{image_model} for frame embeddings", "info")
+        ctx.log(f"Scene workers: {num_workers}", "info")
+
+        task = cls(
+            stash=ctx.stash,
+            embedding_config=embedding_config,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            num_workers=num_workers,
+        )
+
+        task.force = str(ctx.args.get("force", "")).lower() == "true"
+        scene_id_str = ctx.args.get("scene_id")
+        task.scene_id = int(scene_id_str) if scene_id_str else None
+        return task
+
     def run(
         self,
-        force: bool = False,
+        force: bool | None = None,
         scene_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Embed cached frames for scenes missing frame embeddings.
 
         Args:
-            force: If True, re-embed even if frame embeddings exist
-            scene_id: If provided, only process this scene
+            force: If True, re-embed even if frame embeddings exist. ``None``
+                falls back to the ``from_context``-resolved value (so the dispatch
+                seam can call ``run()`` with no arguments).
+            scene_id: If provided, only process this scene. ``None`` falls back to
+                the ``from_context``-resolved value.
 
         Returns:
             Summary with counts of processed, skipped, and errors
         """
+        if force is None:
+            force = self.force
+        if scene_id is None:
+            scene_id = self.scene_id
         try:
             return self._run_impl(force=force, scene_id=scene_id)
         finally:
