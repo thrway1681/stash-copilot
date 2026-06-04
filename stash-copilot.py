@@ -629,50 +629,33 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_get_scene_tag_gaps(self, args: dict[str, Any]) -> None:
-        """Get tag gap detail for a specific scene (sidebar query)."""
-        try:
-            from stash_ai.tasks.tag_gap_detection import TagGapDetectionTask
+        """Get tag-gap detail for a scene (sidebar query), via the dispatch seam (#4).
 
-            scene_id = args.get("scene_id")
-            if not scene_id:
-                self.error("scene_id argument required")
-                return
+        Result-producing: ``SceneTagGapsTask`` wraps
+        ``TagGapDetectionTask.get_scene_gaps_detail``; ``on_result`` persists the
+        result through the seam's ResultStore as ``tag_gaps_scene_{request_id}.
+        json`` (request_id defaults to ``scene_{scene_id}``, matching the old
+        handler); ``dispatch`` owns uniform error handling. The missing-scene_id
+        guard stays here (before the seam).
+        """
+        scene_id = args.get("scene_id")
+        if not scene_id:
+            self.error("scene_id argument required")
+            return
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
+        # Preserve the old filename: request_id defaults to "scene_{scene_id}",
+        # so ResultStore writes tag_gaps_scene_{request_id}.json.
+        request_id = args.get("request_id", f"scene_{scene_id}")
 
-            from stash_ai.embeddings.config import EmbeddingConfig
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.tag_gap_detection import SceneTagGapsTask
 
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
+            return SceneTagGapsTask.from_context(ctx)
 
-            task = TagGapDetectionTask(
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
+        def on_result(task: Any, result: Any) -> None:
+            self._result_store().save(task.result_key, request_id, result)
 
-            result = task.get_scene_gaps_detail(int(scene_id))
-
-            # Write basic result immediately so frontend doesn't timeout
-            request_id = args.get("request_id", f"scene_{scene_id}")
-            assets_dir = os.path.join(PLUGIN_DIR, "assets")
-            os.makedirs(assets_dir, exist_ok=True)
-            filepath = os.path.join(assets_dir, f"tag_gaps_scene_{request_id}.json")
-
-            with open(filepath, "w") as f:
-                json.dump(result, f)
-
-            # Similar scenes computation is slow (O(N) queries across all scenes)
-            # Skip for now - requires optimization (pre-computed avg embeddings)
-            # TODO: Optimize find_similar_uncovered with pre-computed scene vectors
-
-        except Exception as e:
-            self.error(f"Get scene tag gaps failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_preview_tag_impact(self, args: dict[str, Any]) -> None:
         """Preview the coverage impact of a hypothetical tag on a scene."""

@@ -1027,3 +1027,48 @@ class TagGapDetectionTask:
             "max_similarity": round(max_sim, 4),
             "threshold": round(threshold, 4),
         }
+
+
+class SceneTagGapsTask:
+    """Tag-gap detail for a single scene (the sidebar query).
+
+    A thin dispatch-seam wrapper around
+    :meth:`TagGapDetectionTask.get_scene_gaps_detail` (which is a separate entry
+    point from the full-library ``run()`` pipeline). Result-producing: the handler
+    routes ``run()``'s dict through the seam's ``ResultStore`` keyed by
+    :attr:`result_key`.
+    """
+
+    result_key = "tag_gaps_scene"
+
+    def __init__(self, detector: TagGapDetectionTask, scene_id: int = 0) -> None:
+        self._detector = detector
+        self.scene_id = scene_id
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> SceneTagGapsTask:
+        """Build from a standard :class:`TaskContext`.
+
+        Resolves the image-embedding ``model_key`` (default ``"siglip"``, matching
+        the old handler) and the ``scene_id`` from args, wrapping a fresh
+        :class:`TagGapDetectionTask`.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        model_key = "siglip"
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+
+        detector = TagGapDetectionTask(
+            stash=ctx.stash,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            model_key=model_key,
+        )
+        return cls(detector=detector, scene_id=int(ctx.args.get("scene_id", 0)))
+
+    def run(self) -> dict[str, Any]:
+        """Return the per-scene tag-gap detail for the resolved scene."""
+        return self._detector.get_scene_gaps_detail(self.scene_id)
