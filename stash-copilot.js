@@ -12691,66 +12691,50 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
             taskArgs.seed_weight = String(sceneRecsState.seedWeight);
         }
 
+        const recsKey = sceneRecsState.mode === 'rewatch' ? 'recsRewatch' : 'recsDiscover';
         try {
             const weightInfo = sceneRecsState.mode === 'rewatch'
                 ? `engagement_weight ${sceneRecsState.engagementWeight}`
                 : `seed_weight ${sceneRecsState.seedWeight}`;
             log(`Firing ${taskName} task (${requestId}, ${weightInfo})`);
 
-            await runPluginTask(taskName, taskArgs);
+            // dispatchTask (#5) owns invocation + polling: recsDiscover/recsRewatch
+            // are request_id-keyed -> recommendations_{request_id}.json. pollTimeout
+            // 120000 preserves the real budget (registry default 60000 would halve
+            // it); isDone is status-only because the recs result file always carries
+            // a `results` array, so the default predicate would resolve early.
+            const data = await dispatchTask(recsKey, taskArgs, {
+                pollTimeout: 120000,
+                isDone: (d) => d && (d.status === 'complete' || d.status === 'error')
+            });
 
-            // Poll for single result file
-            pollSidebarRecsResults(panel, requestId);
+            // Supersede guard: a new in-panel search (mode subtab, recency, weight
+            // slider, or refresh) minted a fresh sceneRecsState.requestId — drop
+            // this stale result so it can't clobber the new view. A navigate-away
+            // is left to complete into the hidden panel; the sidebar keeps no
+            // cross-session cache, so a late render is benign.
+            if (sceneRecsState.requestId !== requestId) return;
 
-        } catch (e) {
-            log(`Recs search error: ${e.message}`, 'error');
-            showSidebarError(panel, e.message);
-        }
-    }
-
-    /**
-     * Poll for a single sidebar recommendation result file.
-     */
-    function pollSidebarRecsResults(panel, requestId) {
-        const resultFile = `/plugin/stash-copilot/assets/recommendations_${requestId}.json`;
-
-        const pollInterval = setInterval(async () => {
-            // Bail if request ID has changed (new search started)
-            if (sceneRecsState.requestId !== requestId) {
-                clearInterval(pollInterval);
+            if (data.status === 'error') {
+                const errorMsg = data.error || 'Recommendation task failed';
+                log(`Sidebar recs task error: ${errorMsg}`, 'error');
+                showSidebarError(panel, errorMsg);
                 return;
             }
 
-            try {
-                const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data.status === 'complete') {
-                        clearInterval(pollInterval);
-                        sceneRecsState.allResults = data.results || [];
-                        sceneRecsState.results = [...sceneRecsState.allResults];
-                        sceneRecsState.profile = data.profile;
-                        log(`Sidebar recs results received: ${sceneRecsState.results.length} results`);
-                        renderSidebarRecsResultsUI(panel);
-                    } else if (data.status === 'error') {
-                        clearInterval(pollInterval);
-                        const errorMsg = data.error || 'Recommendation task failed';
-                        log(`Sidebar recs task error: ${errorMsg}`, 'error');
-                        showSidebarError(panel, errorMsg);
-                    }
-                }
-            } catch (e) {
-                // File not ready yet, continue polling
-            }
-        }, 500);
+            sceneRecsState.allResults = data.results || [];
+            sceneRecsState.results = [...sceneRecsState.allResults];
+            sceneRecsState.profile = data.profile;
+            log(`Sidebar recs results received: ${sceneRecsState.allResults.length} results`);
+            renderSidebarRecsResultsUI(panel);
 
-        // Timeout after 120s
-        setTimeout(() => {
-            clearInterval(pollInterval);
-            if (sceneRecsState.results.length === 0) {
-                showSidebarError(panel, 'Request timed out. Please try again.');
-            }
-        }, 120000);
+        } catch (e) {
+            if (sceneRecsState.requestId !== requestId) return;
+            log(`Recs search error: ${e.message}`, 'error');
+            showSidebarError(panel, /timed out/i.test(e.message || '')
+                ? 'Request timed out. Please try again.'
+                : e.message);
+        }
     }
 
     function renderSidebarRecsResultsUI(panel) {

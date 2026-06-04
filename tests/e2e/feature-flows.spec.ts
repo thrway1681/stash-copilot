@@ -361,6 +361,46 @@ test.describe('feature flows (stub backend)', () => {
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 
+  test('Recs sidebar tab: request_id-keyed recommendations resolve via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    // Opening the Recs tab auto-fires startSidebarRecsSearch (Discover mode,
+    // request_id-keyed -> recommendations_<rid>.json). The stub serves the
+    // fixture after a 2s delay; its results render as recs cards.
+    await openSceneTab(page, 2, 'scene-copilot-recs');
+
+    const panel = page.locator('#scene-copilot-recs-panel');
+    await expect(panel).toBeVisible({ timeout: 10000 });
+
+    await expect(panel.locator('.stash-copilot-sidebar-loading')).toBeHidden({ timeout: 20000 });
+    await expect(panel.locator('.stash-copilot-card[data-theme="recs"]').first()).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
+  test('Recs sidebar tab: switching Discover->Re-watch mid-search renders without a stale clobber', async ({ page }) => {
+    // The migrated search awaits dispatchTask (uncancellable). Switching mode
+    // mints a fresh sceneRecsState.requestId; the in-flight Discover result must
+    // be dropped by the supersede guard so it can't clobber the Re-watch view.
+    // The stub delays recommendations (sleep 2) to make the race deterministic.
+    const pageErrors = await collectPageErrors(page);
+
+    await openSceneTab(page, 2, 'scene-copilot-recs');
+    const panel = page.locator('#scene-copilot-recs-panel');
+    await expect(panel).toBeVisible({ timeout: 10000 });
+
+    // Discover auto-search is in flight; switch to Re-watch before it lands.
+    await expect(panel.locator('.stash-copilot-sidebar-loading')).toBeVisible({ timeout: 5000 });
+    await panel.locator('.stash-copilot-sidebar-subtab[data-mode="rewatch"]').click();
+    await expect(panel.locator('.stash-copilot-sidebar-subtab[data-mode="rewatch"]')).toHaveClass(/active/);
+
+    // Re-watch resolves and renders; the dropped Discover result causes no error.
+    await expect(panel.locator('.stash-copilot-sidebar-loading')).toBeHidden({ timeout: 20000 });
+    await expect(panel.locator('.stash-copilot-card[data-theme="recs"]').first()).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
   test('Tag dedup page: request_id-keyed find_duplicate_tags + merge_tags resolve via the stub', async ({ page }) => {
     const pageErrors = await collectPageErrors(page);
 
