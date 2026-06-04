@@ -126,7 +126,8 @@ def test_dispatch_logs_connection_error_uniformly() -> None:
         build_task=lambda ctx: _Failing(),
     )
 
-    assert log.calls == [("Connection error: no llm", "error")]
+    # The task was constructed before run() raised, so the error is attributed.
+    assert log.calls == [("[_Failing] Connection error: no llm", "error")]
 
 
 def test_dispatch_logs_import_error_uniformly() -> None:
@@ -169,4 +170,34 @@ def test_dispatch_handles_context_build_failure() -> None:
         build_task=lambda ctx: _FakeTask(),
     )
 
+    # Built before any task object existed → no class name to attribute.
     assert log.calls == [("Task failed: no stash connection", "error")]
+
+
+def test_dispatch_attributes_post_build_errors_to_the_task() -> None:
+    """Once the task is constructed, error lines carry its class name as a prefix."""
+    log = _RecordingLog()
+
+    class _Boom(_FakeTask):
+        def run(self) -> Any:
+            raise ValueError("kaboom")
+
+    dispatch(
+        log=log,
+        build_context=lambda: _make_context(log),
+        build_task=lambda ctx: _Boom(),
+    )
+
+    assert log.calls == [("[_Boom] Unexpected error: kaboom", "error")]
+
+
+def test_dispatch_leaves_build_phase_errors_unattributed() -> None:
+    """A failure inside build_task (before the task exists) has no class prefix."""
+    log = _RecordingLog()
+
+    def build_task(ctx: TaskContext) -> Any:
+        raise RuntimeError("build blew up")
+
+    dispatch(log=log, build_context=lambda: _make_context(log), build_task=build_task)
+
+    assert log.calls == [("Task failed: build blew up", "error")]

@@ -1237,26 +1237,6 @@ class MyPlugin(StashPlugin):
 
         self._dispatch(args, build_task, on_result=on_result)
 
-    def _write_similar_result(self, scene_id: str, data: dict[str, Any]) -> None:
-        """Write similar scenes result to JSON file for frontend polling."""
-        import json as json_module
-        import os
-
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        assets_dir = os.path.join(plugin_dir, "assets")
-
-        # Ensure assets directory exists
-        os.makedirs(assets_dir, exist_ok=True)
-
-        result_file = os.path.join(assets_dir, f"similar_results_{scene_id}.json")
-
-        try:
-            with open(result_file, "w") as f:
-                json_module.dump(data, f)
-            self.log(f"Wrote similar results to: {result_file}", "debug")
-        except Exception as e:
-            self.error(f"Failed to write similar results file: {e}")
-
     def run_search_by_text(self, args: dict[str, Any]) -> None:
         """Semantic scene search by text, via the dispatch seam (#4, commit 4).
 
@@ -1267,7 +1247,7 @@ class MyPlugin(StashPlugin):
         owns uniform error handling. The empty-query guard writes its error result
         here (before the seam).
         """
-        # Mirror _write_search_result's "request_id or 'latest'" filename rule.
+        # Preserve the old writer's "request_id or 'latest'" filename rule.
         request_id = args.get("request_id", "") or "latest"
 
         if not args.get("query", "").strip():
