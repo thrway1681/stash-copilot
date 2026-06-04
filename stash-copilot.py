@@ -1402,18 +1402,6 @@ class MyPlugin(StashPlugin):
 
         self._dispatch(args, build_task, on_result=on_result)
 
-    def _get_scene_details_batch(self, scene_ids: list[int]) -> dict[int, dict[str, Any]]:
-        """Fetch scene details for multiple scenes from SQLite (shared helper).
-
-        Thin wrapper over ``stash_ai.tools.scene_details.get_scene_details_batch``
-        (extracted under #4 commit 4 so the dispatch-seam search tasks share one
-        implementation). Retained for the not-yet-migrated search handlers; removed
-        in commit 5 once they all use the shared helper directly.
-        """
-        from stash_ai.tools.scene_details import get_scene_details_batch
-
-        return get_scene_details_batch(scene_ids, self.log)
-
     def run_frame_analysis(self, args: dict[str, Any]) -> None:
         """Run intra-scene frame analysis through the dispatch seam (#4, commit 4).
 
@@ -1565,253 +1553,41 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_find_similar_by_frame(self, args: dict[str, Any]) -> None:
-        """Find similar scenes by extracting and embedding the current video frame.
+        """Find similar scenes by embedding the playing frame, via the dispatch seam (#4, commit 4).
 
-        Extracts a single frame at the given timestamp, embeds it with the
-        configured image embedding provider, and searches the FAISS frame
-        index for visually similar frames across the library.
-
-        Args:
-            args: Task arguments containing:
-                - scene_id: Scene ID currently playing (required)
-                - timestamp: Playback position in seconds (required)
-                - limit: Maximum results (default 20)
-                - request_id: Unique request ID for frontend polling (required)
+        Result-producing: ``FindSimilarByFrameTask.from_context`` resolves the
+        scene/timestamp + image-embedding settings; ``run()`` extracts a frame,
+        embeds it, searches the FAISS frame index, and returns the result dict (or
+        an error dict, owning its own runtime error handling — invalid params, no
+        video, extract/index failures); ``on_result`` persists it through the
+        seam's ResultStore as ``frame_search_{request_id|latest}.json``;
+        ``dispatch`` owns uniform error handling. The missing-scene_id guard writes
+        its error result here (before the seam). Mirrors the old
+        ``request_id or 'latest'`` filename rule.
         """
-        try:
-            import numpy as np
+        request_id = args.get("request_id", "") or "latest"
 
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.frame_search import FrameSearchIndex
-            from stash_ai.embeddings.provider import get_embedding_provider
-            from stash_ai.tasks.frame_extractor import FrameExtractionConfig, FrameExtractor
-            from stash_ai.tools.database import get_readonly_connection, get_stash_db_path
-
-            scene_id = args.get("scene_id", "").strip()
-            timestamp_str = args.get("timestamp", "0")
-            request_id = args.get("request_id", "")
-
-            if not scene_id:
-                self._write_frame_search_result(
-                    request_id,
-                    {"status": "error", "error": "Scene ID is required", "request_id": request_id},
-                )
-                return
-
-            try:
-                timestamp = float(timestamp_str)
-                limit = int(args.get("limit", 20))
-            except ValueError as e:
-                self._write_frame_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": f"Invalid parameter: {e}",
-                        "request_id": request_id,
-                    },
-                )
-                return
-            self.log(
-                f"Frame search: scene={scene_id}, timestamp={timestamp:.1f}s, limit={limit}", "info"
-            )
-
-            # Step 1: Resolve video file path from Stash SQLite
-            db_path = get_stash_db_path()
-            conn = get_readonly_connection(db_path)
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT fo.path || '/' || f.basename as video_path
-                    FROM scenes s
-                    JOIN scenes_files sf ON s.id = sf.scene_id AND sf."primary" = 1
-                    JOIN files f ON sf.file_id = f.id
-                    JOIN folders fo ON f.parent_folder_id = fo.id
-                    JOIN video_files vf ON f.id = vf.file_id
-                    WHERE s.id = ?
-                    """,
-                    (int(scene_id),),
-                )
-                row = cursor.fetchone()
-            finally:
-                conn.close()
-
-            if not row:
-                self._write_frame_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": f"Could not find video file for scene {scene_id}",
-                        "request_id": request_id,
-                    },
-                )
-                return
-
-            video_path = row["video_path"]
-
-            # Step 2: Extract frame at timestamp (ephemeral - no disk caching)
-            plugin_dir = os.path.dirname(os.path.abspath(__file__))
-            assets_dir = os.path.join(plugin_dir, "assets")
-            extractor = FrameExtractor(
-                config=FrameExtractionConfig(),
-                cache_dir=os.path.join(assets_dir, "embedded_frames"),
-                log_callback=self.log,
-            )
-
-            frame_bytes = extractor.extract_frame_at_timestamp(video_path, timestamp)
-            if frame_bytes is None:
-                self._write_frame_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": f"Failed to extract frame at {timestamp:.1f}s",
-                        "request_id": request_id,
-                    },
-                )
-                return
-
-            self.log(f"Extracted frame: {len(frame_bytes)} bytes", "debug")
-
-            # Step 3: Embed the frame
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if not image_provider or not image_model:
-                self._write_frame_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": "No image embedding provider configured. Set up in Plugin Settings.",
-                        "request_id": request_id,
-                    },
-                )
-                return
-
-            embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
-            )
-            model_key = embedding_config.model_key
-
-            embedder = get_embedding_provider(embedding_config)
-            if not hasattr(embedder, "embed_image"):
-                self._write_frame_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": f"Provider '{image_provider}' does not support image embedding.",
-                        "request_id": request_id,
-                    },
-                )
-                return
-            result = embedder.embed_image(frame_bytes)
-            query_embedding = np.array(result["embedding"], dtype=np.float32)
-
-            self.log(f"Embedded frame: {result['dimensions']} dims", "debug")
-
-            # Step 4: Load frame search index
-            frame_index = FrameSearchIndex(assets_dir=assets_dir, model_key=model_key)
-
-            if not frame_index.exists:
-                self._write_frame_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": f"Frame search index not found for model '{model_key}'. Run 'Build Frame Search Index' task first.",
-                        "request_id": request_id,
-                    },
-                )
-                return
-
-            # Step 5: Search for similar frames
-            # Over-fetch frames since many top matches may belong to the same scene.
-            # After aggregate_to_scenes(), we need enough unique scenes to fill `limit`.
-            frame_matches = frame_index.search(query_embedding, top_k=2000)
-
-            # Step 6: Filter out query scene's own frames
-            frame_matches = [m for m in frame_matches if m.scene_id != int(scene_id)]
-
-            # Step 7: Aggregate to best match per scene
-            scene_matches = frame_index.aggregate_to_scenes(frame_matches)
-
-            # Step 8: Truncate to limit
-            scene_matches = scene_matches[:limit]
-
-            # Step 9: Fetch scene details
-            scene_details = self._get_scene_details_batch([m.scene_id for m in scene_matches])
-
-            # Step 10: Build result data
-            result_data = []
-            for m in scene_matches:
-                scene = scene_details.get(m.scene_id, {})
-                frame_path = (
-                    f"embedded_frames/scene_{m.scene_id}/frame_{m.best_frame_index:04d}.jpg"
-                )
-                result_data.append(
-                    {
-                        "scene_id": m.scene_id,
-                        "similarity": m.similarity,
-                        "matched_timestamp": m.best_timestamp,
-                        "matched_frame_index": m.best_frame_index,
-                        "frame_path": frame_path,
-                        "scene": scene,
-                    }
-                )
-
-            # Step 11: Write results
-            self._write_frame_search_result(
+        if not args.get("scene_id", "").strip():
+            self._result_store().save(
+                "frame_search",
                 request_id,
                 {
-                    "status": "complete",
-                    "query_scene_id": int(scene_id),
-                    "query_timestamp": timestamp,
-                    "model_key": model_key,
-                    "results": result_data,
-                    "limit": limit,
-                    "request_id": request_id,
-                },
-            )
-
-            self.log(f"Frame search complete: {len(result_data)} scenes found", "info")
-
-        except ImportError as e:
-            self.error(f"Failed to import modules: {e}")
-            self._write_frame_search_result(
-                args.get("request_id", ""),
-                {
                     "status": "error",
-                    "error": f"Failed to import modules: {e}",
+                    "error": "Scene ID is required",
                     "request_id": args.get("request_id", ""),
                 },
             )
-        except Exception as e:
-            self.error(f"Frame search error: {e}")
-            self._write_frame_search_result(
-                args.get("request_id", ""),
-                {"status": "error", "error": str(e), "request_id": args.get("request_id", "")},
-            )
+            return
 
-    def _write_frame_search_result(self, request_id: str, data: dict[str, Any]) -> None:
-        """Write frame search results to JSON file for frontend polling."""
-        import json as json_module
-        import os
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.find_similar_by_frame import FindSimilarByFrameTask
 
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        assets_dir = os.path.join(plugin_dir, "assets")
-        os.makedirs(assets_dir, exist_ok=True)
+            return FindSimilarByFrameTask.from_context(ctx)
 
-        filename = f"frame_search_{request_id or 'latest'}.json"
-        result_file = os.path.join(assets_dir, filename)
+        def on_result(_task: Any, result: Any) -> None:
+            self._result_store().save("frame_search", request_id, result)
 
-        try:
-            with open(result_file, "w") as f:
-                json_module.dump(data, f)
-            self.log(f"Wrote frame search results to: {result_file}", "debug")
-        except Exception as e:
-            self.error(f"Failed to write frame search results: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_get_embedding_models(self, args: dict[str, Any]) -> None:
         """List available embedding models + stats, through the dispatch seam (#4, commit 4).
