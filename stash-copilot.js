@@ -69,7 +69,7 @@
 
         // ---- tag gaps / suggestions / dedup ----
         detectTagGaps:       { name: 'Detect Tag Gaps',      resultKey: 'tag_gaps',        keying: 'request_id', defaultArgs: { force: 'false' }, pollTimeout: 60000 },
-        getSceneTagGaps:     { name: 'Get Scene Tag Gaps',   resultKey: 'tag_gaps_scene',  keying: 'request_id', defaultArgs: {}, pollTimeout: 6000 },
+        getSceneTagGaps:     { name: 'Get Scene Tag Gaps',   resultKey: 'tag_gaps_scene',  keying: 'request_id', defaultArgs: {}, pollTimeout: 30000 },
         previewTagImpact:    { name: 'Preview Tag Impact',   resultKey: 'tag_preview',     keying: 'request_id', defaultArgs: {}, pollTimeout: 15000 },
         getTagSuggestions:   { name: 'Get Tag Suggestions',  resultKey: 'tag_suggestions', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
         dismissSuggestedTag: { name: 'Dismiss Suggested Tag', resultKey: null, keying: 'none', defaultArgs: {} },
@@ -10497,48 +10497,32 @@
         const emptyEl = container.querySelector('.stash-copilot-sidebar-gaps-empty');
 
         try {
-            const requestId = `${sceneId}_${Date.now()}`;
-            await runPluginTask('Get Scene Tag Gaps', {
-                scene_id: String(sceneId),
-                request_id: requestId
+            // dispatchTask (#5) owns invocation + polling. get_scene_tag_gaps
+            // signals readiness via `has_data` (not status), so override isDone.
+            const data = await dispatchTask('getSceneTagGaps', { scene_id: String(sceneId) }, {
+                isDone: (d) => d.has_data !== undefined || d.status === 'error'
             });
 
-            const resultFile = `/plugin/stash-copilot/assets/tag_gaps_scene_${requestId}.json`;
-            let attempts = 0;
-            const maxAttempts = 30;
-
-            const poll = setInterval(async () => {
-                attempts++;
-                if (attempts > maxAttempts) {
-                    clearInterval(poll);
-                    if (loadingEl) loadingEl.style.display = 'none';
-                    if (emptyEl) {
-                        emptyEl.style.display = '';
-                        emptyEl.querySelector('p').textContent = 'Timed out loading gap data.';
-                    }
-                    return;
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (data.has_data === false) {
+                if (emptyEl) emptyEl.style.display = '';
+            } else {
+                if (contentEl) {
+                    contentEl.style.display = '';
+                    await renderSidebarGapsDetail(contentEl, data, sceneId);
                 }
-                try {
-                    const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        clearInterval(poll);
-                        if (loadingEl) loadingEl.style.display = 'none';
-                        if (data.has_data === false) {
-                            if (emptyEl) emptyEl.style.display = '';
-                        } else {
-                            if (contentEl) {
-                                contentEl.style.display = '';
-                                await renderSidebarGapsDetail(contentEl, data, sceneId);
-                            }
-                        }
-                    }
-                } catch (e) { /* not ready yet */ }
-            }, 1000);
+            }
         } catch (e) {
             log(`Load sidebar gaps error: ${e.message}`, 'error');
             if (loadingEl) loadingEl.style.display = 'none';
-            if (emptyEl) emptyEl.style.display = '';
+            if (emptyEl) {
+                emptyEl.style.display = '';
+                // dispatchTask rejects on timeout; preserve the old timeout copy.
+                if (/timed out/i.test(e.message || '')) {
+                    const p = emptyEl.querySelector('p');
+                    if (p) p.textContent = 'Timed out loading gap data.';
+                }
+            }
         }
     }
 
