@@ -1241,3 +1241,45 @@ class FrameAnalysisTask:
         full_path = os.path.join(output_dir, "analysis_results.json")
         with open(full_path, "w") as f:
             json.dump(dict(result), f, indent=2)
+
+
+class CheckFrameAnalysisTask:
+    """Poll for cached frame-analysis results / status for a scene.
+
+    Returns a status dict that the handler prints to STDOUT (the UI's polling IPC
+    channel) — so this is NOT a ``ResultStore`` task and declares no
+    ``result_key``. Reads ``analysis_summary.json`` / ``analysis_status.json``
+    from ``assets/frame_analysis_{scene_id}/`` and owns its own error handling
+    (returns ``{"status": "error", ...}``) so the stdout contract holds even on
+    failure. Needs no plugin settings, LLM, or stash client.
+    """
+
+    def __init__(self, scene_id: int = 0) -> None:
+        self.scene_id = scene_id
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "CheckFrameAnalysisTask":
+        """Build from a standard :class:`TaskContext`; only needs ``scene_id`` from args."""
+        return cls(scene_id=int(ctx.args.get("scene_id", 0)))
+
+    def run(self) -> dict[str, Any]:
+        """Return the cached results, the running/error status, or not_found."""
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        output_dir = os.path.join(plugin_dir, "assets", f"frame_analysis_{self.scene_id}")
+        summary_file = os.path.join(output_dir, "analysis_summary.json")
+        status_file = os.path.join(output_dir, "analysis_status.json")
+        try:
+            # If a summary exists, the analysis is complete — return its results.
+            if os.path.exists(summary_file):
+                with open(summary_file) as f:
+                    results = json.load(f)
+                return {"status": "complete", "results": results}
+
+            # Otherwise return the running/error status file if present.
+            if os.path.exists(status_file):
+                with open(status_file) as f:
+                    return cast("dict[str, Any]", json.load(f))
+
+            return {"status": "not_found"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
