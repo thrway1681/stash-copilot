@@ -528,110 +528,21 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_recommendations(self, args: dict[str, Any]) -> None:
-        """
-        Run the personalized recommendations task.
+        """Run personalized recommendations through the dispatch seam (#4, commit 4).
 
-        Args:
-            args: Task arguments containing recommendation settings
+        Result-producing: ``RecommendationsTask.from_context`` resolves the ~16
+        run parameters + model_key from the ``TaskContext``, ``run()`` writes its
+        own ``recommendations_{request_id}.json`` (declares
+        ``result_key="recommendations"``), ``on_result`` logs the summary, and
+        ``dispatch`` owns uniform error handling.
         """
-        try:
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.recommendations import RecommendationsTask
 
-            self.log("Initializing recommendation generation...", "info")
+            return RecommendationsTask.from_context(ctx)
 
-            # Get plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Parse arguments with fallback to plugin settings
-            mode = args.get("rec_mode", "discover_new")
-            scoring_method = args.get("scoring_method", "base_weighted")
-            limit = int(args.get("limit", 120))  # 10 pages x 12 per page
-            per_page = int(args.get("per_page", 12))
-            request_id = args.get("request_id", "")
-
-            # Engagement weights from settings or defaults
-            top_scenes = int(plugin_settings.get("rec_top_scenes") or args.get("top_scenes", 20))
-            o_weight = float(plugin_settings.get("rec_o_weight") or args.get("o_weight", 3.0))
-            view_weight = float(
-                plugin_settings.get("rec_view_weight") or args.get("view_weight", 1.5)
-            )
-            duration_weight = float(
-                plugin_settings.get("rec_duration_weight") or args.get("duration_weight", 1.0)
-            )
-            rating_weight = float(
-                plugin_settings.get("rec_rating_weight") or args.get("rating_weight", 1.5)
-            )
-            half_life = float(
-                plugin_settings.get("rec_time_decay_days") or args.get("half_life_days", 30.0)
-            )
-            min_similarity = float(args.get("min_similarity", 0.1))
-
-            # Seed scene for scene-specific recommendations
-            seed_scene_id_str = args.get("seed_scene_id", "")
-            seed_scene_id = int(seed_scene_id_str) if seed_scene_id_str else None
-            seed_weight = float(args.get("seed_weight", 0.3))
-            engagement_weight = float(args.get("engagement_weight", 0.6))
-
-            # Session-based recommendations (scene IDs from current session)
-            session_scene_ids_str = args.get("session_scene_ids", "")
-            session_scene_ids = (
-                [int(x.strip()) for x in session_scene_ids_str.split(",") if x.strip()]
-                if session_scene_ids_str
-                else None
-            )
-
-            self.log(
-                f"Running recommendations: mode={mode}, scoring={scoring_method}",
-                "info",
-            )
-            if session_scene_ids:
-                self.log(f"Session mode: {len(session_scene_ids)} scenes", "info")
-            if seed_scene_id:
-                self.log(f"Seed scene: {seed_scene_id} (weight: {seed_weight})", "info")
-            self.log(
-                f"Weights: o_count={o_weight}, views={view_weight}, "
-                f"duration={duration_weight}, rating={rating_weight}",
-                "debug",
-            )
-
-            # Get model_key from image embedding settings (defaults to siglip)
-            from stash_ai.embeddings.config import EmbeddingConfig
-
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"  # Default
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
-                self.log(f"Using embedding model: {model_key}", "debug")
-
-            task = RecommendationsTask(
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
-
-            result = task.run(
-                mode=mode,
-                scoring_method=scoring_method,
-                limit=limit,
-                per_page=per_page,
-                top_scenes_for_profile=top_scenes,
-                o_weight=o_weight,
-                view_weight=view_weight,
-                duration_weight=duration_weight,
-                rating_weight=rating_weight,
-                half_life_days=half_life,
-                min_similarity=min_similarity,
-                request_id=request_id,
-                seed_scene_id=seed_scene_id,
-                seed_weight=seed_weight,
-                engagement_weight=engagement_weight,
-                session_scene_ids=session_scene_ids,
-            )
-
-            # Output summary
+        def on_result(_task: Any, result: Any) -> None:
             self.log("=" * 50, "info")
             self.log("RECOMMENDATIONS", "info")
             self.log("=" * 50, "info")
@@ -657,10 +568,7 @@ class MyPlugin(StashPlugin):
 
             self.log("=" * 50, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import recommendation modules: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_build_taste_map(self, args: dict[str, Any]) -> None:
         """Run the Build Taste Map task through the dispatch seam (#4, commit 4).
