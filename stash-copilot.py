@@ -1923,78 +1923,31 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def start_frame_analysis(self, args: dict[str, Any]) -> None:
-        """
-        Start frame analysis for a scene (called from UI).
+        """Start frame analysis for a scene (UI run action), via the dispatch seam (#4).
 
-        This runs the analysis synchronously but writes status files
-        so the UI can poll for progress.
-
-        Args:
-            args: Task arguments containing scene_id
+        SPECIAL: prints a JSON status to STDOUT (the UI IPC channel).
+        ``StartFrameAnalysisTask.run()`` writes the ``running`` status file, runs
+        the analysis, and returns a ``started`` / ``error`` status (owning its own
+        error handling — including writing the error status file — so stdout
+        always gets valid JSON); ``on_result`` prints it. The missing-scene_id
+        guard prints to stdout here (before the seam).
         """
         import json as json_module
-        import os
 
         scene_id = args.get("scene_id")
         if not scene_id:
             print(json_module.dumps({"status": "error", "error": "scene_id is required"}))
             return
 
-        # Create output directory and write initial status
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(plugin_dir, "assets", f"frame_analysis_{scene_id}")
-        os.makedirs(output_dir, exist_ok=True)
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.frame_analysis import StartFrameAnalysisTask
 
-        status_file = os.path.join(output_dir, "analysis_status.json")
-        summary_file = os.path.join(output_dir, "analysis_summary.json")
+            return StartFrameAnalysisTask.from_context(ctx)
 
-        try:
-            # Clear old results so polling doesn't find stale data
-            if os.path.exists(summary_file):
-                os.remove(summary_file)
+        def on_result(_task: Any, result: Any) -> None:
+            print(json_module.dumps(result))
 
-            # Write running status
-            with open(status_file, "w") as f:
-                json_module.dump(
-                    {
-                        "status": "running",
-                        "scene_id": scene_id,
-                    },
-                    f,
-                )
-
-            # Run the actual analysis
-            self.run_frame_analysis(args)
-
-            # Return started status (UI will poll for completion)
-            print(
-                json_module.dumps(
-                    {
-                        "status": "started",
-                        "scene_id": scene_id,
-                    }
-                )
-            )
-
-        except Exception as e:
-            # Write error status
-            with open(status_file, "w") as f:
-                json_module.dump(
-                    {
-                        "status": "error",
-                        "scene_id": scene_id,
-                        "error": str(e),
-                    },
-                    f,
-                )
-            print(
-                json_module.dumps(
-                    {
-                        "status": "error",
-                        "error": str(e),
-                    }
-                )
-            )
+        self._dispatch(args, build_task, on_result=on_result)
 
     def _write_similar_result(self, scene_id: str, data: dict[str, Any]) -> None:
         """Write similar scenes result to JSON file for frontend polling."""

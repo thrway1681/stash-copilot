@@ -1283,3 +1283,54 @@ class CheckFrameAnalysisTask:
             return {"status": "not_found"}
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+
+class StartFrameAnalysisTask:
+    """Start frame analysis for a scene (the UI "run" action).
+
+    Writes a ``running`` status file, runs :class:`FrameAnalysisTask`, and returns
+    a ``started`` / ``error`` status the handler prints to STDOUT (the UI then
+    polls :class:`CheckFrameAnalysisTask`). Manages
+    ``assets/frame_analysis_{scene_id}/analysis_status.json`` and clears any stale
+    ``analysis_summary.json`` first. Not a ``ResultStore`` task — no ``result_key``.
+    Builds + runs the inner :class:`FrameAnalysisTask` inside its own ``try`` so a
+    construction failure still writes the error status file and returns an error
+    status (preserving the old handler's behavior).
+    """
+
+    def __init__(self, ctx: "TaskContext", scene_id: Any = None) -> None:
+        # The full context is retained so the inner FrameAnalysisTask can be built
+        # inside run()'s try (where a failure becomes an error status, not a log).
+        self._ctx = ctx
+        self.scene_id = scene_id  # raw arg value (used for the status dir + payload)
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "StartFrameAnalysisTask":
+        """Build from a standard :class:`TaskContext`; retains it + the raw scene_id."""
+        return cls(ctx=ctx, scene_id=ctx.args.get("scene_id"))
+
+    def run(self) -> dict[str, Any]:
+        """Mark the scene 'running', run the analysis, and return a 'started'/'error' status."""
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        output_dir = os.path.join(plugin_dir, "assets", f"frame_analysis_{self.scene_id}")
+        os.makedirs(output_dir, exist_ok=True)
+        status_file = os.path.join(output_dir, "analysis_status.json")
+        summary_file = os.path.join(output_dir, "analysis_summary.json")
+
+        try:
+            # Clear old results so polling doesn't find stale data.
+            if os.path.exists(summary_file):
+                os.remove(summary_file)
+
+            with open(status_file, "w") as f:
+                json.dump({"status": "running", "scene_id": self.scene_id}, f)
+
+            # Run the actual analysis (writes its own summary/status on completion).
+            FrameAnalysisTask.from_context(self._ctx).run()
+
+            return {"status": "started", "scene_id": self.scene_id}
+
+        except Exception as e:
+            with open(status_file, "w") as f:
+                json.dump({"status": "error", "scene_id": self.scene_id, "error": str(e)}, f)
+            return {"status": "error", "error": str(e)}
