@@ -931,23 +931,19 @@ class MyPlugin(StashPlugin):
             self.log(f"Failed to apply tag: {e}", "error")
 
     def run_dismiss_suggested_tag(self, args: dict[str, Any]) -> None:
-        """Dismiss a tag suggestion for a scene."""
-        scene_id = int(args.get("scene_id", 0))
-        tag_id = int(args.get("tag_id", 0))
+        """Dismiss a tag suggestion for a scene, through the dispatch seam (#4, commit 4).
 
-        if not scene_id or not tag_id:
-            self.log("Missing scene_id or tag_id", "error")
-            return
+        Log-only side effect: ``DismissSuggestedTagTask`` writes the dismissal to
+        EmbeddingStorage and logs the outcome (no result_key); the missing-arg
+        guard lives in its ``run()``, and ``dispatch`` owns uniform error handling.
+        """
 
-        try:
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.tag_suggestion_actions import DismissSuggestedTagTask
 
-            storage = EmbeddingStorage(model_key="siglip")
-            storage.save_dismissed_tag(scene_id, tag_id)
-            self.log(f"Dismissed tag {tag_id} for scene {scene_id}", "info")
+            return DismissSuggestedTagTask.from_context(ctx)
 
-        except Exception as e:
-            self.log(f"Failed to dismiss tag: {e}", "error")
+        self._dispatch(args, build_task)
 
     def run_clear_dismissed_tags(self, args: dict[str, Any]) -> None:
         """Clear all dismissed tags for a scene."""
