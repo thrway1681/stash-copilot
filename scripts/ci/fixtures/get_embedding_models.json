@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "models": [
+    { "model_key": "openclip:ViT-B-32", "count": 3, "dimensions": 512 }
+  ],
+  "current_model_key": "openclip:ViT-B-32",
+  "request_id": "__REQUEST_ID__"
+}
