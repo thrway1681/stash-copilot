@@ -1072,3 +1072,54 @@ class SceneTagGapsTask:
     def run(self) -> dict[str, Any]:
         """Return the per-scene tag-gap detail for the resolved scene."""
         return self._detector.get_scene_gaps_detail(self.scene_id)
+
+
+class PreviewTagImpactTask:
+    """Preview the coverage impact of a hypothetical tag on a scene (sidebar query).
+
+    A thin dispatch-seam wrapper around
+    :meth:`TagGapDetectionTask.preview_tag_impact`. Result-producing: the handler
+    routes ``run()``'s dict through the seam's ``ResultStore`` keyed by
+    :attr:`result_key`.
+    """
+
+    result_key = "tag_preview"
+
+    def __init__(
+        self, detector: TagGapDetectionTask, scene_id: int = 0, tag_name: str = ""
+    ) -> None:
+        self._detector = detector
+        self.scene_id = scene_id
+        self.tag_name = tag_name
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> PreviewTagImpactTask:
+        """Build from a standard :class:`TaskContext`.
+
+        Resolves the image-embedding ``model_key`` (default ``"siglip"``, matching
+        the old handler) and the ``scene_id``/``tag_name`` from args, wrapping a
+        fresh :class:`TagGapDetectionTask`.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        model_key = "siglip"
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+
+        detector = TagGapDetectionTask(
+            stash=ctx.stash,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            model_key=model_key,
+        )
+        return cls(
+            detector=detector,
+            scene_id=int(ctx.args.get("scene_id", 0)),
+            tag_name=ctx.args.get("tag_name", ""),
+        )
+
+    def run(self) -> dict[str, Any]:
+        """Return the coverage-impact preview for the resolved scene + tag."""
+        return self._detector.preview_tag_impact(self.scene_id, self.tag_name)

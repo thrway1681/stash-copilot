@@ -658,46 +658,32 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_preview_tag_impact(self, args: dict[str, Any]) -> None:
-        """Preview the coverage impact of a hypothetical tag on a scene."""
-        try:
-            from stash_ai.tasks.tag_gap_detection import TagGapDetectionTask
+        """Preview a hypothetical tag's coverage impact, via the dispatch seam (#4).
 
-            scene_id = args.get("scene_id")
-            tag_name = args.get("tag_name")
-            if not scene_id or not tag_name:
-                self.error("scene_id and tag_name arguments required")
-                return
+        Result-producing: ``PreviewTagImpactTask`` wraps
+        ``TagGapDetectionTask.preview_tag_impact``; ``on_result`` persists the
+        result through the seam's ResultStore as ``tag_preview_{request_id}.json``
+        (request_id defaults to ``preview_{scene_id}_{tag_name}``, matching the old
+        handler); ``dispatch`` owns uniform error handling. The missing-arg guard
+        stays here (before the seam).
+        """
+        scene_id = args.get("scene_id")
+        tag_name = args.get("tag_name")
+        if not scene_id or not tag_name:
+            self.error("scene_id and tag_name arguments required")
+            return
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
+        request_id = args.get("request_id", f"preview_{scene_id}_{tag_name}")
 
-            from stash_ai.embeddings.config import EmbeddingConfig
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.tag_gap_detection import PreviewTagImpactTask
 
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
+            return PreviewTagImpactTask.from_context(ctx)
 
-            task = TagGapDetectionTask(
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
+        def on_result(task: Any, result: Any) -> None:
+            self._result_store().save(task.result_key, request_id, result)
 
-            result = task.preview_tag_impact(int(scene_id), tag_name)
-
-            request_id = args.get("request_id", f"preview_{scene_id}_{tag_name}")
-            assets_dir = os.path.join(PLUGIN_DIR, "assets")
-            os.makedirs(assets_dir, exist_ok=True)
-
-            filepath = os.path.join(assets_dir, f"tag_preview_{request_id}.json")
-            with open(filepath, "w") as f:
-                json.dump(result, f)
-
-        except Exception as e:
-            self.error(f"Preview tag impact failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_get_tag_suggestions(self, args: dict[str, Any]) -> None:
         """Get embedding-based tag suggestions for a scene, via the dispatch seam (#4).
