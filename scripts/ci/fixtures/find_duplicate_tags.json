@@ -1,0 +1,12 @@
+{
+  "status": "complete",
+  "candidates": [
+    {
+      "similarity": 0.92,
+      "suggested_keep": "a",
+      "tag_a": { "id": 1, "name": "ci-tag", "scene_count": 2 },
+      "tag_b": { "id": 2, "name": "ci tag", "scene_count": 1 }
+    }
+  ],
+  "request_id": "__REQUEST_ID__"
+}

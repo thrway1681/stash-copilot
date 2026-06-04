@@ -295,4 +295,27 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('Tag dedup page: request_id-keyed find_duplicate_tags + merge_tags resolve via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    // The plugin renders its own tag-dedup page (onPageChange -> renderTagDedupPage)
+    // and auto-runs find_duplicate_tags (request_id-keyed -> tag_dedup_<rid>.json).
+    await page.goto('/plugins/stash-copilot/tag-dedup', { waitUntil: 'domcontentloaded' });
+    await page.locator('.stash-copilot-dedup-body').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+
+    // The stub's single candidate pair renders.
+    await expect(page.locator('.stash-copilot-dedup-versus')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.stash-copilot-dedup-versus')).toContainText('ci-tag');
+
+    // Keep the left tag -> merge_tags (request_id-keyed -> tag_merge_<rid>.json).
+    // With one candidate, completing the merge advances to the summary screen.
+    await page.locator('#dedup-keep-left').click();
+
+    await expect(page.locator('.stash-copilot-dedup-summary')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.stash-copilot-dedup-summary')).toContainText('Deduplication Complete');
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });
