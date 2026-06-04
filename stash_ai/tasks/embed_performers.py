@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..embeddings.config import EmbeddingConfig
 from ..embeddings.storage import EmbeddingStorage
@@ -16,6 +16,7 @@ from ..recommendations.types import (
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 @dataclass
@@ -82,6 +83,12 @@ class EmbedPerformersTask:
         self.log = log_callback or (lambda msg, level: None)
         self.progress = progress_callback or (lambda cur, total: None)
 
+        # Run-time selectors resolved by ``from_context``; ``run()`` reads these
+        # to choose single-performer vs all-performers mode (the dispatch seam
+        # calls ``run()`` with no arguments).
+        self.performer_id: int | None = None
+        self.force: bool = False
+
         # Initialize storage with model_key
         model_key = embedding_config.model_key
         self.storage = EmbeddingStorage(model_key=model_key)
@@ -94,6 +101,105 @@ class EmbedPerformersTask:
             time_decay=time_decay,
             log_callback=self.log,
         )
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "EmbedPerformersTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding config, the engagement weights, and the task
+        config (``min_scenes``/``max_scenes`` from args), and caches the
+        ``performer_id``/``force`` run selectors for :meth:`run`. Log-only:
+        declares no ``result_key`` — it writes no result file (``find_similar_
+        performers`` owns its own output).
+        """
+        ctx.log("Initializing performer embedding generation...", "info")
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+        if not image_provider or not image_model:
+            raise RuntimeError(
+                "Image embedding provider and model are required for performer embedding. "
+                "Please configure image_embedding_provider and image_embedding_model in plugin settings."
+            )
+
+        embedding_config = EmbeddingConfig(
+            provider=image_provider,
+            model=image_model,
+            device=image_device,
+        )
+        ctx.log(f"Using {image_provider}/{image_model} for performer embeddings", "info")
+
+        # Engagement weights — note the rec_* settings map onto the
+        # EngagementWeights keys (o_count/view_count/play_duration/rating).
+        weights = cast(
+            "EngagementWeights",
+            {
+                "o_count": float(ctx.plugin_settings.get("rec_o_weight") or "20.0"),
+                "view_count": float(ctx.plugin_settings.get("rec_view_weight") or "2.0"),
+                "play_duration": float(ctx.plugin_settings.get("rec_duration_weight") or "1.0"),
+                "rating": float(ctx.plugin_settings.get("rec_rating_weight") or "1.5"),
+            },
+        )
+
+        task_config = EmbedPerformersTaskConfig(
+            min_scenes=int(ctx.args.get("min_scenes") or "2"),
+            max_scenes=int(ctx.args.get("max_scenes") or "50"),
+            use_engagement_weighting=True,
+            include_unwatched=True,
+        )
+
+        task = cls(
+            stash=ctx.stash,
+            embedding_config=embedding_config,
+            task_config=task_config,
+            weights=weights,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+
+        performer_id = ctx.args.get("performer_id")
+        task.performer_id = int(performer_id) if performer_id else None
+        task.force = str(ctx.args.get("force", "")).lower() == "true"
+        return task
+
+    def run(self) -> dict[str, Any]:
+        """Embed one performer or all (mode from the cached selectors). Log-only."""
+        if self.performer_id is not None:
+            self.log(f"Embedding performer {self.performer_id}...", "info")
+            result = self.embed_performer(self.performer_id, force=self.force)
+
+            if result.get("success"):
+                if result.get("skipped"):
+                    self.log(f"Skipped: {result.get('message')}", "info")
+                else:
+                    self.log(
+                        f"Embedded {result.get('performer_name')}: "
+                        f"{result.get('contributing_scenes')} scenes, "
+                        f"score {result.get('total_engagement_score', 0):.2f}",
+                        "info",
+                    )
+            else:
+                # self.error in the old handler == log(msg, "error").
+                self.log(f"Failed: {result.get('error')}", "error")
+            return result
+
+        self.log("Embedding all performers...", "info")
+        result = self.embed_all_performers(force=self.force)
+
+        self.log("=" * 50, "info")
+        self.log("PERFORMER EMBEDDING COMPLETE", "info")
+        self.log("=" * 50, "info")
+        self.log(f"Total performers: {result.get('total_performers', 0)}", "info")
+        self.log(f"Embedded: {result.get('embedded', 0)}", "info")
+        self.log(f"Skipped (already embedded): {result.get('skipped', 0)}", "info")
+        self.log(f"Insufficient scenes: {result.get('insufficient_scenes', 0)}", "info")
+        self.log(f"Errors: {result.get('errors', 0)}", "info")
+
+        if result.get("error_details"):
+            for err in result["error_details"][:5]:
+                self.log(f"  - {err}", "warning")
+        return result
 
     def embed_performer(
         self,
