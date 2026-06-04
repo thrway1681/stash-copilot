@@ -1896,63 +1896,31 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def check_frame_analysis(self, args: dict[str, Any]) -> None:
-        """
-        Check if frame analysis results exist for a scene.
+        """Poll for frame-analysis results/status for a scene, via the dispatch seam (#4).
 
-        Used by the UI to poll for cached results or task completion status.
-
-        Args:
-            args: Task arguments containing scene_id
+        SPECIAL: the UI polls this task's STDOUT for a JSON status, so the result
+        is ``print``-ed (not logged). ``CheckFrameAnalysisTask.run()`` reads the
+        per-scene status/summary files and owns its own error handling (returns
+        ``{"status": "error", ...}``) so stdout always gets valid JSON;
+        ``on_result`` prints it. The missing-scene_id guard prints to stdout here
+        (before the seam).
         """
         import json as json_module
-        import os
 
         scene_id = args.get("scene_id")
         if not scene_id:
             print(json_module.dumps({"status": "error", "error": "scene_id is required"}))
             return
 
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(plugin_dir, "assets", f"frame_analysis_{scene_id}")
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.frame_analysis import CheckFrameAnalysisTask
 
-        # Check for status file first
-        status_file = os.path.join(output_dir, "analysis_status.json")
-        summary_file = os.path.join(output_dir, "analysis_summary.json")
+            return CheckFrameAnalysisTask.from_context(ctx)
 
-        try:
-            # If summary exists, return complete status with results
-            if os.path.exists(summary_file):
-                with open(summary_file) as f:
-                    results = json_module.load(f)
-                print(
-                    json_module.dumps(
-                        {
-                            "status": "complete",
-                            "results": results,
-                        }
-                    )
-                )
-                return
+        def on_result(_task: Any, result: Any) -> None:
+            print(json_module.dumps(result))
 
-            # Check status file for running/error state
-            if os.path.exists(status_file):
-                with open(status_file) as f:
-                    status_data = json_module.load(f)
-                print(json_module.dumps(status_data))
-                return
-
-            # No results or status file
-            print(json_module.dumps({"status": "not_found"}))
-
-        except Exception as e:
-            print(
-                json_module.dumps(
-                    {
-                        "status": "error",
-                        "error": str(e),
-                    }
-                )
-            )
+        self._dispatch(args, build_task, on_result=on_result)
 
     def start_frame_analysis(self, args: dict[str, Any]) -> None:
         """
