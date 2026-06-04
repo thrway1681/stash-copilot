@@ -451,49 +451,77 @@ class MyPlugin(StashPlugin):
         return ResultStore(os.path.join(PLUGIN_DIR, "assets"))
 
     def run_eroscripts_validate_auth(self, args: dict[str, Any]) -> None:
-        """Validate (or clear/re-check) the EroScripts session cookie."""
-        try:
-            from stash_ai.tasks import eroscripts_auth as task_module
+        """Validate the EroScripts session cookie, via the dispatch seam (#4, commit 4).
 
-            task_module.run(args, self.log)
-        except Exception as e:
-            self.error(f"eroscripts_validate_auth failed: {e}")
+        Result-producing (task-internal writer): ``EroscriptsValidateAuthTask``
+        wraps the ``eroscripts_auth`` module's ``run`` (which writes its own
+        ``assets/eroscripts/auth_{request_id}.json``); ``dispatch`` owns uniform
+        error handling. (EroScripts is slated to spin off into its own plugin.)
+        """
+
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.eroscripts_actions import EroscriptsValidateAuthTask
+
+            return EroscriptsValidateAuthTask.from_context(ctx)
+
+        self._dispatch(args, build_task)
 
     def run_eroscripts_search(self, args: dict[str, Any]) -> None:
-        """Search discuss.eroscripts.com for funscripts matching a Stash scene."""
+        """Search EroScripts for matching funscripts, via the dispatch seam (#4, commit 4).
+
+        Result-producing (task-internal writer): ``EroscriptsSearchTask`` wraps the
+        ``eroscripts_search`` module's ``run`` (writes its own
+        ``assets/eroscripts/search_{request_id}.json``); ``dispatch`` owns uniform
+        error handling. The no-connection guard stays here (before the seam).
+        """
         if self.stash is None:
             self.error("Stash connection unavailable")
             return
-        try:
-            from stash_ai.tasks import eroscripts_search as task_module
 
-            task_module.run(self.stash, args, self.log)
-        except Exception as e:
-            self.error(f"eroscripts_search failed: {e}")
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.eroscripts_actions import EroscriptsSearchTask
+
+            return EroscriptsSearchTask.from_context(ctx)
+
+        self._dispatch(args, build_task)
 
     def run_eroscripts_download(self, args: dict[str, Any]) -> None:
-        """List attachments for an eroscripts topic, or download one and persist."""
+        """List/download an eroscripts attachment, via the dispatch seam (#4, commit 4).
+
+        Result-producing (task-internal writer): ``EroscriptsDownloadTask`` wraps
+        the ``eroscripts_download`` module's ``run`` (writes its own
+        ``assets/eroscripts/download_{request_id}.json``); ``dispatch`` owns uniform
+        error handling. The no-connection guard stays here (before the seam).
+        """
         if self.stash is None:
             self.error("Stash connection unavailable")
             return
-        try:
-            from stash_ai.tasks import eroscripts_download as task_module
 
-            task_module.run(self.stash, args, self.log)
-        except Exception as e:
-            self.error(f"eroscripts_download failed: {e}")
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.eroscripts_actions import EroscriptsDownloadTask
+
+            return EroscriptsDownloadTask.from_context(ctx)
+
+        self._dispatch(args, build_task)
 
     def run_eroscripts_status(self, args: dict[str, Any]) -> None:
-        """Report whether a scene has a matched funscript + sidecar."""
+        """Report a scene's funscript+sidecar status, via the dispatch seam (#4, commit 4).
+
+        Result-producing (task-internal writer): ``EroscriptsStatusTask`` wraps the
+        ``eroscripts_status`` module's ``run`` (writes its own
+        ``assets/eroscripts/status_{request_id}.json``); ``dispatch`` owns uniform
+        error handling. The no-connection guard stays here (before the seam).
+        """
         if self.stash is None:
             self.error("Stash connection unavailable")
             return
-        try:
-            from stash_ai.tasks import eroscripts_status as task_module
 
-            task_module.run(self.stash, args, self.log)
-        except Exception as e:
-            self.error(f"eroscripts_status failed: {e}")
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.eroscripts_actions import EroscriptsStatusTask
+
+            return EroscriptsStatusTask.from_context(ctx)
+
+        self._dispatch(args, build_task)
 
     def run_stats_summary(self, args: dict[str, Any]) -> None:
         """
