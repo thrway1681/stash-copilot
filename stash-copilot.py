@@ -920,22 +920,19 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_clear_dismissed_tags(self, args: dict[str, Any]) -> None:
-        """Clear all dismissed tags for a scene."""
-        scene_id = int(args.get("scene_id", 0))
+        """Clear all dismissed tags for a scene, through the dispatch seam (#4, commit 4).
 
-        if not scene_id:
-            self.log("Missing scene_id", "error")
-            return
+        Log-only side effect: ``ClearDismissedTagsTask`` clears the scene's
+        dismissed-tag rows in EmbeddingStorage and logs the count; the missing-arg
+        guard lives in its ``run()``, and ``dispatch`` owns uniform error handling.
+        """
 
-        try:
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.tag_suggestion_actions import ClearDismissedTagsTask
 
-            storage = EmbeddingStorage(model_key="siglip")
-            count = storage.clear_dismissed_tags(scene_id)
-            self.log(f"Cleared {count} dismissed tags for scene {scene_id}", "info")
+            return ClearDismissedTagsTask.from_context(ctx)
 
-        except Exception as e:
-            self.log(f"Failed to clear dismissed tags: {e}", "error")
+        self._dispatch(args, build_task)
 
     def run_find_duplicate_tags(self, args: dict[str, Any]) -> None:
         """Find duplicate tags using embedding similarity."""

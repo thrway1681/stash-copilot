@@ -3,8 +3,8 @@
 These back the tag-suggestion actions on the scene Tags tab (apply / dismiss /
 clear). Each is a small ``SelfBuildingTask``: log-only (no ``result_key`` /
 ``ResultStore``), performing a Stash or :class:`EmbeddingStorage` side effect and
-logging the outcome. ``clear_dismissed_tags`` joins this module as it migrates
-under #4, commit 4.
+logging the outcome. Houses the apply / dismiss / clear actions migrated under
+#4, commit 4.
 """
 
 from __future__ import annotations
@@ -130,3 +130,44 @@ class ApplySuggestedTagTask:
         )
 
         self.log(f"Applied tag {self.tag_id} to scene {self.scene_id}", "info")
+
+
+class ClearDismissedTagsTask:
+    """Clear all dismissed tag suggestions for a scene (log-only).
+
+    Writes to :class:`EmbeddingStorage` and logs how many rows were cleared.
+    ``model_key`` is hardcoded ``"siglip"`` because the dismissed-tag table is
+    model-agnostic (keyed by scene_id), matching the old handler.
+    """
+
+    def __init__(
+        self,
+        storage: EmbeddingStorage,
+        log_callback: Callable[[str, str], None] | None = None,
+        scene_id: int = 0,
+    ) -> None:
+        self.storage = storage
+        self.log = log_callback or (lambda msg, level: None)
+        self.scene_id = scene_id
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> ClearDismissedTagsTask:
+        """Build from the standard :class:`TaskContext`.
+
+        ``scene_id`` comes from ``ctx.args``; the missing-arg guard stays in
+        :meth:`run` (dispatch always calls ``run()``) to preserve the
+        no-op-on-missing behavior.
+        """
+        return cls(
+            storage=EmbeddingStorage(model_key="siglip"),
+            log_callback=ctx.log,
+            scene_id=int(ctx.args.get("scene_id", 0)),
+        )
+
+    def run(self) -> None:
+        """Clear the scene's dismissed tags; no-op + error log if scene_id missing."""
+        if not self.scene_id:
+            self.log("Missing scene_id", "error")
+            return
+        count = self.storage.clear_dismissed_tags(self.scene_id)
+        self.log(f"Cleared {count} dismissed tags for scene {self.scene_id}", "info")
