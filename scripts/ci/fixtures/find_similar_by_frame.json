@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "query_scene_id": 0,
+  "query_timestamp": 1.5,
+  "model_key": "openclip:ViT-B-32",
+  "results": [],
+  "request_id": "__REQUEST_ID__"
+}

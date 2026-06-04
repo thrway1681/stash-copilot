@@ -158,4 +158,38 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('Similar tab "Search by Frame": request_id-keyed find_similar_by_frame resolves via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    await openSceneTab(page, 1, 'scene-copilot-similar');
+    const panel = page.locator('#scene-copilot-similar-panel');
+
+    // The Similar tab auto-runs find_similar on open; wait for it to settle so it
+    // doesn't race/overwrite the frame-search render.
+    await expect(panel.locator('.stash-copilot-sidebar-loading')).toBeHidden({ timeout: 20000 });
+
+    // startFrameSearch reads the player's currentTime and requires it > 0 (or
+    // readyState >= 1). Headless doesn't auto-load the clip into a seekable
+    // video.vjs-tech, so inject a fake one — the video is only the timestamp
+    // source; dispatchTask is what's under test.
+    await page.evaluate(() => {
+      let v = document.querySelector('video.vjs-tech');
+      if (!v) {
+        v = document.createElement('video');
+        v.className = 'vjs-tech';
+        document.body.appendChild(v);
+      }
+      Object.defineProperty(v, 'currentTime', { value: 1.5, configurable: true });
+      Object.defineProperty(v, 'readyState', { value: 4, configurable: true });
+    });
+
+    await panel.locator('.stash-copilot-frame-search-btn').click();
+
+    // Frame search resolves to its own render (empty fixture -> "No similar frames
+    // found" + a Back button, which is unique to the frame-search view).
+    await expect(panel.locator('.stash-copilot-back-to-similar')).toBeVisible({ timeout: 20000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });

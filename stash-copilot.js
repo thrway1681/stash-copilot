@@ -12519,74 +12519,42 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
             }
         }
 
-        // Trigger backend task
+        // Trigger backend task. dispatchTask (#5) owns invocation + polling
+        // (request_id auto-keyed -> frame_search_{request_id}.json, 60s budget —
+        // the first call loads the OpenCLIP model). The result file is unique per
+        // request, so the old request_id stale-guard is no longer needed.
         try {
-            await runPluginTask('Find Similar by Frame', {
-                mode: 'find_similar_by_frame',
+            const data = await dispatchTask('findSimilarByFrame', {
                 scene_id: String(sceneId),
-                timestamp: String(timestamp),
-                limit: '20',
-                request_id: requestId
+                timestamp: String(timestamp)
             });
 
-            pollFrameSearchResults(requestId, sceneId, panel);
-        } catch (e) {
-            log(`Frame search error: ${e.message}`, 'error');
-            showSidebarError(panel, e.message);
-            if (frameSearchBtn) frameSearchBtn.disabled = false;
-        }
-    }
-
-    function pollFrameSearchResults(requestId, sceneId, panel) {
-        const resultFile = `/plugin/stash-copilot/assets/frame_search_${requestId}.json`;
-        let attempts = 0;
-        const maxAttempts = 400; // 60s timeout (first call loads OpenCLIP model ~10-15s)
-
-        frameSearchState.pollInterval = setInterval(async () => {
-            attempts++;
-            if (attempts > maxAttempts) {
-                clearInterval(frameSearchState.pollInterval);
-                frameSearchState.pollInterval = null;
+            frameSearchState.pollInterval = null;
+            if (data.status === 'error') {
                 frameSearchState.active = false;
-                const resultsDiv = panel.querySelector('.stash-copilot-sidebar-results');
-                if (resultsDiv) {
-                    const loading = resultsDiv.querySelector('.stash-copilot-sidebar-loading');
-                    if (loading) loading.innerHTML = `
-                        <span>Search timed out. The embedding model may still be loading. Try again.</span>
-                    `;
-                }
+                showSidebarError(panel, data.error || 'Frame search failed');
                 const btn = panel.querySelector('.stash-copilot-frame-search-btn');
                 if (btn) btn.disabled = false;
                 return;
             }
 
-            try {
-                const response = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                if (response.ok) {
-                    const data = await response.json();
-
-                    // Validate request_id to avoid stale results
-                    if (data.request_id !== requestId) return;
-
-                    if (data.status === 'complete' || data.results) {
-                        clearInterval(frameSearchState.pollInterval);
-                        frameSearchState.pollInterval = null;
-                        frameSearchState.results = data.results || [];
-                        renderFrameSearchResults(data, panel);
-                    } else if (data.status === 'error') {
-                        clearInterval(frameSearchState.pollInterval);
-                        frameSearchState.pollInterval = null;
-                        frameSearchState.active = false;
-                        showSidebarError(panel, data.error || 'Frame search failed');
-                        const btn = panel.querySelector('.stash-copilot-frame-search-btn');
-                        if (btn) btn.disabled = false;
-                    }
+            frameSearchState.results = data.results || [];
+            renderFrameSearchResults(data, panel);
+        } catch (e) {
+            frameSearchState.active = false;
+            const btn = panel.querySelector('.stash-copilot-frame-search-btn');
+            if (btn) btn.disabled = false;
+            if (/timed out/i.test(e.message || '')) {
+                const resultsDiv = panel.querySelector('.stash-copilot-sidebar-results');
+                const loading = resultsDiv && resultsDiv.querySelector('.stash-copilot-sidebar-loading');
+                if (loading) {
+                    loading.innerHTML = '<span>Search timed out. The embedding model may still be loading. Try again.</span>';
                 }
-            } catch (e) {
-                log(`Frame search poll error: ${e.message}`);
+            } else {
+                log(`Frame search error: ${e.message}`, 'error');
+                showSidebarError(panel, e.message);
             }
-        }, 150);
-        // Timeout is handled by the attempt counter above (200 * 150ms = 30s)
+        }
     }
 
     function renderFrameSearchResults(data, panel) {
