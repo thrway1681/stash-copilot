@@ -3229,123 +3229,21 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_embed_performers(self, args: dict[str, Any]) -> None:
+        """Generate performer embeddings through the dispatch seam (#4, commit 4).
+
+        Log-only: ``EmbedPerformersTask.from_context`` resolves the embedding
+        config, engagement weights, and task config (min/max scenes from args),
+        and caches the performer_id/force selectors; ``run()`` embeds one performer
+        or all and logs the summary; ``dispatch`` owns uniform error handling
+        (missing image-embedding config surfaces via its RuntimeError branch).
         """
-        Generate embeddings for performers from aggregated scene embeddings.
 
-        Args:
-            args: Task arguments containing:
-                - performer_id: Optional specific performer ID
-                - force: "true" to regenerate existing embeddings
-        """
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.recommendations.types import EngagementWeights
-            from stash_ai.tasks.embed_performers import (
-                EmbedPerformersTask,
-                EmbedPerformersTaskConfig,
-            )
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.embed_performers import EmbedPerformersTask
 
-            self.log("Initializing performer embedding generation...", "info")
+            return EmbedPerformersTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get image embedding config
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if not image_provider or not image_model:
-                self.error(
-                    "Image embedding provider and model are required for performer embedding. "
-                    "Please configure image_embedding_provider and image_embedding_model in plugin settings."
-                )
-                return
-
-            # Build embedding config
-            embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
-            )
-
-            self.log(f"Using {image_provider}/{image_model} for performer embeddings", "info")
-
-            # Get engagement weights from settings
-            weights = cast(
-                "EngagementWeights",
-                {
-                    "o_count": float(plugin_settings.get("rec_o_weight") or "20.0"),
-                    "view_count": float(plugin_settings.get("rec_view_weight") or "2.0"),
-                    "play_duration": float(plugin_settings.get("rec_duration_weight") or "1.0"),
-                    "rating": float(plugin_settings.get("rec_rating_weight") or "1.5"),
-                },
-            )
-
-            # Task config
-            min_scenes = int(args.get("min_scenes") or "2")
-            max_scenes = int(args.get("max_scenes") or "50")
-
-            task_config = EmbedPerformersTaskConfig(
-                min_scenes=min_scenes,
-                max_scenes=max_scenes,
-                use_engagement_weighting=True,
-                include_unwatched=True,
-            )
-
-            # Create task
-            task = EmbedPerformersTask(
-                stash=self.stash_client,
-                embedding_config=embedding_config,
-                task_config=task_config,
-                weights=weights,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            # Check for specific performer or all performers
-            performer_id = args.get("performer_id")
-            force = str(args.get("force", "")).lower() == "true"
-
-            if performer_id:
-                self.log(f"Embedding performer {performer_id}...", "info")
-                result = task.embed_performer(int(performer_id), force=force)
-
-                if result.get("success"):
-                    if result.get("skipped"):
-                        self.log(f"Skipped: {result.get('message')}", "info")
-                    else:
-                        self.log(
-                            f"Embedded {result.get('performer_name')}: "
-                            f"{result.get('contributing_scenes')} scenes, "
-                            f"score {result.get('total_engagement_score', 0):.2f}",
-                            "info",
-                        )
-                else:
-                    self.error(f"Failed: {result.get('error')}")
-            else:
-                self.log("Embedding all performers...", "info")
-                result = task.embed_all_performers(force=force)
-
-                self.log("=" * 50, "info")
-                self.log("PERFORMER EMBEDDING COMPLETE", "info")
-                self.log("=" * 50, "info")
-                self.log(f"Total performers: {result.get('total_performers', 0)}", "info")
-                self.log(f"Embedded: {result.get('embedded', 0)}", "info")
-                self.log(f"Skipped (already embedded): {result.get('skipped', 0)}", "info")
-                self.log(f"Insufficient scenes: {result.get('insufficient_scenes', 0)}", "info")
-                self.log(f"Errors: {result.get('errors', 0)}", "info")
-
-                if result.get("error_details"):
-                    for err in result["error_details"][:5]:
-                        self.log(f"  - {err}", "warning")
-
-        except ImportError as e:
-            self.error(f"Failed to import performer embedding modules: {e}")
-        except Exception as e:
-            import traceback
-
-            self.error(f"Performer embedding failed: {e}")
-            self.log(f"Traceback: {traceback.format_exc()}", "debug")
+        self._dispatch(args, build_task)
 
     def run_describe_performers(self, args: dict[str, Any]) -> None:
         """
