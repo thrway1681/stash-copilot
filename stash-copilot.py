@@ -603,36 +603,20 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_detect_tag_gaps(self, args: dict[str, Any]) -> None:
-        """Run the tag gap detection task."""
-        try:
+        """Run tag gap detection through the dispatch seam (#4, commit 4).
+
+        Result-producing: ``TagGapDetectionTask.from_context`` resolves the
+        model_key + request_id/force, ``run()`` writes its own ``tag_gaps_*``
+        files (declares ``result_key="tag_gaps"``), ``on_result`` logs the
+        complete/failed summary, and ``dispatch`` owns uniform error handling.
+        """
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.tag_gap_detection import TagGapDetectionTask
 
-            self.log("Initializing tag gap detection...", "info")
+            return TagGapDetectionTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            from stash_ai.embeddings.config import EmbeddingConfig
-
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
-
-            task = TagGapDetectionTask(
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
-
-            force = args.get("force", "false").lower() == "true"
-            report = task.run(
-                request_id=args.get("request_id", ""),
-                force=force,
-            )
-
+        def on_result(_task: Any, report: Any) -> None:
             if report["status"] == "complete":
                 self.log(
                     f"Tag gap detection complete: {report['avg_coverage']:.0%} avg coverage, "
@@ -642,8 +626,7 @@ class MyPlugin(StashPlugin):
             else:
                 self.log(f"Tag gap detection failed: {report.get('error', 'Unknown')}", "error")
 
-        except Exception as e:
-            self.error(f"Detect Tag Gaps failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_get_scene_tag_gaps(self, args: dict[str, Any]) -> None:
         """Get tag gap detail for a specific scene (sidebar query)."""
