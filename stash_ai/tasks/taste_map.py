@@ -11,6 +11,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 from stash_ai.embeddings.storage import EmbeddingStorage
 from stash_ai.embeddings.tag_vocabulary import TagVocabulary
@@ -29,6 +30,13 @@ from stash_ai.recommendations.types import (
 class TasteMapTask:
     """Task for building the taste map visualization data."""
 
+    #: Frontend result-file key (the backend half of the cross-stack task
+    #: contract). The task writes its own ``taste_map_{request_id}.json`` (plus a
+    #: ``taste_map_latest.json`` persistence file) internally, so this declares
+    #: the key for the dispatch-seam guard rather than routing through
+    #: :class:`ResultStore`.
+    result_key = "taste_map"
+
     def __init__(
         self,
         stash: StashClient,
@@ -41,13 +49,54 @@ class TasteMapTask:
         self.progress = progress_callback or (lambda cur, total: None)
         self.model_key = model_key
         self.storage = EmbeddingStorage(model_key=model_key)
+        # Run parameters resolved from the task context by ``from_context``;
+        # ``run()`` falls back to these when called with no arguments (the
+        # parameter-less ``run()`` the dispatch seam invokes).
+        self.request_id: str = ""
+        self.scoring_method: str = "base_weighted"
+        self.num_clusters: int | None = None
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> TasteMapTask:
+        """Build the task from a standard :class:`TaskContext`.
+
+        The self-describing construction hook for the dispatch seam (#4):
+        resolves the image-embedding ``model_key`` from the context's plugin
+        settings and the run parameters (``request_id``, ``scoring_method``,
+        ``num_clusters``) from its args, so the entry-point handler only points
+        ``dispatch`` at this class. The per-task construction knowledge that used
+        to live in the handler now lives here, on the task.
+        """
+        from stash_ai.embeddings.config import EmbeddingConfig
+
+        ctx.log("Initializing taste map generation...", "info")
+
+        # Resolve model_key from image embedding settings (same as recommendations).
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        model_key = "siglip"  # Default
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+
+        task = cls(
+            stash=ctx.stash,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            model_key=model_key,
+        )
+
+        num_clusters_str = ctx.args.get("num_clusters", "")
+        task.request_id = str(ctx.args.get("request_id", ""))
+        task.scoring_method = ctx.args.get("scoring_method", "base_weighted")
+        task.num_clusters = int(num_clusters_str) if num_clusters_str else None
+        return task
 
     def run(
         self,
-        request_id: str = "",
+        request_id: str | None = None,
         weights: dict[str, float] | None = None,
         time_decay: dict[str, float] | None = None,
-        scoring_method: str = "base_weighted",
+        scoring_method: str | None = None,
         num_clusters: int | None = None,
     ) -> TasteMapResponse:
         """Run the taste map pipeline.
@@ -60,15 +109,26 @@ class TasteMapTask:
             5. Save results to JSON
 
         Args:
-            request_id: Unique ID for result file.
+            request_id: Unique ID for result file. Defaults to the value
+                resolved by :meth:`from_context` (so the dispatch seam can call
+                ``run()`` with no arguments).
             weights: Engagement weight overrides.
             time_decay: Time decay config.
-            scoring_method: 'base_weighted' or 'time_decayed'.
-            num_clusters: Fixed number of clusters (None = auto-detect).
+            scoring_method: 'base_weighted' or 'time_decayed'. Defaults to the
+                ``from_context`` value.
+            num_clusters: Fixed number of clusters (None = auto-detect). Defaults
+                to the ``from_context`` value.
 
         Returns:
             Complete taste map response.
         """
+        # Fall back to the parameters resolved from the task context, so the
+        # parameter-less ``run()`` the dispatch seam invokes uses the request's
+        # args. Explicit callers (tests, direct use) still override.
+        request_id = request_id if request_id is not None else self.request_id
+        scoring_method = scoring_method if scoring_method is not None else self.scoring_method
+        if num_clusters is None:
+            num_clusters = self.num_clusters
         try:
             total_steps = 5
             self.progress(0, total_steps)
