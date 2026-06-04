@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 from stash_ai.embeddings.storage import EmbeddingStorage
 
@@ -86,6 +87,42 @@ class TagSuggestionsTask:
         self.storage = storage
         self.log = log_callback or (lambda msg, level: None)
         self.model_key = model_key
+        # Run param resolved by ``from_context``; ``run()`` falls back to it.
+        self.scene_id: int = 0
+
+    #: Frontend result-file key. The handler routes ``run()``'s result through
+    #: the seam's ``ResultStore`` (``assets/tag_suggestions_{request_id}.json``).
+    result_key = "tag_suggestions"
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> TagSuggestionsTask:
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding ``model_key`` (default ``"openclip:ViT-H-14"``
+        — the handler's effective fallback, NOT the ``__init__`` "siglip" default)
+        + storage, and caches ``scene_id`` from args.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(
+                provider=image_provider, model=image_model, device=image_device
+            ).model_key
+        else:
+            model_key = "openclip:ViT-H-14"
+        ctx.log(f"Using embedding model: {model_key}", "debug")
+
+        task = cls(
+            stash=ctx.stash,
+            storage=EmbeddingStorage(model_key=model_key),
+            log_callback=ctx.log,
+            model_key=model_key,
+        )
+        task.scene_id = int(ctx.args.get("scene_id", 0))
+        return task
 
     def _compute_similarities(
         self,
@@ -158,15 +195,19 @@ class TagSuggestionsTask:
 
         return results
 
-    def run(self, scene_id: int) -> TagSuggestionsResult:
+    def run(self, scene_id: int | None = None) -> TagSuggestionsResult:
         """Compute tag suggestions for a scene.
 
         Args:
-            scene_id: The scene to analyze
+            scene_id: The scene to analyze. ``None`` falls back to the
+                ``from_context``-resolved value (so the dispatch seam can call
+                ``run()`` with no arguments).
 
         Returns:
             TagSuggestionsResult with suggestions or error
         """
+        if scene_id is None:
+            scene_id = self.scene_id
         try:
             # 1. Load frame embeddings
             frame_data = self.storage._load_all_frames_for_scene(scene_id)
