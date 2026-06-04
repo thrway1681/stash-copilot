@@ -58,19 +58,28 @@ test.describe('feature flows (stub backend)', () => {
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 
-  test('Gaps tab: request_id-keyed get_scene_tag_gaps resolves via the stub', async ({ page }) => {
+  test('Gaps tab: get_scene_tag_gaps renders coverage + preview_tag_impact resolves via the stub', async ({ page }) => {
     const pageErrors = await collectPageErrors(page);
 
-    // The Gaps tab auto-triggers get_scene_tag_gaps on open (keyed by request_id
-    // -> tag_gaps_scene_<requestId>.json). The fixture sets has_data:false, so
-    // the panel resolves to its empty state.
+    // The Gaps tab auto-triggers get_scene_tag_gaps on open (request_id-keyed ->
+    // tag_gaps_scene_<rid>.json). The fixture sets has_data:true, so the panel
+    // renders the coverage detail — which includes the Test Tag Impact UI.
     await openSceneTab(page, 1, 'scene-copilot-gaps');
 
     const panel = page.locator('#scene-copilot-gaps-panel');
     await expect(panel).toBeVisible({ timeout: 10000 });
 
     await expect(panel.locator('.stash-copilot-sidebar-gaps-loading')).toBeHidden({ timeout: 20000 });
-    await expect(panel.locator('.stash-copilot-sidebar-gaps-empty')).toBeVisible({ timeout: 5000 });
+    await expect(panel.locator('.stash-copilot-sidebar-gaps-coverage')).toBeVisible({ timeout: 5000 });
+
+    // Exercise preview_tag_impact (request_id-keyed -> tag_preview_<rid>.json):
+    // type a tag and click Preview; the fixture renders the coverage impact.
+    await panel.locator('.stash-copilot-sidebar-gaps-tag-input').fill('outdoor');
+    await panel.locator('.stash-copilot-sidebar-gaps-preview-btn').click();
+
+    const previewResult = panel.locator('.stash-copilot-sidebar-gaps-preview-result');
+    await expect(previewResult).toBeVisible({ timeout: 15000 });
+    await expect(previewResult.locator('.stash-copilot-sidebar-gaps-preview-tag')).toContainText('outdoor');
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });

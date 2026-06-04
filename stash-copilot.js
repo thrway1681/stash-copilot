@@ -10818,38 +10818,21 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
 
             try {
                 const requestId = `${sceneId}_${tagName.replace(/\W/g, '_')}_${Date.now()}`;
-                await runPluginTask('Preview Tag Impact', {
+                // dispatchTask (#5) owns invocation + polling: preview_tag_impact
+                // is request_id-keyed -> tag_preview_{request_id}.json (15s budget).
+                // The result carries no status field (just coverage numbers or an
+                // error), so the first file that lands is terminal.
+                const data = await dispatchTask('previewTagImpact', {
                     scene_id: String(sceneId),
                     tag_name: tagName,
                     request_id: requestId
-                });
-
-                const resultFile = `/plugin/stash-copilot/assets/tag_preview_${requestId}.json`;
-                let attempts = 0;
-                const maxAttempts = 30;
-
-                const poll = setInterval(async () => {
-                    attempts++;
-                    if (attempts > maxAttempts) {
-                        clearInterval(poll);
-                        resultEl.innerHTML = `<div class="stash-copilot-sidebar-gaps-preview-error">Timed out</div>`;
-                        previewBtn.disabled = false;
-                        previewBtn.textContent = 'Preview';
-                        return;
-                    }
-                    try {
-                        const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                        if (resp.ok) {
-                            clearInterval(poll);
-                            const data = await resp.json();
-                            renderTagPreviewResult(resultEl, data, sceneId);
-                            previewBtn.disabled = false;
-                            previewBtn.textContent = 'Preview';
-                        }
-                    } catch (e) { /* not ready yet */ }
-                }, 500);
+                }, { isDone: () => true });
+                renderTagPreviewResult(resultEl, data, sceneId);
+                previewBtn.disabled = false;
+                previewBtn.textContent = 'Preview';
             } catch (e) {
-                resultEl.innerHTML = `<div class="stash-copilot-sidebar-gaps-preview-error">Error: ${escapeHtml(e.message)}</div>`;
+                const msg = /timed out/i.test(e.message || '') ? 'Timed out' : 'Error: ' + e.message;
+                resultEl.innerHTML = `<div class="stash-copilot-sidebar-gaps-preview-error">${escapeHtml(msg)}</div>`;
                 previewBtn.disabled = false;
                 previewBtn.textContent = 'Preview';
             }

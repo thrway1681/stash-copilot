@@ -1,5 +1,10 @@
 {
   "status": "complete",
-  "has_data": false,
+  "has_data": true,
+  "coverage_ratio": 0.6,
+  "covered_frames": 6,
+  "uncovered_frames": 4,
+  "total_frames": 10,
+  "threshold": 0.25,
   "request_id": "__REQUEST_ID__"
 }

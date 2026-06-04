@@ -1,0 +1,10 @@
+{
+  "tag_name": "outdoor",
+  "current_coverage": 0.6,
+  "new_coverage": 0.8,
+  "frames_covered": 2,
+  "total_uncovered": 4,
+  "max_similarity": 0.42,
+  "threshold": 0.25,
+  "request_id": "__REQUEST_ID__"
+}
