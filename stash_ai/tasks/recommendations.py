@@ -23,6 +23,7 @@ from ..tools.database import get_readonly_connection, get_stash_db_path
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 class RecommendationsTask:
@@ -35,6 +36,12 @@ class RecommendationsTask:
     3. Enrich results with scene details
     4. Write results to JSON file for frontend
     """
+
+    #: Frontend result-file key (the backend half of the cross-stack contract).
+    #: The task writes its own ``recommendations_{request_id}.json`` via
+    #: :meth:`_save_results`, so this declares the key for the dispatch-seam guard
+    #: rather than routing through ``ResultStore`` (same as ``TasteMapTask``).
+    result_key = "recommendations"
 
     def __init__(
         self,
@@ -62,27 +69,139 @@ class RecommendationsTask:
             log_callback=self.log,
         )
 
+        # Run-time parameters resolved by ``from_context``; ``run()`` falls back
+        # to these when called with no arguments (the dispatch seam path). The
+        # min_similarity default is 0.1 — the handler's effective default, not
+        # run()'s 0.3 signature default.
+        self.mode: str = "discover_new"
+        self.scoring_method: str = "base_weighted"
+        self.limit: int = 120
+        self.per_page: int = 12
+        self.top_scenes_for_profile: int = 20
+        self.o_weight: float = 3.0
+        self.view_weight: float = 1.5
+        self.duration_weight: float = 1.0
+        self.rating_weight: float = 1.5
+        self.half_life_days: float = 30.0
+        self.min_similarity: float = 0.1
+        self.request_id: str = ""
+        self.seed_scene_id: int | None = None
+        self.seed_weight: float = 0.3
+        self.engagement_weight: float = 0.6
+        self.session_scene_ids: list[int] | None = None
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "RecommendationsTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves ``model_key`` (same as ``TasteMapTask``) and all ~16 run
+        parameters from ``ctx.args`` + ``ctx.plugin_settings`` using the handler's
+        exact ``or``-fallback idioms, caching them on the instance for :meth:`run`.
+        Result-producing: declares ``result_key`` but writes its own
+        ``recommendations_{request_id}.json`` via :meth:`_save_results`.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        ctx.log("Initializing recommendation generation...", "info")
+
+        args = ctx.args
+        ps = ctx.plugin_settings
+
+        # Parse arguments with fallback to plugin settings (verbatim from the
+        # old handler — the ``or`` fallbacks are load-bearing).
+        mode = args.get("rec_mode", "discover_new")
+        scoring_method = args.get("scoring_method", "base_weighted")
+        limit = int(args.get("limit", 120))
+        per_page = int(args.get("per_page", 12))
+        request_id = args.get("request_id", "")
+        top_scenes = int(ps.get("rec_top_scenes") or args.get("top_scenes", 20))
+        o_weight = float(ps.get("rec_o_weight") or args.get("o_weight", 3.0))
+        view_weight = float(ps.get("rec_view_weight") or args.get("view_weight", 1.5))
+        duration_weight = float(ps.get("rec_duration_weight") or args.get("duration_weight", 1.0))
+        rating_weight = float(ps.get("rec_rating_weight") or args.get("rating_weight", 1.5))
+        half_life = float(ps.get("rec_time_decay_days") or args.get("half_life_days", 30.0))
+        min_similarity = float(args.get("min_similarity", 0.1))
+
+        seed_scene_id_str = args.get("seed_scene_id", "")
+        seed_scene_id = int(seed_scene_id_str) if seed_scene_id_str else None
+        seed_weight = float(args.get("seed_weight", 0.3))
+        engagement_weight = float(args.get("engagement_weight", 0.6))
+
+        session_scene_ids_str = args.get("session_scene_ids", "")
+        session_scene_ids = (
+            [int(x.strip()) for x in session_scene_ids_str.split(",") if x.strip()]
+            if session_scene_ids_str
+            else None
+        )
+
+        ctx.log(f"Running recommendations: mode={mode}, scoring={scoring_method}", "info")
+        if session_scene_ids:
+            ctx.log(f"Session mode: {len(session_scene_ids)} scenes", "info")
+        if seed_scene_id:
+            ctx.log(f"Seed scene: {seed_scene_id} (weight: {seed_weight})", "info")
+        ctx.log(
+            f"Weights: o_count={o_weight}, views={view_weight}, "
+            f"duration={duration_weight}, rating={rating_weight}",
+            "debug",
+        )
+
+        # model_key from image embedding settings (defaults to siglip).
+        image_provider = ps.get("image_embedding_provider")
+        image_model = ps.get("image_embedding_model")
+        model_key = "siglip"
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+            ctx.log(f"Using embedding model: {model_key}", "debug")
+
+        task = cls(
+            stash=ctx.stash,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            model_key=model_key,
+        )
+        task.mode = mode
+        task.scoring_method = scoring_method
+        task.limit = limit
+        task.per_page = per_page
+        task.request_id = request_id
+        task.top_scenes_for_profile = top_scenes
+        task.o_weight = o_weight
+        task.view_weight = view_weight
+        task.duration_weight = duration_weight
+        task.rating_weight = rating_weight
+        task.half_life_days = half_life
+        task.min_similarity = min_similarity
+        task.seed_scene_id = seed_scene_id
+        task.seed_weight = seed_weight
+        task.engagement_weight = engagement_weight
+        task.session_scene_ids = session_scene_ids
+        return task
+
     def run(
         self,
-        mode: str = "discover_new",
-        scoring_method: str = "base_weighted",
-        limit: int = 120,
-        per_page: int = 12,
-        top_scenes_for_profile: int = 20,
-        o_weight: float = 3.0,
-        view_weight: float = 1.5,
-        duration_weight: float = 1.0,
-        rating_weight: float = 1.5,
-        half_life_days: float = 30.0,
-        min_similarity: float = 0.3,
-        request_id: str = "",
+        mode: str | None = None,
+        scoring_method: str | None = None,
+        limit: int | None = None,
+        per_page: int | None = None,
+        top_scenes_for_profile: int | None = None,
+        o_weight: float | None = None,
+        view_weight: float | None = None,
+        duration_weight: float | None = None,
+        rating_weight: float | None = None,
+        half_life_days: float | None = None,
+        min_similarity: float | None = None,
+        request_id: str | None = None,
         seed_scene_id: int | None = None,
-        seed_weight: float = 0.3,
-        engagement_weight: float = 0.6,
+        seed_weight: float | None = None,
+        engagement_weight: float | None = None,
         session_scene_ids: list[int] | None = None,
     ) -> RecommendationResponse:
         """
         Run the recommendation task.
+
+        Every parameter defaults to ``None`` and falls back to the value resolved
+        by :meth:`from_context` (so the dispatch seam can call ``run()`` with no
+        arguments); explicit callers still override.
 
         Args:
             mode: "discover_new" or "rewatch"
@@ -106,6 +225,32 @@ class RecommendationsTask:
         Returns:
             RecommendationResponse with results
         """
+        # Fall back to the from_context-resolved values when called with no args.
+        mode = mode if mode is not None else self.mode
+        scoring_method = scoring_method if scoring_method is not None else self.scoring_method
+        limit = limit if limit is not None else self.limit
+        per_page = per_page if per_page is not None else self.per_page
+        top_scenes_for_profile = (
+            top_scenes_for_profile
+            if top_scenes_for_profile is not None
+            else self.top_scenes_for_profile
+        )
+        o_weight = o_weight if o_weight is not None else self.o_weight
+        view_weight = view_weight if view_weight is not None else self.view_weight
+        duration_weight = duration_weight if duration_weight is not None else self.duration_weight
+        rating_weight = rating_weight if rating_weight is not None else self.rating_weight
+        half_life_days = half_life_days if half_life_days is not None else self.half_life_days
+        min_similarity = min_similarity if min_similarity is not None else self.min_similarity
+        request_id = request_id if request_id is not None else self.request_id
+        seed_scene_id = seed_scene_id if seed_scene_id is not None else self.seed_scene_id
+        seed_weight = seed_weight if seed_weight is not None else self.seed_weight
+        engagement_weight = (
+            engagement_weight if engagement_weight is not None else self.engagement_weight
+        )
+        session_scene_ids = (
+            session_scene_ids if session_scene_ids is not None else self.session_scene_ids
+        )
+
         self.log("Starting recommendation generation", "info")
         self.progress(0, 4)
 
