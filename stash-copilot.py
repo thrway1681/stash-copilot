@@ -3193,114 +3193,20 @@ class MyPlugin(StashPlugin):
             self.error(f"Failed to write embedding models file: {e}")
 
     def run_embed_o_moments(self, args: dict[str, Any]) -> None:
+        """Run O-moment embedding through the dispatch seam (#4, commit 4).
+
+        Log-only: ``EmbedOMomentsTask`` resolves its embedding + O-moment config
+        and the single-scene/all-scenes selectors from the ``TaskContext`` in
+        ``from_context``, and its ``run()`` embeds and logs the summary; missing
+        image-embedding config surfaces via ``dispatch``'s RuntimeError branch.
         """
-        Run the O-moment embedding generation task.
 
-        Creates embeddings from frames around O markers for
-        "Peak Moments" recommendations.
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.embed_o_moments import EmbedOMomentsTask
 
-        Args:
-            args: Task arguments containing optional scene_id and force flag
-        """
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.tasks.embed_o_moments import EmbedOMomentsConfig, EmbedOMomentsTask
+            return EmbedOMomentsTask.from_context(ctx)
 
-            self.log("Initializing O-moment embedding generation...", "info")
-
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get image embedding config
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if not image_provider or not image_model:
-                self.error(
-                    "Image embedding provider and model are required for O-moment embedding. "
-                    "Please configure image_embedding_provider and image_embedding_model in plugin settings."
-                )
-                return
-
-            # Build embedding config
-            embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
-            )
-
-            self.log(f"Using {image_provider}/{image_model} for O-moment embeddings", "info")
-
-            # Build O-moment config from settings
-            window_seconds = float(
-                args.get("window_seconds") or plugin_settings.get("o_moment_window") or "120"
-            )
-            frames_per_window = int(
-                args.get("frames_per_window") or plugin_settings.get("o_moment_frames") or "12"
-            )
-            o_tag_name = args.get("o_tag") or plugin_settings.get("o_tag_name") or "O"
-
-            embed_config = EmbedOMomentsConfig(
-                window_seconds=window_seconds,
-                frames_per_window=frames_per_window,
-                o_tag_name=o_tag_name,
-            )
-
-            self.log(
-                f"O-moment config: window={window_seconds}s, frames={frames_per_window}, tag='{o_tag_name}'",
-                "debug",
-            )
-
-            # Create task
-            task = EmbedOMomentsTask(
-                stash=self.stash_client,
-                embedding_config=embedding_config,
-                embed_config=embed_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            # Check for specific scene or all scenes
-            scene_id = args.get("scene_id")
-            force = str(args.get("force", "")).lower() == "true"
-
-            if scene_id:
-                self.log(f"Embedding O-moments for scene {scene_id}...", "info")
-                result = task.embed_scene_o_moments(int(scene_id), force=force)
-
-                self.log(f"Result: {result}", "info")
-                if result.get("success"):
-                    self.log(
-                        f"Embedded {result.get('embedded', 0)} O-moments, "
-                        f"skipped {result.get('skipped', 0)} (already embedded)",
-                        "info",
-                    )
-            else:
-                self.log("Embedding O-moments for all scenes with O markers...", "info")
-
-                # Check for scene_ids filter
-                scene_ids_str = args.get("scene_ids", "")
-                scene_ids = None
-                if scene_ids_str:
-                    scene_ids = [int(s.strip()) for s in scene_ids_str.split(",") if s.strip()]
-
-                result = task.embed_all_o_moments(force=force, scene_ids=scene_ids)
-
-                self.log("O-moment embedding complete:", "info")
-                self.log(f"  Total scenes: {result.get('total_scenes', 0)}", "info")
-                self.log(f"  Total markers: {result.get('total_markers', 0)}", "info")
-                self.log(f"  Embedded: {result.get('embedded', 0)}", "info")
-                self.log(f"  Skipped: {result.get('skipped', 0)}", "info")
-                self.log(f"  Errors: {result.get('errors', 0)}", "info")
-
-                if result.get("error_details"):
-                    for err in result["error_details"][:5]:
-                        self.log(f"  - {err}", "warning")
-
-        except ImportError as e:
-            self.error(f"Failed to import O-moment embedding modules: {e}")
-        except Exception as e:
-            self.error(f"O-moment embedding failed: {e}")
+        self._dispatch(args, build_task)
 
     def run_embed_cached_frames(self, args: dict[str, Any]) -> None:
         """

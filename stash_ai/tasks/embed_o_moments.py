@@ -15,6 +15,7 @@ from .o_moment_extractor import OMomentExtractor
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 @dataclass
@@ -65,6 +66,13 @@ class EmbedOMomentsTask:
         self.log = log_callback or (lambda msg, level: None)
         self.progress = progress_callback or (lambda cur, total: None)
 
+        # Run-time selectors resolved by ``from_context``; ``run()`` reads these
+        # to pick the single-scene vs all-scenes path (the dispatch seam calls
+        # ``run()`` with no arguments).
+        self.scene_id: int | None = None
+        self.force: bool = False
+        self.scene_ids: list[int] | None = None
+
         # Initialize providers lazily
         self._embedder: Any | None = None
 
@@ -110,6 +118,107 @@ class EmbedOMomentsTask:
                 if self._embedder is None:
                     self._embedder = get_embedding_provider(self.embedding_config)
         return self._embedder
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "EmbedOMomentsTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding config and the O-moment config from plugin
+        settings/args (with the same ``or``-chain defaults the old handler used),
+        and caches the single-scene/all-scenes run selectors on the instance for
+        :meth:`run`. Log-only: no ``result_key`` — unlike ``taste_map`` this writes
+        no result file; ``run()`` logs its summary directly.
+        """
+        ctx.log("Initializing O-moment embedding generation...", "info")
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        image_device = ctx.plugin_settings.get("image_embedding_device") or "auto"
+        if not image_provider or not image_model:
+            raise RuntimeError(
+                "Image embedding provider and model are required for O-moment embedding. "
+                "Please configure image_embedding_provider and image_embedding_model in plugin settings."
+            )
+
+        embedding_config = EmbeddingConfig(
+            provider=image_provider,
+            model=image_model,
+            device=image_device,
+        )
+        ctx.log(f"Using {image_provider}/{image_model} for O-moment embeddings", "info")
+
+        window_seconds = float(
+            ctx.args.get("window_seconds") or ctx.plugin_settings.get("o_moment_window") or "120"
+        )
+        frames_per_window = int(
+            ctx.args.get("frames_per_window") or ctx.plugin_settings.get("o_moment_frames") or "12"
+        )
+        o_tag_name = ctx.args.get("o_tag") or ctx.plugin_settings.get("o_tag_name") or "O"
+
+        embed_config = EmbedOMomentsConfig(
+            window_seconds=window_seconds,
+            frames_per_window=frames_per_window,
+            o_tag_name=o_tag_name,
+        )
+        ctx.log(
+            f"O-moment config: window={window_seconds}s, frames={frames_per_window}, tag='{o_tag_name}'",
+            "debug",
+        )
+
+        task = cls(
+            stash=ctx.stash,
+            embedding_config=embedding_config,
+            embed_config=embed_config,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+        )
+
+        # Cache run selectors (single-scene if scene_id is truthy, else all scenes).
+        scene_id = ctx.args.get("scene_id")
+        task.scene_id = int(scene_id) if scene_id else None
+        task.force = str(ctx.args.get("force", "")).lower() == "true"
+        scene_ids_str = ctx.args.get("scene_ids", "")
+        task.scene_ids = (
+            [int(s.strip()) for s in scene_ids_str.split(",") if s.strip()]
+            if scene_ids_str
+            else None
+        )
+        return task
+
+    def run(self) -> dict[str, Any]:
+        """Embed O-moments for one scene or all scenes (mode from the cached selectors).
+
+        Log-only: returns the result dict (satisfying the dispatch ``run()``
+        contract) but writes no result file — the summary is logged here, matching
+        the old handler's output exactly.
+        """
+        if self.scene_id is not None:
+            self.log(f"Embedding O-moments for scene {self.scene_id}...", "info")
+            result = self.embed_scene_o_moments(self.scene_id, force=self.force)
+
+            self.log(f"Result: {result}", "info")
+            if result.get("success"):
+                self.log(
+                    f"Embedded {result.get('embedded', 0)} O-moments, "
+                    f"skipped {result.get('skipped', 0)} (already embedded)",
+                    "info",
+                )
+            return result
+
+        self.log("Embedding O-moments for all scenes with O markers...", "info")
+        result = self.embed_all_o_moments(force=self.force, scene_ids=self.scene_ids)
+
+        self.log("O-moment embedding complete:", "info")
+        self.log(f"  Total scenes: {result.get('total_scenes', 0)}", "info")
+        self.log(f"  Total markers: {result.get('total_markers', 0)}", "info")
+        self.log(f"  Embedded: {result.get('embedded', 0)}", "info")
+        self.log(f"  Skipped: {result.get('skipped', 0)}", "info")
+        self.log(f"  Errors: {result.get('errors', 0)}", "info")
+
+        if result.get("error_details"):
+            for err in result["error_details"][:5]:
+                self.log(f"  - {err}", "warning")
+        return result
 
     def embed_scene_o_moments(
         self,
