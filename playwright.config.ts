@@ -1,87 +1,44 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
+ * Playwright config for the plugin's UI tests (issue #5 testing infra).
+ *
+ * The tests drive a real Stash instance with the plugin UI installed:
+ *   - locally: `docker compose -f docker-compose.dev.yml up -d` + install the
+ *     plugin (scripts/ci/install_plugin_ui.sh) + `reloadPlugins`, then
+ *     `npx playwright test`.
+ *   - in CI: the `ui` job in .github/workflows/ci.yml does the same headlessly.
+ *
+ * STASH_URL points at that instance (default matches the dev compose: host
+ * 3000 -> container 9999). CI runs chromium-only for speed/determinism.
  */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
+const STASH_URL = process.env.STASH_URL || 'http://localhost:3000';
 
-/**
- * See https://playwright.dev/docs/test-configuration.
- */
 export default defineConfig({
-  testDir: './tests',
-  /* Directory for test artifacts (videos, traces, screenshots) */
+  testDir: './tests/e2e',
+  /* Artifacts (screenshots, video, traces) — uploaded as CI artifacts. */
   outputDir: './test-recordings',
-  /* Run tests in files in parallel */
   fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
+  /* Fail the build on CI if a test.only was left in the source. */
   forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
+  /* The plugin injects into a shared Stash instance; serialize on CI to avoid
+     cross-test interference (one Stash, shared plugin asset files). */
   workers: process.env.CI ? 1 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: [['html', { host: '0.0.0.0', port: 9323 }]],
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['html', { open: 'never' }]]
+    : [['list'], ['html', { open: 'never' }]],
   use: {
-    /* Base URL to use in actions like `await page.goto('')`. */
-    // baseURL: 'http://localhost:3000',
-
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+    baseURL: STASH_URL,
+    /* Always capture evidence — these tests are the cross-stack UI guard. */
     trace: 'on-first-retry',
-
-    /* Record video of all tests */
-    video: 'on',
-
-    /* Take screenshot on failure */
+    video: 'retain-on-failure',
     screenshot: 'on',
   },
-
-  /* Configure projects for major browsers */
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
-
-    /* Test against mobile viewports. */
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: { ...devices['Pixel 5'] },
-    // },
-    // {
-    //   name: 'Mobile Safari',
-    //   use: { ...devices['iPhone 12'] },
-    // },
-
-    /* Test against branded browsers. */
-    // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    // },
   ],
-
-  /* Run your local dev server before starting the tests */
-  // webServer: {
-  //   command: 'npm run start',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: !process.env.CI,
-  // },
 });
