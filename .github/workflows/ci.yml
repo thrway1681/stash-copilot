@@ -229,7 +229,7 @@ jobs:
             -d '{"query":"mutation{ reloadPlugins }"}'
           # Keep the smoke backend-free: don't let scene views auto-fire vision.
           curl -fsS http://localhost:3000/graphql -H 'Content-Type: application/json' \
-            -d '{"query":"mutation($id:ID!,$in:Map!){configurePlugin(plugin_id:$id,input:$in)}","variables":{"id":"stash-copilot","input":{"vision_auto_analyze":"false"}}}'
+            -d '{"query":"mutation($id:ID!,$input:Map!){configurePlugin(plugin_id:$id,input:$input)}","variables":{"id":"stash-copilot","input":{"vision_auto_analyze":"false"}}}'
 
       - name: Run Playwright UI smoke
         env:
