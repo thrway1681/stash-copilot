@@ -266,4 +266,33 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('AI Insights modal: fixed-file generate_summary resolves via the stub', async ({ page }) => {
+    // generate_summary is the FIXED-file keying path (last_summary.json, no
+    // request_id in the name). The migration also fixes a real bug: the old call
+    // site invoked a non-existent 'Generate Summary' task + an undefined
+    // pollForSummary. The stub stamps a fresh generated_at (__NOW__) so the
+    // freshness poll resolves.
+    const pageErrors = await collectPageErrors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    // Summary is the default tab; click it explicitly for robustness.
+    await page.locator('.stash-copilot-insights-tab[data-tab="summary"]').click();
+
+    const generateBtn = page.locator('.stash-copilot-generate-btn');
+    await generateBtn.click();
+
+    // The fresh summary renders and the button returns to its idle, enabled state.
+    await expect(page.locator('.stash-copilot-summary-text')).toContainText('CI Library Summary', {
+      timeout: 20000,
+    });
+    await expect(generateBtn).toHaveText('Generate Summary', { timeout: 5000 });
+    await expect(generateBtn).toBeEnabled();
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });
