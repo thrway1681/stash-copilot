@@ -1525,78 +1525,21 @@ class MyPlugin(StashPlugin):
             self.log(f"Error cleaning up deleted scene {scene_id}: {e}", "warning")
 
     def run_build_frame_index(self, args: dict[str, Any]) -> None:
+        """Build the frame-level FAISS search index, via the dispatch seam (#4, commit 4).
+
+        Log-only: ``BuildFrameIndexTask.from_context`` resolves the embedding
+        model key (explicit ``model_key`` arg wins, else the configured image
+        provider/model); ``run()`` builds + persists the index with progress
+        logging, or logs an error and stops if the provider is not configured;
+        ``dispatch`` owns uniform error handling.
         """
-        Build FAISS index for frame-level semantic search.
 
-        Args:
-            args: Task arguments containing:
-                - model_key: Optional model key (defaults to configured model)
-        """
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.frame_search import FrameSearchIndex
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.build_frame_index import BuildFrameIndexTask
 
-            # Get model key from args or settings
-            requested_model_key = args.get("model_key", "").strip()
+            return BuildFrameIndexTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            if requested_model_key:
-                model_key = requested_model_key
-            else:
-                image_provider = plugin_settings.get("image_embedding_provider")
-                image_model = plugin_settings.get("image_embedding_model")
-
-                if not image_provider or not image_model:
-                    self.error(
-                        "Image embedding provider not configured. Set up in Plugin Settings first."
-                    )
-                    return
-
-                embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
-                    device="cpu",  # Not used for indexing
-                )
-                model_key = embedding_config.model_key
-
-            self.log(f"Building frame search index for model: {model_key}", "info")
-
-            # Initialize storage and index
-            storage = EmbeddingStorage(model_key=model_key)
-            plugin_dir = os.path.dirname(os.path.abspath(__file__))
-            assets_dir = os.path.join(plugin_dir, "assets")
-
-            frame_index = FrameSearchIndex(assets_dir=assets_dir, model_key=model_key)
-
-            # Build with progress reporting
-            def progress_callback(current: int, total: int) -> None:
-                self.progress(current, total)
-                if current % 50000 == 0 or current == total:
-                    self.log(f"Indexed {current:,} / {total:,} frames", "info")
-
-            info = frame_index.build(
-                storage=storage,
-                progress_callback=progress_callback,
-            )
-
-            self.log(
-                f"Frame search index built successfully:\n"
-                f"  Model: {info.model_key}\n"
-                f"  Frames: {info.frame_count:,}\n"
-                f"  Scenes: {info.scene_count:,}\n"
-                f"  Dimensions: {info.dimensions}",
-                "info",
-            )
-
-        except ValueError as e:
-            self.error(str(e))
-        except Exception as e:
-            self.error(f"Failed to build frame search index: {e}")
-            import traceback
-
-            self.log(traceback.format_exc(), "debug")
+        self._dispatch(args, build_task)
 
     def run_cleanup_orphaned(self, args: dict[str, Any]) -> None:
         """Clean up embeddings for deleted scenes, through the dispatch seam (#4, commit 4).
