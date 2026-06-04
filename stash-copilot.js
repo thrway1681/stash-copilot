@@ -14141,97 +14141,61 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         if (contentEl) contentEl.style.display = 'none';
         if (loadingEl) loadingEl.style.display = 'flex';
 
-        const requestId = `tags_${sceneId}_${Date.now()}`;
         tagSuggestionState.loading = true;
         tagSuggestionState.error = null;
 
-        try {
-            await runPluginTask('Get Tag Suggestions', {
-                scene_id: String(sceneId),
-                request_id: requestId,
-            });
-            pollTagSuggestions(container, sceneId, requestId, statusEl);
-        } catch (error) {
-            log(`Tag suggestions error: ${error.message}`, 'error');
+        const showError = (html) => {
             tagSuggestionState.loading = false;
-            tagSuggestionState.error = error.message;
             if (loadingEl) loadingEl.style.display = 'none';
             if (errorEl) {
                 errorEl.style.display = 'block';
-                errorEl.innerHTML = `<div class="stash-copilot-error-message">Error: ${escapeHtml(error.message)}</div>`;
+                errorEl.innerHTML = html;
             }
-        }
-    }
+        };
 
-    /**
-     * Poll for tag suggestion results
-     */
-    async function pollTagSuggestions(container, sceneId, requestId, statusEl) {
-        const loadingEl = container.querySelector('.stash-copilot-tags-loading');
-        const contentEl = container.querySelector('.stash-copilot-tags-content');
-        const errorEl = container.querySelector('.stash-copilot-tags-error');
-
-        const maxAttempts = 60;  // 60 seconds timeout
-        const pollInterval = 1000;
-
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            try {
-                const response = await fetch(`/plugin/stash-copilot/assets/tag_suggestions_${requestId}.json?t=${Date.now()}`, {
-                    cache: 'no-store'
-                });
-                if (response.ok) {
-                    const data = await response.json();
-
-                    if (data.status === 'complete') {
-                        tagSuggestionState.suggestions = data.suggestions || [];
-                        tagSuggestionState.currentPage = 0;
-                        tagSuggestionState.loading = false;
-
-                        if (loadingEl) loadingEl.style.display = 'none';
-                        if (contentEl) {
-                            contentEl.style.display = 'block';
-                            renderTagSuggestions(contentEl, sceneId);
-                        }
-                        return;
-                    } else if (data.status === 'error') {
-                        tagSuggestionState.loading = false;
-                        tagSuggestionState.error = data.error || 'Unknown error';
-                        if (loadingEl) loadingEl.style.display = 'none';
-                        if (errorEl) {
-                            errorEl.style.display = 'block';
-                            errorEl.innerHTML = `<div class="stash-copilot-error-message">${escapeHtml(data.error || 'Unknown error')}</div>`;
-                        }
-                        return;
-                    } else if (data.status === 'no_embeddings') {
-                        tagSuggestionState.loading = false;
-                        if (loadingEl) loadingEl.style.display = 'none';
-                        if (errorEl) {
-                            errorEl.style.display = 'block';
-                            errorEl.innerHTML = `
-                                <div class="stash-copilot-error-message">
-                                    <p>No embeddings found for this scene.</p>
-                                    <p class="stash-copilot-error-hint">Run <strong>Embed All Scenes</strong> from AI Insights to generate embeddings first.</p>
-                                </div>
-                            `;
-                        }
-                        return;
-                    } else if (data.status === 'processing' && statusEl) {
-                        statusEl.textContent = data.message || 'Processing...';
+        try {
+            // dispatchTask (#5) owns invocation + polling. Terminal states are
+            // complete/error/no_embeddings; 'processing' streams a status line.
+            const data = await dispatchTask('getTagSuggestions', { scene_id: String(sceneId) }, {
+                isDone: (d) => d.status === 'complete' || d.status === 'error' || d.status === 'no_embeddings',
+                onPoll: (d) => {
+                    if (d.status === 'processing' && statusEl) {
+                        statusEl.textContent = d.message || 'Processing...';
                     }
                 }
-            } catch (e) {
-                // File not ready yet, continue polling
-            }
-            await new Promise(r => setTimeout(r, pollInterval));
-        }
+            });
 
-        // Timeout
-        tagSuggestionState.loading = false;
-        tagSuggestionState.error = 'Timeout waiting for results';
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (errorEl) {
-            errorEl.style.display = 'block';
-            errorEl.innerHTML = `<div class="stash-copilot-error-message">Timeout waiting for results. Please try again.</div>`;
+            if (data.status === 'error') {
+                tagSuggestionState.error = data.error || 'Unknown error';
+                showError(`<div class="stash-copilot-error-message">${escapeHtml(data.error || 'Unknown error')}</div>`);
+                return;
+            }
+            if (data.status === 'no_embeddings') {
+                showError(`
+                    <div class="stash-copilot-error-message">
+                        <p>No embeddings found for this scene.</p>
+                        <p class="stash-copilot-error-hint">Run <strong>Embed All Scenes</strong> from AI Insights to generate embeddings first.</p>
+                    </div>
+                `);
+                return;
+            }
+
+            // complete
+            tagSuggestionState.suggestions = data.suggestions || [];
+            tagSuggestionState.currentPage = 0;
+            tagSuggestionState.loading = false;
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (contentEl) {
+                contentEl.style.display = 'block';
+                renderTagSuggestions(contentEl, sceneId);
+            }
+        } catch (error) {
+            log(`Tag suggestions error: ${error.message}`, 'error');
+            tagSuggestionState.error = error.message;
+            // dispatchTask rejects on invocation failure or timeout; preserve the
+            // old per-path copy (timeout vs generic error).
+            const timedOut = /timed out/i.test(error.message || '');
+            showError(`<div class="stash-copilot-error-message">${timedOut ? 'Timeout waiting for results. Please try again.' : 'Error: ' + escapeHtml(error.message)}</div>`);
         }
     }
 
