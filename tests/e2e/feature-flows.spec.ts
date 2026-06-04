@@ -74,4 +74,23 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('Tags tab: request_id-keyed get_tag_suggestions resolves via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    // The Tags tab shows an intro with a "Suggest Tags" button (no auto-load);
+    // clicking it runs get_tag_suggestions (request_id-keyed). The fixture
+    // returns status:complete with empty suggestions -> content empty state.
+    await openSceneTab(page, 1, 'scene-copilot-tags');
+
+    const panel = page.locator('#scene-copilot-tags-panel');
+    await expect(panel).toBeVisible({ timeout: 10000 });
+
+    await panel.locator('.stash-copilot-suggest-tags-btn').click();
+
+    await expect(panel.locator('.stash-copilot-tags-loading')).toBeHidden({ timeout: 20000 });
+    await expect(panel.locator('.stash-copilot-tags-content')).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });
