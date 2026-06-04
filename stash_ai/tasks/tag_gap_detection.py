@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 # ---------------------------------------------------------------------------
 # Types
@@ -69,6 +70,12 @@ class TagGapDetectionTask:
     marked as *uncovered*.
     """
 
+    #: Frontend result-file key. The task writes its own ``tag_gaps_{request_id}.
+    #: json`` (plus ``tag_gaps_latest.json``) via :meth:`_save_results`, so this
+    #: declares the key for the dispatch-seam guard rather than routing through
+    #: ``ResultStore`` (same as ``TasteMapTask``).
+    result_key = "tag_gaps"
+
     def __init__(
         self,
         stash: StashClient,
@@ -82,6 +89,37 @@ class TagGapDetectionTask:
         self.model_key = model_key
         self.storage = EmbeddingStorage(model_key=model_key)
         self._cached_threshold: float | None = None
+        # Run params resolved by ``from_context``; ``run()`` falls back to these.
+        self.request_id: str = ""
+        self.force: bool = False
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> TagGapDetectionTask:
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding ``model_key`` (same as ``TasteMapTask``) and
+        caches the ``request_id``/``force`` run selectors. Result-producing: writes
+        its own ``tag_gaps_*`` files via :meth:`_save_results`.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        ctx.log("Initializing tag gap detection...", "info")
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        model_key = "siglip"
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+
+        task = cls(
+            stash=ctx.stash,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            model_key=model_key,
+        )
+        task.request_id = str(ctx.args.get("request_id", ""))
+        task.force = ctx.args.get("force", "false").lower() == "true"
+        return task
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -89,19 +127,24 @@ class TagGapDetectionTask:
 
     def run(
         self,
-        request_id: str = "",
-        force: bool = False,
+        request_id: str | None = None,
+        force: bool | None = None,
     ) -> TagGapReport:
         """Run the full tag-gap detection pipeline.
 
         Args:
             request_id: Unique ID for result file (enables frontend polling).
+                ``None`` falls back to the ``from_context``-resolved value (so the
+                dispatch seam can call ``run()`` with no arguments).
             force: If ``True``, re-process scenes that already have coverage
-                data.  Otherwise only new scenes are processed.
+                data.  Otherwise only new scenes are processed. ``None`` falls
+                back to the ``from_context``-resolved value.
 
         Returns:
             A :class:`TagGapReport` dict.
         """
+        request_id = request_id if request_id is not None else self.request_id
+        force = force if force is not None else self.force
         try:
             total_steps = 5
             self.progress(0, total_steps)
