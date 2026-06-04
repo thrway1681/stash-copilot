@@ -40,6 +40,13 @@ cp "$ROOT/scripts/ci/stub-run-plugin.sh" "$DEST/run-plugin.sh"
 chmod +x "$DEST/run-plugin.sh"
 printf '# CI UI-test stub — the real backend runs on the host, not in-container.\n' > "$DEST/stash-copilot.py"
 
+# Fixture result bodies the stub writes per task mode (one file per feature
+# under UI test; modes without one are a no-op). The stub reads ./fixtures/.
+rm -rf "$DEST/fixtures"
+if [ -d "$ROOT/scripts/ci/fixtures" ]; then
+  cp -r "$ROOT/scripts/ci/fixtures" "$DEST/fixtures"
+fi
+
 echo "[install_plugin_ui] installed plugin UI into $DEST"
 ls -1 "$DEST"
 exit "$missing_vendor"

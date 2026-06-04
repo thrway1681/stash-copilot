@@ -22,9 +22,10 @@ export default defineConfig({
   /* Fail the build on CI if a test.only was left in the source. */
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  /* The plugin injects into a shared Stash instance; serialize on CI to avoid
-     cross-test interference (one Stash, shared plugin asset files). */
-  workers: process.env.CI ? 1 : undefined,
+  /* The plugin injects into ONE shared Stash instance whose plugin job queue
+     serialises task execution, so run tests serially everywhere (not just CI)
+     to avoid cross-test interference over the shared result-file assets. */
+  workers: 1,
   reporter: process.env.CI
     ? [['github'], ['list'], ['html', { open: 'never' }]]
     : [['list'], ['html', { open: 'never' }]],
