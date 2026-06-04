@@ -882,7 +882,14 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_dismiss_tag_merge(self, args: dict[str, Any]) -> None:
-        """Dismiss a tag merge candidate (not duplicates)."""
+        """Dismiss a tag-merge candidate through the dispatch seam (#4, commit 4).
+
+        Side-effecting: ``DismissTagMergeTask`` records the dismissal in
+        EmbeddingStorage; ``on_result`` persists the ``{"status": "complete"}``
+        confirmation through the seam's ResultStore (``tag_dismiss_{request_id}.
+        json``); ``dispatch`` owns uniform error handling. The missing-name guard
+        stays here (before the seam) so it's a clean no-op.
+        """
         tag_a_name = args.get("tag_a_name", "")
         tag_b_name = args.get("tag_b_name", "")
         request_id = args.get("request_id", "")
@@ -891,23 +898,15 @@ class MyPlugin(StashPlugin):
             self.log("Missing tag_a_name or tag_b_name", "error")
             return
 
-        try:
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.tag_dedup import DismissTagMergeTask
 
-            storage = EmbeddingStorage()
-            storage.save_dismissed_tag_merge(tag_a_name, tag_b_name)
-            self.log(f"Dismissed merge: {tag_a_name} / {tag_b_name}", "info")
+            return DismissTagMergeTask.from_context(ctx)
 
-            # Save confirmation for frontend
-            if request_id:
-                assets_dir = os.path.join(PLUGIN_DIR, "assets")
-                os.makedirs(assets_dir, exist_ok=True)
-                result_path = os.path.join(assets_dir, f"tag_dismiss_{request_id}.json")
-                with open(result_path, "w") as f:
-                    json.dump({"status": "complete"}, f)
+        def on_result(task: Any, result: Any) -> None:
+            self._result_store().save(task.result_key, request_id, result)
 
-        except Exception as e:
-            self.log(f"Failed to dismiss tag merge: {e}", "error")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_prepare_labeling_session(self, args: dict[str, Any]) -> None:
         """Prepare a labeling session with uncertainty-sampled frames."""

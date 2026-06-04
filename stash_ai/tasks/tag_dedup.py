@@ -460,3 +460,46 @@ class MergeTagsTask:
             return None
         except Exception:
             return None
+
+
+class DismissTagMergeTask:
+    """Mark a tag-merge candidate as 'not duplicates' (a side-effecting action).
+
+    Records the dismissal in :class:`EmbeddingStorage` and returns a small
+    ``{"status": "complete"}`` confirmation that the handler persists for the
+    frontend via the seam's ``ResultStore`` (``tag_dismiss_{request_id}.json``).
+    """
+
+    result_key: ClassVar[str] = "tag_dismiss"
+
+    def __init__(
+        self,
+        storage: EmbeddingStorage,
+        log_callback: Callable[[str, str], None] | None = None,
+        tag_a_name: str = "",
+        tag_b_name: str = "",
+    ) -> None:
+        self.storage = storage
+        self.log = log_callback or (lambda msg, level: None)
+        self.tag_a_name = tag_a_name
+        self.tag_b_name = tag_b_name
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> DismissTagMergeTask:
+        """Build from a standard :class:`TaskContext`; caches the two tag names from args.
+
+        Uses the default-model_key ``EmbeddingStorage()`` (the dismissed-merge
+        table is model-agnostic, matching the old handler).
+        """
+        return cls(
+            storage=EmbeddingStorage(),
+            log_callback=ctx.log,
+            tag_a_name=ctx.args.get("tag_a_name", ""),
+            tag_b_name=ctx.args.get("tag_b_name", ""),
+        )
+
+    def run(self) -> dict[str, str]:
+        """Persist the dismissal and return the frontend confirmation payload."""
+        self.storage.save_dismissed_tag_merge(self.tag_a_name, self.tag_b_name)
+        self.log(f"Dismissed merge: {self.tag_a_name} / {self.tag_b_name}", "info")
+        return {"status": "complete"}
