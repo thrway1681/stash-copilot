@@ -250,10 +250,9 @@ jobs:
       - name: Diagnostics on failure
         if: failure()
         run: |
-          echo "=== plugin JS served? ==="
-          curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/plugin/stash-copilot/assets/stash-copilot.js || true
-          echo "=== plugin JS present in injected /javascript bundle? (match count) ==="
-          curl -s http://localhost:3000/javascript | grep -c "stash-copilot" || true
+          echo "=== plugin UI JS served? (per-plugin endpoint, not legacy /javascript) ==="
+          curl -s -o /dev/null -w "/plugin/stash-copilot/javascript -> HTTP %{http_code}, %{size_download} bytes\n" \
+            http://localhost:3000/plugin/stash-copilot/javascript || true
           echo "=== installed plugins ==="
           curl -s http://localhost:3000/graphql -H 'Content-Type: application/json' \
             -d '{"query":"{ plugins { id name enabled } }"}' || true

@@ -23,6 +23,21 @@ function collectPageErrors(page: Page): Error[] {
   return errors;
 }
 
+/**
+ * After first-run setup Stash shows a one-time version/changelog dialog that
+ * overlays the page (`.ModalComponent.modal.show`) and intercepts clicks. Each
+ * Playwright test gets a fresh context, so it reappears per test — dismiss it
+ * before interacting. No-op if absent.
+ */
+async function dismissStashDialogs(page: Page): Promise<void> {
+  const closeBtn = page.locator('[role="dialog"].modal.show button:has-text("Close")');
+  for (let i = 0; i < 3; i++) {
+    if (!(await closeBtn.first().isVisible().catch(() => false))) return;
+    await closeBtn.first().click().catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+}
+
 test.describe('plugin UI smoke', () => {
   test('library/home page loads without plugin errors', async ({ page }) => {
     const pageErrors = collectPageErrors(page);
@@ -70,6 +85,9 @@ test.describe('plugin UI smoke', () => {
     await page.goto('/scenes/1', { waitUntil: 'domcontentloaded' });
     await page.locator('.scene-tabs').first().waitFor({ timeout: 30000 });
     await page.locator('.stash-copilot-tab-nav').first().waitFor({ timeout: 20000 });
+
+    // Clear Stash's one-time changelog dialog so it can't intercept the click.
+    await dismissStashDialogs(page);
 
     // The Analyze tab is purely client-side (no backend task) until the user
     // clicks "Analyze", so opening it must not require the plugin backend.
