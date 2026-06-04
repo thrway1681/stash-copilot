@@ -1291,89 +1291,33 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_chat(self, args: dict[str, Any]) -> None:
-        """
-        Run the Chat task - multi-turn conversation with tool transparency.
+        """Run the Chat task through the dispatch seam (#4, commit 4).
 
-        Args:
-            args: Task arguments containing message and optional conversation_id
+        Multi-turn conversation with tool transparency. Log-only: ``ChatTask``
+        persists ``assets/chat_history.json`` itself; ``from_context`` resolves
+        the text-LLM config (with the load-bearing max_tokens=8192), embedding
+        config, and excluded tags; ``on_result`` logs the response; ``dispatch``
+        owns the uniform 4-clause error handling. The empty-message guard stays
+        here (before the seam) so an empty message is a clean no-op.
         """
-        try:
-            from stash_ai.config import get_text_llm_settings
-            from stash_ai.embeddings.config import EmbeddingConfig
+        message = args.get("message", "")
+        if not message:
+            self.error("No message provided")
+            return
+
+        self.log(f"Chat message: {message[:100]}...", "info")
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.chat import ChatTask
 
-            message = args.get("message", "")
-            conversation_id = args.get("conversation_id")
+            return ChatTask.from_context(ctx)
 
-            if not message:
-                self.error("No message provided")
-                return
-
-            self.log(f"Chat message: {message[:100]}...", "info")
-
-            # Get plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get text LLM settings
-            text_llm = get_text_llm_settings(plugin_settings, args)
-            self.log(f"Using LLM: {text_llm.provider}/{text_llm.model}", "info")
-
-            # Chat needs higher max_tokens than default (1024) because tool calls
-            # may include large argument payloads (e.g., hundreds of scene IDs).
-            # With 1024 tokens, the LLM response gets truncated mid-tool-call,
-            # causing arguments to arrive as empty strings.
-            llm_config = text_llm.to_config(max_tokens=8192)
-
-            # Get image embedding config for text-based scene search
-            embedding_config = None
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if image_provider and image_model:
-                embedding_config = EmbeddingConfig(
-                    provider=cast("str", image_provider),
-                    model=cast("str", image_model),
-                    device=image_device,
-                )
-                self.log(f"Text search enabled with: {image_provider}/{image_model}", "debug")
-
-            # Parse excluded tags (comma-separated string to list)
-            excluded_tags_str = plugin_settings.get("excluded_tags", "")
-            excluded_tags = (
-                [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
-                if excluded_tags_str
-                else []
-            )
-
-            if excluded_tags:
-                self.log(f"Excluding tags from AI tools: {excluded_tags}", "debug")
-
-            # Create and run the task
-            task = ChatTask(
-                stash=self.stash_client,
-                llm_config=llm_config,
-                embedding_config=embedding_config,
-                excluded_tags=excluded_tags,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
-
-            response = task.run(message, conversation_id)
-
-            # Output the response
+        def on_result(_task: Any, response: Any) -> None:
             self.log("Chat response generated", "info")
-            for line in response.split("\n"):
+            for line in str(response).split("\n"):
                 self.log(line, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import Stash AI modules: {e}")
-        except ConnectionError as e:
-            self.error(f"Connection error: {e}")
-        except RuntimeError as e:
-            self.error(f"Task failed: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_clear_chat(self, args: dict[str, Any]) -> None:
         """Clear the chat conversation history through the dispatch seam (#4, commit 4).
