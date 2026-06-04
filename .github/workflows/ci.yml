@@ -222,6 +222,13 @@ jobs:
           STASH_URL=http://localhost:3000 STASH_LIBRARY="$MEDIA_ABS" \
             EMBED_DEVICE=cpu bash scripts/dev_stash_bootstrap.sh
 
+      - name: Seed synthetic performers + tags for UI flow tests
+        env:
+          STASH_URL: http://localhost:3000
+        # Synthetic, non-adult DB structure (no media, no secrets) so the
+        # stub-backed flow tests for performer/tag features have data to render.
+        run: bash scripts/ci/seed_stash_ui.sh
+
       - name: Reload plugins + disable auto-analyze
         run: |
           # Discover the freshly-installed plugin (the "Reload plugins" button).

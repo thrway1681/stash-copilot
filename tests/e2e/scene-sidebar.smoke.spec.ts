@@ -79,6 +79,22 @@ test.describe('plugin UI smoke', () => {
     expect(pageErrors, `uncaught JS errors on scene page:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 
+  test('performer page injects the AI tabs without errors', async ({ page }) => {
+    const pageErrors = collectPageErrors(page);
+
+    // The seed creates performers; id 1 always exists after seeding. The plugin
+    // injects two tabs (Similar / Profile) on the performer detail page.
+    await page.goto('/performers/1', { waitUntil: 'domcontentloaded' });
+    await dismissStashDialogs(page);
+
+    const tabNav = page.locator('.stash-copilot-performer-tab-nav');
+    await tabNav.first().waitFor({ timeout: 30000 });
+    await expect(tabNav).toHaveCount(2);
+    await expect(page.locator('a[data-rb-event-key="performer-copilot-similar"]')).toHaveCount(1);
+
+    expect(pageErrors, `uncaught JS errors on performer page:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
   test('clicking an AI tab activates its panel', async ({ page }) => {
     const pageErrors = collectPageErrors(page);
 
