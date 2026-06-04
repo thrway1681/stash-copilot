@@ -1,0 +1,12 @@
+{
+  "status": "complete",
+  "silhouette_score": 0.42,
+  "optimal_k": 1,
+  "clusters": [
+    { "cluster_id": 0, "auto_label": "Cluster A", "size": 1, "scene_count": 1, "top_tags": [] }
+  ],
+  "scenes": [
+    { "scene_id": 1, "cluster_id": 0, "x": 0.1, "y": 0.2, "z": 0.0, "title": "clip", "play_count": 1, "o_counter": 0, "engagement_score": 5 }
+  ],
+  "request_id": "__REQUEST_ID__"
+}
