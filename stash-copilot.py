@@ -2883,102 +2883,20 @@ class MyPlugin(StashPlugin):
             self.error(f"Failed to write search results file: {e}")
 
     def run_get_embedding_models(self, args: dict[str, Any]) -> None:
-        """
-        Get available embedding models and their statistics.
+        """List available embedding models + stats, through the dispatch seam (#4, commit 4).
 
-        Returns a JSON file with all model keys that have stored embeddings,
-        along with their embedding counts and dimensions.
-
-        Args:
-            args: Task arguments containing:
-                - request_id: Unique request ID for frontend validation
+        Result-producing: ``GetEmbeddingModelsTask`` writes its own
+        ``assets/embedding_models_{request_id|latest}.json`` on both success and
+        error (declares ``result_key="embedding_models"``), so it owns its file
+        I/O and error handling; ``dispatch`` just runs it.
         """
 
-        try:
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.embedding_models import GetEmbeddingModelsTask
 
-            request_id = args.get("request_id", "")
+            return GetEmbeddingModelsTask.from_context(ctx)
 
-            self.log("Fetching available embedding models...", "info")
-
-            # Create storage instance (model_key doesn't matter for getting all models)
-            storage = EmbeddingStorage(model_key="siglip")
-
-            # Get available model keys
-            model_keys = storage.get_available_model_keys()
-
-            # Get stats for each model
-            models_data = []
-            for model_key in model_keys:
-                model_storage = EmbeddingStorage(model_key=model_key)
-                stats = model_storage.get_stats()
-                models_data.append(
-                    {
-                        "model_key": model_key,
-                        "count": stats["total_embeddings"],
-                        "dimensions": list(stats["dimensions_distribution"].keys())[0]
-                        if stats["dimensions_distribution"]
-                        else None,
-                        "oldest": stats["oldest_embedding"],
-                        "newest": stats["newest_embedding"],
-                    }
-                )
-
-            # Get current plugin settings for reference
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            current_provider = plugin_settings.get("image_embedding_provider", "")
-            current_model = plugin_settings.get("image_embedding_model", "")
-
-            # Build current model key for comparison
-            current_model_key = None
-            if current_provider and current_model:
-                if current_provider == "siglip":
-                    current_model_key = "siglip"
-                else:
-                    current_model_key = f"{current_provider}:{current_model}"
-
-            # Write results
-            result_data = {
-                "status": "complete",
-                "models": models_data,
-                "current_model_key": current_model_key,
-                "request_id": request_id,
-            }
-
-            self._write_embedding_models_result(request_id, result_data)
-            self.log(f"Found {len(models_data)} embedding models", "info")
-
-        except ImportError as e:
-            self.error(f"Failed to import embedding modules: {e}")
-            self._write_embedding_models_result(
-                args.get("request_id", ""),
-                {"status": "error", "error": f"Failed to import embedding modules: {e}"},
-            )
-        except Exception as e:
-            self.error(f"Error getting embedding models: {e}")
-            self._write_embedding_models_result(
-                args.get("request_id", ""), {"status": "error", "error": str(e)}
-            )
-
-    def _write_embedding_models_result(self, request_id: str, data: dict[str, Any]) -> None:
-        """Write embedding models result to JSON file for frontend polling."""
-        import json as json_module
-        import os
-
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        assets_dir = os.path.join(plugin_dir, "assets")
-
-        os.makedirs(assets_dir, exist_ok=True)
-
-        filename = f"embedding_models_{request_id or 'latest'}.json"
-        result_file = os.path.join(assets_dir, filename)
-
-        try:
-            with open(result_file, "w") as f:
-                json_module.dump(data, f)
-            self.log(f"Wrote embedding models to: {result_file}", "debug")
-        except Exception as e:
-            self.error(f"Failed to write embedding models file: {e}")
+        self._dispatch(args, build_task)
 
     def run_embed_o_moments(self, args: dict[str, Any]) -> None:
         """Run O-moment embedding through the dispatch seam (#4, commit 4).
