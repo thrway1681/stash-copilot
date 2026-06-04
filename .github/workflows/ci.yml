@@ -175,3 +175,90 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.dev.yml down -v || true
+
+  # Browser check of the plugin UI against a real Stash (issue #5 testing infra).
+  # CI only runs the Python suite otherwise, so a JS/UI regression would slip
+  # through; this loads the plugin in a headless Chromium and asserts the AI
+  # sidebar tabs inject with no uncaught errors. The plugin's ML/LLM backend
+  # can't run in the Alpine Stash container, so the UI is installed with a stub
+  # exec (scripts/ci/stub-run-plugin.sh) and tasks that need a backend are not
+  # fired in the P0 smoke. Non-required (like integration) while it stabilises.
+  ui:
+    name: UI (Playwright)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # `npm ci` also runs the postinstall that vendors marked/purify/plotly
+      # into assets/, which install_plugin_ui.sh copies into the plugin dir.
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Generate synthetic media
+        run: |
+          mkdir -p docker/media
+          for src in "testsrc" "smptebars" "rgbtestsrc" "mandelbrot" "yuvtestsrc" "gradients"; do
+            ffmpeg -y -f lavfi -i "${src}=size=320x240:rate=12" \
+              -t 60 -pix_fmt yuv420p -c:v libx264 "docker/media/clip_${src}.mp4" >/dev/null 2>&1 \
+              || echo "skip unsupported lavfi source: ${src}"
+          done
+          count=$(ls -1 docker/media/*.mp4 2>/dev/null | wc -l)
+          test "$count" -ge 1 || { echo "no synthetic clips produced"; exit 1; }
+
+      - name: Install plugin UI into the dev Stash (stub backend exec)
+        run: bash scripts/ci/install_plugin_ui.sh
+
+      - name: Boot dev Stash (DB bind mount + media path parity)
+        env:
+          MEDIA_ABS: ${{ github.workspace }}/docker/media
+        run: |
+          export STASH_MEDIA_DIR="$MEDIA_ABS" STASH_MEDIA_MOUNT="$MEDIA_ABS"
+          docker compose -f docker-compose.dev.yml up -d
+          STASH_URL=http://localhost:3000 STASH_LIBRARY="$MEDIA_ABS" \
+            EMBED_DEVICE=cpu bash scripts/dev_stash_bootstrap.sh
+
+      - name: Reload plugins + disable auto-analyze
+        run: |
+          # Discover the freshly-installed plugin (the "Reload plugins" button).
+          curl -fsS http://localhost:3000/graphql -H 'Content-Type: application/json' \
+            -d '{"query":"mutation{ reloadPlugins }"}'
+          # Keep the smoke backend-free: don't let scene views auto-fire vision.
+          curl -fsS http://localhost:3000/graphql -H 'Content-Type: application/json' \
+            -d '{"query":"mutation($id:ID!,$input:Map!){configurePlugin(plugin_id:$id,input:$input)}","variables":{"id":"stash-copilot","input":{"vision_auto_analyze":"false"}}}'
+
+      - name: Run Playwright UI smoke
+        env:
+          STASH_URL: http://localhost:3000
+        run: npx playwright test
+
+      - name: Upload Playwright report + recordings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-recordings/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== plugin UI JS served? (per-plugin endpoint, not legacy /javascript) ==="
+          curl -s -o /dev/null -w "/plugin/stash-copilot/javascript -> HTTP %{http_code}, %{size_download} bytes\n" \
+            http://localhost:3000/plugin/stash-copilot/javascript || true
+          echo "=== installed plugins ==="
+          curl -s http://localhost:3000/graphql -H 'Content-Type: application/json' \
+            -d '{"query":"{ plugins { id name enabled } }"}' || true
+          echo "=== stash logs ==="
+          docker compose -f docker-compose.dev.yml logs --tail=200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.dev.yml down -v || true
