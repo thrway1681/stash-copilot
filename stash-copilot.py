@@ -826,47 +826,29 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_find_duplicate_tags(self, args: dict[str, Any]) -> None:
-        """Find duplicate tags using embedding similarity."""
+        """Find duplicate tags through the dispatch seam (#4, commit 4).
+
+        Result-producing: ``FindDuplicateTagsTask.from_context`` resolves the
+        model_key + storage; ``on_result`` persists the result through the seam's
+        ResultStore (keyed by the task's ``result_key``) and logs the summary;
+        ``dispatch`` owns uniform error handling.
+        """
         request_id = args.get("request_id", "")
 
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.tag_dedup import FindDuplicateTagsTask
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
+            return FindDuplicateTagsTask.from_context(ctx)
 
-            if image_provider and image_model:
-                embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
-                )
-                model_key = embedding_config.model_key
-            else:
-                model_key = "openclip:ViT-H-14"
-
-            storage = EmbeddingStorage(model_key=model_key)
-            task = FindDuplicateTagsTask(
-                stash=self.stash_client,
-                storage=storage,
-                log_callback=self.log,
-                model_key=model_key,
-            )
-
-            result = task.run()
-
-            # Save result for frontend polling via the dispatch seam's result store.
+        def on_result(task: Any, result: Any) -> None:
+            # Persist for frontend polling via the dispatch seam's result store.
             self._result_store().save(task.result_key, request_id, result)
-
             if result["status"] == "complete":
                 self.log(f"Found {len(result['candidates'])} duplicate tag candidates", "info")
             else:
                 self.log(f"Tag dedup: {result.get('error', 'unknown error')}", "warning")
 
-        except Exception as e:
-            self.error(f"Find duplicate tags failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_merge_tags(self, args: dict[str, Any]) -> None:
         """Merge one tag into another."""
