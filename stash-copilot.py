@@ -1811,117 +1811,39 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_find_similar_performers(self, args: dict[str, Any]) -> None:
+        """Find performers similar to a performer, via the dispatch seam (#4, commit 4).
+
+        Result-producing: ``FindSimilarPerformersTask.from_context`` resolves the
+        performer/limits + image-embedding settings; ``run()`` reuses
+        ``EmbedPerformersTask.find_similar_performers`` and returns the polled
+        result dict (or an error dict, owning its own runtime error handling);
+        ``on_result`` persists it through the seam's ResultStore as
+        ``similar_performers_{request_id}.json``. The request_id falls back to the
+        performer id (the frontend's profile path polls by bare id), matching the
+        old handler. The missing-performer_id guard writes its error result here
+        (before the seam).
         """
-        Find performers visually similar to a given performer.
-
-        Args:
-            args: Task arguments containing:
-                - performer_id: Required source performer ID
-                - limit: Maximum results (default 10)
-                - min_similarity: Minimum similarity threshold (default 0.5)
-                - request_id: Optional request ID for frontend tracking
-        """
-
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.tasks.embed_performers import EmbedPerformersTask
-
-            performer_id = args.get("performer_id")
-            if not performer_id:
-                self._write_similar_performers_result(
-                    "", {"status": "error", "error": "performer_id is required"}
-                )
-                return
-
-            limit = int(args.get("limit") or "10")
-            min_similarity = float(args.get("min_similarity") or "0.0")
-            request_id = args.get("request_id") or str(performer_id)
-
-            self.log(f"Finding performers similar to {performer_id}...", "info")
-
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get image embedding config
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
-
-            if not image_provider or not image_model:
-                self._write_similar_performers_result(
-                    request_id,
-                    {"status": "error", "error": "Image embedding provider not configured"},
-                )
-                return
-
-            embedding_config = EmbeddingConfig(
-                provider=image_provider,
-                model=image_model,
-                device=image_device,
+        performer_id = args.get("performer_id")
+        if not performer_id:
+            self.error("performer_id is required")
+            self._result_store().save(
+                "similar_performers",
+                str(performer_id) if performer_id else "unknown",
+                {"status": "error", "error": "performer_id is required"},
             )
+            return
 
-            # Create task (reusing EmbedPerformersTask for find_similar_performers)
-            task = EmbedPerformersTask(
-                stash=self.stash_client,
-                embedding_config=embedding_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-            )
+        request_id = args.get("request_id") or str(performer_id)
 
-            result = task.find_similar_performers(
-                performer_id=int(performer_id),
-                limit=limit,
-                min_similarity=min_similarity,
-            )
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.find_similar_performers import FindSimilarPerformersTask
 
-            if result.get("success"):
-                self.log(
-                    f"Found {len(result.get('similar_performers', []))} similar performers", "info"
-                )
-                self._write_similar_performers_result(
-                    request_id,
-                    {
-                        "status": "complete",
-                        "source_performer": result.get("source_performer"),
-                        "results": result.get("similar_performers", []),
-                        "total_found": result.get("total_found", 0),
-                    },
-                )
-            else:
-                self._write_similar_performers_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": result.get("error"),
-                    },
-                )
+            return FindSimilarPerformersTask.from_context(ctx)
 
-        except ImportError as e:
-            self._write_similar_performers_result(
-                args.get("request_id", ""),
-                {"status": "error", "error": f"Failed to import modules: {e}"},
-            )
-        except Exception as e:
-            self._write_similar_performers_result(
-                args.get("request_id", ""), {"status": "error", "error": str(e)}
-            )
+        def on_result(_task: Any, result: Any) -> None:
+            self._result_store().save("similar_performers", request_id, result)
 
-    def _write_similar_performers_result(self, request_id: str, data: dict[str, Any]) -> None:
-        """Write similar performers result to JSON file for frontend polling."""
-        import json as json_module
-        import os
-
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        assets_dir = os.path.join(plugin_dir, "assets")
-        os.makedirs(assets_dir, exist_ok=True)
-
-        result_file = os.path.join(assets_dir, f"similar_performers_{request_id}.json")
-
-        try:
-            with open(result_file, "w") as f:
-                json_module.dump(data, f)
-            self.log(f"Wrote similar performers results to: {result_file}", "debug")
-        except Exception as e:
-            self.error(f"Failed to write similar performers results file: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_hook(self, hook_context: dict[str, Any]) -> None:
         """
