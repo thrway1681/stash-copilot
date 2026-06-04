@@ -1,0 +1,7 @@
+{
+  "status": "complete",
+  "query": "test query",
+  "results": [],
+  "has_more": false,
+  "request_id": "__REQUEST_ID__"
+}

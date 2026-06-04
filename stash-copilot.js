@@ -277,7 +277,6 @@
         totalFetched: 0,        // Total results fetched so far
         hasMoreOnServer: true,  // Server has more results to fetch
         requestId: null,
-        pollInterval: null,
         lastQuery: localStorage.getItem('stash-copilot-last-search') || '',
         // Model selection for embedding comparison
         availableModels: [],    // List of {model_key, count, dimensions} from backend
@@ -6058,57 +6057,37 @@
             return;
         }
 
-        const requestId = `models-${Date.now()}`;
-
         try {
-            // Run the get_embedding_models task
-            await runPluginTask('Get Embedding Models', {
-                request_id: requestId
-            });
+            // dispatchTask (#5) owns invocation + polling: get_embedding_models
+            // is request_id-keyed -> embedding_models_{request_id}.json (6s budget).
+            const data = await dispatchTask('getEmbeddingModels', {});
 
-            // Poll for results
-            const resultUrl = `/plugin/stash-copilot/assets/embedding_models_${requestId}.json`;
-            let attempts = 0;
-            const maxAttempts = 30;
-
-            while (attempts < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-                attempts++;
-
-                try {
-                    const response = await fetch(resultUrl);
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.status === 'complete') {
-                            searchState.availableModels = data.models || [];
-                            searchState.modelsLoaded = true;
-
-                            // If no model selected, use the current configured model or first available
-                            if (!searchState.selectedModel && data.current_model_key) {
-                                searchState.selectedModel = data.current_model_key;
-                            } else if (!searchState.selectedModel && searchState.availableModels.length > 0) {
-                                searchState.selectedModel = searchState.availableModels[0].model_key;
-                            }
-
-                            updateModelDropdown();
-                            log(`Loaded ${searchState.availableModels.length} embedding models`);
-                            return;
-                        } else if (data.status === 'error') {
-                            log(`Error loading models: ${data.error}`, 'error');
-                            updateModelDropdownError(data.error);
-                            return;
-                        }
-                    }
-                } catch (e) {
-                    // File not ready yet, continue polling
-                }
+            if (data.status === 'error') {
+                log(`Error loading models: ${data.error}`, 'error');
+                updateModelDropdownError(data.error);
+                return;
             }
 
-            log('Timeout loading embedding models', 'warn');
-            updateModelDropdownError('Timeout loading models');
+            searchState.availableModels = data.models || [];
+            searchState.modelsLoaded = true;
+
+            // If no model selected, use the current configured model or first available
+            if (!searchState.selectedModel && data.current_model_key) {
+                searchState.selectedModel = data.current_model_key;
+            } else if (!searchState.selectedModel && searchState.availableModels.length > 0) {
+                searchState.selectedModel = searchState.availableModels[0].model_key;
+            }
+
+            updateModelDropdown();
+            log(`Loaded ${searchState.availableModels.length} embedding models`);
         } catch (e) {
-            log(`Failed to load models: ${e}`, 'error');
-            updateModelDropdownError('Failed to load models');
+            if (/timed out/i.test(e.message || '')) {
+                log('Timeout loading embedding models', 'warn');
+                updateModelDropdownError('Timeout loading models');
+            } else {
+                log(`Failed to load models: ${e}`, 'error');
+                updateModelDropdownError('Failed to load models');
+            }
         }
     }
 
@@ -6346,67 +6325,29 @@
                 taskArgs.frame_search = 'true';
             }
 
-            await runPluginTask('Search Scenes by Text', taskArgs);
+            // dispatchTask (#5) owns invocation + polling: search_by_text is
+            // request_id-keyed -> search_results_{request_id}.json (60s budget).
+            const data = await dispatchTask('searchScenesByText', taskArgs);
 
-            // Poll for results
-            pollSearchResults(requestId);
+            // Supersede guard: a newer search set searchState.requestId before
+            // this awaited. Each request_id file is unique, so this older poll
+            // still resolves with its own (now-stale) result — drop it instead
+            // of rendering over the newer search.
+            if (searchState.requestId !== requestId) return;
 
-        } catch (error) {
-            log(`Search error: ${error}`, 'error');
-            if (loadingDiv) loadingDiv.style.display = 'none';
-            if (errorDiv) {
-                errorDiv.style.display = 'block';
-                errorDiv.innerHTML = `<p>Error: ${escapeHtml(error.message || 'Search failed')}</p>`;
-            }
-            searchState.isSearching = false;
-        }
-    }
-
-    /**
-     * Poll for search results
-     */
-    function pollSearchResults(requestId) {
-        // Clear any existing poll
-        if (searchState.pollInterval) {
-            clearInterval(searchState.pollInterval);
-        }
-
-        const resultUrl = `/plugin/stash-copilot/assets/search_results_${requestId}.json`;
-        let attempts = 0;
-        const maxAttempts = 120; // 60 seconds max
-
-        searchState.pollInterval = setInterval(async () => {
-            attempts++;
-
-            if (attempts > maxAttempts) {
-                clearInterval(searchState.pollInterval);
-                showSearchError('Search timed out. Please try again.');
+            if (data.status === 'error') {
+                showSearchError(data.error || 'Search failed');
                 return;
             }
+            handleSearchResults(data);
 
-            try {
-                const response = await fetch(`${resultUrl}?t=${Date.now()}`);
-                if (!response.ok) return; // Not ready yet
-
-                const data = await response.json();
-
-                // Validate request ID
-                if (data.request_id && data.request_id !== requestId) {
-                    return; // Stale result
-                }
-
-                clearInterval(searchState.pollInterval);
-
-                if (data.status === 'error') {
-                    showSearchError(data.error);
-                } else if (data.status === 'complete') {
-                    handleSearchResults(data);
-                }
-
-            } catch (e) {
-                // File not ready yet, continue polling
-            }
-        }, 500);
+        } catch (error) {
+            if (searchState.requestId !== requestId) return;
+            log(`Search error: ${error}`, 'error');
+            showSearchError(/timed out/i.test(error.message || '')
+                ? 'Search timed out. Please try again.'
+                : (error.message || 'Search failed'));
+        }
     }
 
     /**

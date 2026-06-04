@@ -239,4 +239,31 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('Search page: request_id-keyed get_embedding_models + search_by_text resolve via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    // The plugin renders its own search page at this route (onPageChange ->
+    // renderSearchPage). On render it auto-runs get_embedding_models to populate
+    // the model dropdown (request_id-keyed -> embedding_models_<rid>.json).
+    await page.goto('/plugins/stash-copilot/search', { waitUntil: 'domcontentloaded' });
+    await page.locator('.stash-copilot-search-page').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+
+    // get_embedding_models resolved via the stub: the dropdown leaves its
+    // "Loading models..." placeholder and lists the fixture's model.
+    await expect(page.locator('#stash-copilot-model-select')).toContainText('openclip:ViT-B-32', {
+      timeout: 15000,
+    });
+
+    // Run a search (request_id-keyed -> search_results_<rid>.json). The fixture
+    // returns empty results, so the panel resolves to its empty state.
+    await page.locator('.stash-copilot-search-input').fill('test query');
+    await page.locator('.stash-copilot-search-btn').click();
+
+    await expect(page.locator('.stash-copilot-search-loading')).toBeHidden({ timeout: 20000 });
+    await expect(page.locator('.stash-copilot-search-empty')).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });
