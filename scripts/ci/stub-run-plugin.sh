@@ -76,6 +76,13 @@ case "$keyed_by" in
   *)          stem="${result_key}_${request_id}" ;;
 esac
 
+# The find_similar_by_frame flow is also covered by a cancellation regression
+# test that clicks "Back to Similar" mid-search. A brief delay before writing
+# the result makes that race deterministic: the back-click reliably lands before
+# the result file appears, letting the test verify the token guard drops the
+# late result instead of re-rendering the frame-search view.
+[ "$mode" = "find_similar_by_frame" ] && sleep 2
+
 mkdir -p ./assets
 # Substitute the live ids into the fixture (templates may reference them).
 sed -e "s/__REQUEST_ID__/${request_id}/g" -e "s/__SCENE_ID__/${scene_id}/g" \
