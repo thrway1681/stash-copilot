@@ -4,9 +4,10 @@ import { defineConfig, devices } from '@playwright/test';
  * Playwright config for the plugin's UI tests (issue #5 testing infra).
  *
  * The tests drive a real Stash instance with the plugin UI installed:
- *   - locally: `docker compose -f docker-compose.dev.yml up -d` + install the
- *     plugin (scripts/ci/install_plugin_ui.sh) + `reloadPlugins`, then
- *     `npx playwright test`.
+ *   - locally: `docker compose -f docker-compose.dev.yml up -d`, bootstrap the
+ *     library, install the plugin (scripts/ci/install_plugin_ui.sh), seed
+ *     synthetic performers/tags (scripts/ci/seed_stash_ui.sh), `reloadPlugins`,
+ *     then `npx playwright test`.
  *   - in CI: the `ui` job in .github/workflows/ci.yml does the same headlessly.
  *
  * STASH_URL points at that instance (default matches the dev compose: host
