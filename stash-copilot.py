@@ -851,7 +851,14 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task, on_result=on_result)
 
     def run_merge_tags(self, args: dict[str, Any]) -> None:
-        """Merge one tag into another."""
+        """Merge one tag into another, through the dispatch seam (#4, commit 4).
+
+        Result-producing: ``MergeTagsTask.from_context`` caches the keep/remove
+        tag ids; ``on_result`` persists the result through the seam's ResultStore
+        (``tag_merge_{request_id}.json``, keyed by the task's ``result_key``) and
+        logs the summary; ``dispatch`` owns uniform error handling. The missing-id
+        guard stays here (before the seam) so it's a clean no-op.
+        """
         keep_tag_id = int(args.get("keep_tag_id", 0))
         remove_tag_id = int(args.get("remove_tag_id", 0))
         request_id = args.get("request_id", "")
@@ -860,49 +867,19 @@ class MyPlugin(StashPlugin):
             self.log("Missing keep_tag_id or remove_tag_id", "error")
             return
 
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.tag_dedup import MergeTagsTask
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
+            return MergeTagsTask.from_context(ctx)
 
-            if image_provider and image_model:
-                embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
-                )
-                model_key = embedding_config.model_key
-            else:
-                model_key = "openclip:ViT-H-14"
-
-            storage = EmbeddingStorage(model_key=model_key)
-            task = MergeTagsTask(
-                stash=self.stash_client,
-                storage=storage,
-                log_callback=self.log,
-                model_key=model_key,
-            )
-
-            result = task.run(keep_tag_id=keep_tag_id, remove_tag_id=remove_tag_id)
-
-            # Save result for frontend
-            if request_id:
-                assets_dir = os.path.join(PLUGIN_DIR, "assets")
-                os.makedirs(assets_dir, exist_ok=True)
-                result_path = os.path.join(assets_dir, f"tag_merge_{request_id}.json")
-                with open(result_path, "w") as f:
-                    json.dump(result, f, indent=2)
-
+        def on_result(task: Any, result: Any) -> None:
+            self._result_store().save(task.result_key, request_id, result)
             if result["status"] == "complete":
                 self.log(f"Merged tags: {result['scenes_updated']} scenes updated", "info")
             else:
                 self.log(f"Tag merge error: {result.get('error')}", "warning")
 
-        except Exception as e:
-            self.error(f"Merge tags failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_dismiss_tag_merge(self, args: dict[str, Any]) -> None:
         """Dismiss a tag merge candidate (not duplicates)."""
