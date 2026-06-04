@@ -1,0 +1,9 @@
+{
+  "status": "complete",
+  "avg_coverage": 1.0,
+  "flagged_scenes": 0,
+  "total_scenes": 3,
+  "threshold": 0.35,
+  "scenes": [],
+  "request_id": "__REQUEST_ID__"
+}
