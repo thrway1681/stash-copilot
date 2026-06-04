@@ -74,8 +74,8 @@
         getTagSuggestions:   { name: 'Get Tag Suggestions',  resultKey: 'tag_suggestions', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
         dismissSuggestedTag: { name: 'Dismiss Suggested Tag', resultKey: null, keying: 'none', defaultArgs: {} },
         clearDismissedTags:  { name: 'Clear Dismissed Tags',  resultKey: null, keying: 'none', defaultArgs: {} },
-        findDuplicateTags:   { name: 'Find Duplicate Tags',   resultKey: 'tag_dedup', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
-        mergeTags:           { name: 'Merge Tags',            resultKey: 'tag_merge', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
+        findDuplicateTags:   { name: 'Find Duplicate Tags',   resultKey: 'tag_dedup', keying: 'request_id', defaultArgs: {}, pollTimeout: 30000 },
+        mergeTags:           { name: 'Merge Tags',            resultKey: 'tag_merge', keying: 'request_id', defaultArgs: {}, pollTimeout: 20000 },
         // backend writes tag_dismiss_{request_id}.json, but the frontend treats this as fire-and-forget:
         dismissTagMerge:     { name: 'Dismiss Tag Merge',     resultKey: 'tag_dismiss', keying: 'request_id', defaultArgs: {}, poll: false },
 
@@ -244,7 +244,6 @@
         tagDedupMergeCount: 0,
         tagDedupSkipCount: 0,
         tagDedupScenesUpdated: 0,
-        tagDedupPollInterval: null,
         tagDedupRequestId: null,
         tagDedupProcessing: false
     };
@@ -13585,51 +13584,36 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         state.tagDedupRequestId = requestId;
 
         try {
-            await runPluginTask('Find Duplicate Tags', {
+            // dispatchTask (#5) owns invocation + polling: find_duplicate_tags is
+            // request_id-keyed -> tag_dedup_{request_id}.json (30s budget).
+            // no_embeddings is a terminal state the default predicate misses.
+            const data = await dispatchTask('findDuplicateTags', {
                 mode: 'find_duplicate_tags',
                 request_id: requestId,
+            }, {
+                isDone: (d) => d.status === 'complete' || d.status === 'no_embeddings' || d.status === 'error',
             });
+
+            // Supersede guard: a newer scan started while this awaited.
+            if (state.tagDedupRequestId !== requestId) return;
+
+            if (data.status === 'complete' && data.candidates && data.candidates.length > 0) {
+                state.tagDedupCandidates = data.candidates;
+                renderDedupPair();
+            } else if (data.status === 'complete') {
+                renderDedupEmpty('No duplicate tags found above 75% similarity.');
+            } else if (data.status === 'no_embeddings') {
+                renderDedupEmpty('No tag embeddings found. Run "Build Tag Vocabulary" first.');
+            } else {
+                renderDedupError(data.error || 'Unknown error');
+            }
         } catch (e) {
-            log(`Failed to start tag dedup scan: ${e.message}`, 'error');
-            renderDedupError('Failed to start scan. Check plugin logs.');
-            return;
+            if (state.tagDedupRequestId !== requestId) return;
+            log(`Tag dedup scan error: ${e.message}`, 'error');
+            renderDedupError(/timed out/i.test(e.message || '')
+                ? 'Scan timed out. Check plugin logs.'
+                : 'Failed to start scan. Check plugin logs.');
         }
-
-        // Poll for results
-        const resultFile = `/plugin/stash-copilot/assets/tag_dedup_${requestId}.json`;
-        let attempts = 0;
-        state.tagDedupPollInterval = setInterval(async () => {
-            attempts++;
-            if (state.tagDedupRequestId !== requestId) {
-                clearInterval(state.tagDedupPollInterval);
-                return;
-            }
-
-            try {
-                const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    clearInterval(state.tagDedupPollInterval);
-                    state.tagDedupPollInterval = null;
-
-                    if (data.status === 'complete' && data.candidates && data.candidates.length > 0) {
-                        state.tagDedupCandidates = data.candidates;
-                        renderDedupPair();
-                    } else if (data.status === 'complete') {
-                        renderDedupEmpty('No duplicate tags found above 75% similarity.');
-                    } else if (data.status === 'no_embeddings') {
-                        renderDedupEmpty('No tag embeddings found. Run "Build Tag Vocabulary" first.');
-                    } else {
-                        renderDedupError(data.error || 'Unknown error');
-                    }
-                }
-            } catch (e) { /* file not ready yet */ }
-
-            if (attempts > 150) { // 30s timeout
-                clearInterval(state.tagDedupPollInterval);
-                renderDedupError('Scan timed out. Check plugin logs.');
-            }
-        }, 200);
     }
 
     function renderDedupPair() {
@@ -13740,72 +13724,56 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
 
         try {
             const requestId = `merge_${Date.now()}`;
-            await runPluginTask('Merge Tags', {
+            // dispatchTask (#5) owns invocation + polling: merge_tags is
+            // request_id-keyed -> tag_merge_{request_id}.json (20s budget).
+            const data = await dispatchTask('mergeTags', {
                 mode: 'merge_tags',
                 keep_tag_id: String(keepTag.id),
                 remove_tag_id: String(removeTag.id),
                 request_id: requestId,
             });
 
-            // Poll for merge result
-            const resultFile = `/plugin/stash-copilot/assets/tag_merge_${requestId}.json`;
-            let attempts = 0;
-            const poll = setInterval(async () => {
-                attempts++;
-                try {
-                    const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        clearInterval(poll);
+            if (data.status === 'complete') {
+                state.tagDedupMergeCount++;
+                state.tagDedupScenesUpdated += data.scenes_updated || 0;
+                removeMergedTagFromCandidates(removeTag.id);
 
-                        if (data.status === 'complete') {
-                            state.tagDedupMergeCount++;
-                            state.tagDedupScenesUpdated += data.scenes_updated || 0;
-                            removeMergedTagFromCandidates(removeTag.id);
-
-                            // Show success status briefly
-                            if (statusEl) {
-                                const scenesMsg = data.scenes_updated ? `${data.scenes_updated} scene${data.scenes_updated !== 1 ? 's' : ''} updated` : 'No scenes to update';
-                                statusEl.className = 'stash-copilot-dedup-merge-status success';
-                                statusEl.innerHTML = `✓ Merged! ${scenesMsg}`;
-                            }
-                            await new Promise(r => setTimeout(r, 600));
-                        } else {
-                            log(`Merge failed: ${data.error}`, 'error');
-                            if (statusEl) {
-                                statusEl.className = 'stash-copilot-dedup-merge-status error';
-                                statusEl.innerHTML = `✗ ${data.error || 'Merge failed'}`;
-                            }
-                            await new Promise(r => setTimeout(r, 1500));
-                        }
-
-                        state.tagDedupCurrentIndex++;
-                        state.tagDedupProcessing = false;
-                        renderDedupPair();
-                    }
-                } catch (e) { /* not ready */ }
-
-                if (attempts > 100) {
-                    clearInterval(poll);
-                    log('Merge timed out', 'error');
-                    if (statusEl) {
-                        statusEl.className = 'stash-copilot-dedup-merge-status error';
-                        statusEl.innerHTML = '✗ Merge timed out';
-                    }
-                    await new Promise(r => setTimeout(r, 1500));
-                    state.tagDedupCurrentIndex++;
-                    state.tagDedupProcessing = false;
-                    renderDedupPair();
+                // Show success status briefly
+                if (statusEl) {
+                    const scenesMsg = data.scenes_updated ? `${data.scenes_updated} scene${data.scenes_updated !== 1 ? 's' : ''} updated` : 'No scenes to update';
+                    statusEl.className = 'stash-copilot-dedup-merge-status success';
+                    statusEl.innerHTML = `✓ Merged! ${scenesMsg}`;
                 }
-            }, 200);
+                await new Promise(r => setTimeout(r, 600));
+            } else {
+                log(`Merge failed: ${data.error}`, 'error');
+                if (statusEl) {
+                    statusEl.className = 'stash-copilot-dedup-merge-status error';
+                    statusEl.innerHTML = `✗ ${data.error || 'Merge failed'}`;
+                }
+                await new Promise(r => setTimeout(r, 1500));
+            }
+
+            state.tagDedupCurrentIndex++;
+            state.tagDedupProcessing = false;
+            renderDedupPair();
         } catch (e) {
             log(`Merge error: ${e.message}`, 'error');
+            const timedOut = /timed out/i.test(e.message || '');
             if (statusEl) {
                 statusEl.className = 'stash-copilot-dedup-merge-status error';
-                statusEl.innerHTML = `✗ ${e.message}`;
+                statusEl.innerHTML = timedOut ? '✗ Merge timed out' : `✗ ${e.message}`;
+            }
+            // Preserve the original split: a timeout advances to the next pair;
+            // a failure to start the task re-enables the buttons on this pair.
+            if (timedOut) {
+                await new Promise(r => setTimeout(r, 1500));
+                state.tagDedupCurrentIndex++;
+                renderDedupPair();
+            } else {
+                document.querySelectorAll('.stash-copilot-dedup-btn').forEach(b => b.disabled = false);
             }
             state.tagDedupProcessing = false;
-            document.querySelectorAll('.stash-copilot-dedup-btn').forEach(b => b.disabled = false);
         }
     }
 
