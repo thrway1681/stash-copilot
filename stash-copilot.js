@@ -61,7 +61,7 @@
 
         // ---- insights ----
         generateSummary:     { name: 'Generate Library Summary', resultKey: 'last_summary', keying: 'fixed', defaultArgs: {}, pollTimeout: 60000 },
-        buildTasteMap:       { name: 'Build Taste Map', resultKey: 'taste_map', keying: 'request_id', defaultArgs: { top_scenes: '200', scoring_method: 'base_weighted' }, pollTimeout: 60000 },
+        buildTasteMap:       { name: 'Build Taste Map', resultKey: 'taste_map', keying: 'request_id', defaultArgs: { top_scenes: '200', scoring_method: 'base_weighted' }, pollTimeout: 900000 },
 
         // ---- search ----
         getEmbeddingModels:  { name: 'Get Embedding Models',  resultKey: 'embedding_models', keying: 'request_id', defaultArgs: {}, pollTimeout: 6000 },
@@ -5085,67 +5085,38 @@
         buildBtn.innerHTML = '<span class="stash-copilot-spinner"></span>';
         statusEl.textContent = 'Building taste map...';
 
-        const requestId = `taste_map_${Date.now()}`;
-        state.tasteMapRequestId = requestId;
-
         try {
-            const taskArgs = { request_id: requestId };
+            // dispatchTask (#5) owns invocation + polling (15-min budget from the
+            // registry; large libraries take ~10 min). No 'processing' status —
+            // the backend writes complete/error once.
             const kInput = modal.querySelector('.stash-copilot-taste-map-k-input');
             const kValue = kInput ? parseInt(kInput.value) : NaN;
-            if (!isNaN(kValue) && kValue >= 2) {
-                taskArgs.num_clusters = kValue;
+            const args = (!isNaN(kValue) && kValue >= 2) ? { num_clusters: kValue } : {};
+
+            const data = await dispatchTask('buildTasteMap', args, {
+                isDone: (d) => d.status === 'complete' || d.status === 'error'
+            });
+
+            if (data.status === 'error') {
+                state.tasteMapLoading = false;
+                buildBtn.disabled = false;
+                buildBtn.textContent = 'Build Taste Map';
+                statusEl.textContent = `Error: ${data.error}`;
+                return;
             }
-            await runPluginTask('Build Taste Map', taskArgs);
-            pollTasteMapResults(modal, requestId);
+
+            state.tasteMapData = data;
+            state.tasteMapLoading = false;
+            renderTasteMap(modal, data);
         } catch (e) {
             log(`Build Taste Map error: ${e.message}`, 'error');
             state.tasteMapLoading = false;
             buildBtn.disabled = false;
             buildBtn.textContent = 'Build Taste Map';
-            statusEl.textContent = `Error: ${e.message}`;
+            statusEl.textContent = /timed out/i.test(e.message || '')
+                ? 'Timed out waiting for results'
+                : `Error: ${e.message}`;
         }
-    }
-
-    function pollTasteMapResults(modal, requestId) {
-        const resultFile = `/plugin/stash-copilot/assets/taste_map_${requestId}.json`;
-
-        const interval = setInterval(async () => {
-            if (state.tasteMapRequestId !== requestId) {
-                clearInterval(interval);
-                return;
-            }
-
-            try {
-                const resp = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data.status === 'complete') {
-                        clearInterval(interval);
-                        state.tasteMapData = data;
-                        state.tasteMapLoading = false;
-                        renderTasteMap(modal, data);
-                    } else if (data.status === 'error') {
-                        clearInterval(interval);
-                        state.tasteMapLoading = false;
-                        const buildBtn = modal.querySelector('.stash-copilot-taste-map-build-btn');
-                        const statusEl = modal.querySelector('.stash-copilot-taste-map-status');
-                        if (buildBtn) { buildBtn.disabled = false; buildBtn.textContent = 'Build Taste Map'; }
-                        if (statusEl) statusEl.textContent = `Error: ${data.error}`;
-                    }
-                }
-            } catch (e) {
-                // 404 expected while task is running
-            }
-        }, 500);
-
-        setTimeout(() => {
-            clearInterval(interval);
-            if (state.tasteMapLoading) {
-                state.tasteMapLoading = false;
-                const statusEl = modal.querySelector('.stash-copilot-taste-map-status');
-                if (statusEl) statusEl.textContent = 'Timed out waiting for results';
-            }
-        }, 900000); // 15 min timeout (12K+ scene queries take ~10 min)
     }
 
     async function renderTasteMap(modal, data) {

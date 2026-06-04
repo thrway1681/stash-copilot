@@ -139,4 +139,23 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('AI Insights modal: request_id-keyed build_taste_map resolves via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    await page.locator('.stash-copilot-insights-tab[data-tab="taste_map"]').click();
+    const buildBtn = page.locator('.stash-copilot-taste-map-build-btn');
+    await buildBtn.click();
+
+    // The fixture (1 cluster, 1 scene) resolves -> renderTasteMap flips the
+    // button to "Rebuild" and renders the Plotly chart + cluster sidebar.
+    await expect(buildBtn).toHaveText(/Rebuild/, { timeout: 20000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });
