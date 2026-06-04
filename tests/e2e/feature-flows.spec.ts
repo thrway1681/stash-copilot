@@ -91,6 +91,12 @@ test.describe('feature flows (stub backend)', () => {
     await expect(panel.locator('.stash-copilot-tags-loading')).toBeHidden({ timeout: 20000 });
     await expect(panel.locator('.stash-copilot-tags-content')).toBeVisible({ timeout: 5000 });
 
+    // Exercise a fire-and-forget dispatchTask call: the "Clear Dismissed" (↻)
+    // button runs clearDismissedTags (resultKey null, no poll) and flips to ✓.
+    const clearBtn = panel.locator('.stash-copilot-clear-dismissed-btn');
+    await clearBtn.click();
+    await expect(clearBtn).toHaveText('✓', { timeout: 10000 });
+
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 });
