@@ -1,0 +1,6 @@
+# Shell scripts MUST use LF endings: they run via a `#!/bin/sh` shebang inside
+# the Alpine Stash container (and on CI/Linux). A CRLF shebang ("#!/bin/sh\r")
+# makes the kernel look for the interpreter "/bin/sh\r" and fail with exit 127
+# ("not found"). Without this, a Windows checkout (core.autocrlf=true) would
+# ship CRLF and silently break the plugin exec.
+*.sh text eol=lf

@@ -96,6 +96,94 @@
         embedOmoments:       { name: 'Embed O-Moments',    resultKey: null, keying: 'none', defaultArgs: {} },
     };
 
+    // ===================================================================
+    // dispatchTask seam (issue #5, commit 2)
+    // -------------------------------------------------------------------
+    // The single entry point every task invocation + result poll will route
+    // through (commit 3 migrates the ~24 call sites onto it, deleting their
+    // hand-rolled name literals, result paths, and bespoke poll loops). Looks
+    // the task up in TASKS, runs it via runPluginTask under the EXACT yml task
+    // name, and — for result-producing tasks — runs ONE polling loop over its
+    // result file, returning the parsed result. Fire-and-forget tasks
+    // (resultKey null / poll:false) just run and resolve. Per-task terminal
+    // predicates and timeouts are overridable per call via opts (isDone /
+    // pollTimeout / onPoll). Added here unused; wired up in commit 3.
+
+    /** Build a polled result file's URL from its stem — the one place the prefix lives. */
+    function assetUrl(stem) {
+        return `/plugin/${PLUGIN_ID}/assets/${stem}.json`;
+    }
+
+    /** Default predicate: is the polled result file in a terminal state? */
+    function defaultTaskIsDone(data) {
+        return !!data && (data.status === 'complete' || data.status === 'error' || !!data.results);
+    }
+
+    /**
+     * Run a registered task and (if it produces a result) poll until done.
+     * @param {string} key  - a TASKS key.
+     * @param {object} args - args merged over the task's defaultArgs.
+     * @param {object} opts - { isDone, pollTimeout, pollInterval, onPoll } overrides.
+     * @returns parsed result object (polled tasks) or the runPluginTask result
+     *          (fire-and-forget). Throws on unknown key, missing scene_id, or timeout.
+     */
+    async function dispatchTask(key, args = {}, opts = {}) {
+        const spec = TASKS[key];
+        if (!spec) {
+            throw new Error(`dispatchTask: unknown task key '${key}'`);
+        }
+
+        const merged = Object.assign({}, spec.defaultArgs, args);
+
+        // request_id-keyed tasks self-key: generate one if the caller didn't.
+        if (spec.keying === 'request_id' && !merged.request_id) {
+            merged.request_id = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        }
+
+        // Run the backend task under its EXACT yml task name.
+        const runResult = await runPluginTask(spec.name, merged);
+
+        // Fire-and-forget: no polled result file (or the backend writes one the
+        // frontend intentionally ignores, poll:false).
+        if (spec.resultKey === null || spec.poll === false) {
+            return runResult;
+        }
+
+        // Derive the polled file stem from the task's keying.
+        let stem;
+        if (spec.keying === 'fixed') {
+            stem = spec.resultKey;
+        } else if (spec.keying === 'scene_id') {
+            if (merged.scene_id === undefined || merged.scene_id === null || merged.scene_id === '') {
+                throw new Error(`dispatchTask('${key}'): scene_id is required for scene_id-keyed polling`);
+            }
+            stem = `${spec.resultKey}_${merged.scene_id}`;
+        } else {
+            stem = `${spec.resultKey}_${merged.request_id}`;
+        }
+
+        const url = assetUrl(stem);
+        const isDone = opts.isDone || defaultTaskIsDone;
+        const timeout = opts.pollTimeout || spec.pollTimeout || 60000;
+        const interval = opts.pollInterval || 200;
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+            try {
+                const resp = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (opts.onPoll) opts.onPoll(data);
+                    if (isDone(data)) return data;
+                }
+            } catch (e) {
+                // Result file not ready yet — keep polling.
+            }
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+        throw new Error(`dispatchTask('${key}'): '${spec.name}' timed out after ${timeout}ms`);
+    }
+
     // State management
     const state = {
         initialized: false,
