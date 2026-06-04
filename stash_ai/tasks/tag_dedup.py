@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 from stash_ai.embeddings.storage import EmbeddingStorage
 
@@ -73,6 +74,31 @@ class FindDuplicateTagsTask:
         self.storage = storage
         self.log = log_callback or (lambda msg, level: None)
         self.model_key = model_key
+
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> FindDuplicateTagsTask:
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding ``model_key`` (default
+        ``"openclip:ViT-H-14"`` — note: NOT siglip) and its EmbeddingStorage.
+        Result-producing: the handler routes ``run()``'s result through
+        ``ResultStore`` (keyed by :attr:`result_key`) in ``on_result``.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+        else:
+            model_key = "openclip:ViT-H-14"
+
+        return cls(
+            stash=ctx.stash,
+            storage=EmbeddingStorage(model_key=model_key),
+            log_callback=ctx.log,
+            model_key=model_key,
+        )
 
     def run(self) -> FindDuplicateTagsResult:
         """Find duplicate tag candidates."""
