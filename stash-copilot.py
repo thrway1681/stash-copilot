@@ -663,40 +663,23 @@ class MyPlugin(StashPlugin):
             self.error(f"Unexpected error: {e}")
 
     def run_build_taste_map(self, args: dict[str, Any]) -> None:
-        """Run the Build Taste Map task."""
-        try:
+        """Run the Build Taste Map task through the dispatch seam (#4, commit 4).
+
+        ``TasteMapTask`` is self-describing: it resolves its model_key and run
+        parameters from the :class:`TaskContext` in ``from_context``, writes its
+        own result file (declaring ``result_key``), and :func:`dispatch` owns
+        execution + uniform error handling. This handler only points at the
+        construction hook and logs the outcome.
+        """
+
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.taste_map import TasteMapTask
 
-            self.log("Initializing taste map generation...", "info")
+            return TasteMapTask.from_context(ctx)
 
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get model_key from image embedding settings (same as recommendations)
-            from stash_ai.embeddings.config import EmbeddingConfig
-
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            model_key = "siglip"  # Default
-            if image_provider and image_model:
-                config = EmbeddingConfig(provider=image_provider, model=image_model)
-                model_key = config.model_key
-
-            task = TasteMapTask(
-                stash=self.stash_client,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                model_key=model_key,
-            )
-
-            num_clusters_str = args.get("num_clusters", "")
-            num_clusters = int(num_clusters_str) if num_clusters_str else None
-
-            response = task.run(
-                request_id=args.get("request_id", ""),
-                scoring_method=args.get("scoring_method", "base_weighted"),
-                num_clusters=num_clusters,
-            )
-
+        def on_result(_task: Any, response: Any) -> None:
+            if not response:
+                return
             if response["status"] == "complete":
                 self.log(
                     f"Taste map complete: {response['optimal_k']} clusters, "
@@ -709,8 +692,7 @@ class MyPlugin(StashPlugin):
                     "error",
                 )
 
-        except Exception as e:
-            self.error(f"Build Taste Map failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_detect_tag_gaps(self, args: dict[str, Any]) -> None:
         """Run the tag gap detection task."""
