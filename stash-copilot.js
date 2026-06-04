@@ -1383,10 +1383,12 @@
 
         if (!generateBtn || !contentContainer) return;
 
-        // Generation token. state.peakRequestId is also nulled on navigate-away
-        // (closeInsightsModal / switchInsightsTab) so a late result can't
-        // re-render an abandoned Peak tab (the migrated await is uncancellable,
-        // unlike the old clearInterval-able poll — PR #95 pattern).
+        // Generation token: a newer Generate stamps a fresh state.peakRequestId,
+        // so the older (uncancellable) await drops its stale result via the guard
+        // below. A navigate-away mid-flight is intentionally NOT cancelled — the
+        // result renders into the (hidden) Peak tab and is shown on return, as it
+        // was before this migration; renderPeakResults only flips data-empty when
+        // Peak is the active tab, so it can't disturb whatever tab is showing.
         const requestId = `peak_${Date.now()}`;
         state.peakRequestId = requestId;
         const myRequestId = requestId;
@@ -1420,8 +1422,8 @@
                 isDone: (d) => d && (d.status === 'complete' || d.status === 'error')
             });
 
-            // Cancellation guard: a new Generate or a navigate-away invalidated
-            // this run — drop the stale result.
+            // Supersede guard: a newer Generate replaced state.peakRequestId —
+            // drop this stale result.
             if (state.peakRequestId !== myRequestId) return;
 
             state.isGeneratingPeak = false;
@@ -1455,8 +1457,10 @@
         const modal = dropdown.closest('.stash-copilot-insights-modal');
         const results = data.results || [];
 
-        // Remove empty state when rendering results
-        if (modal && results.length > 0) {
+        // Remove empty state when rendering results — but only while Peak is the
+        // active tab, so a late result rendering into a hidden Peak tab can't
+        // disturb the data-empty sizing of whatever tab is currently showing.
+        if (modal && results.length > 0 && modal.getAttribute('data-active-tab') === 'peak') {
             modal.removeAttribute('data-empty');
         }
 
@@ -4113,10 +4117,6 @@
         const modal = document.getElementById('stash-copilot-insights-modal');
         if (!modal) return;
 
-        // Invalidate any in-flight Peak generation so a late dispatchTask result
-        // can't re-render / mutate state after the modal is gone (PR #95 pattern).
-        state.peakRequestId = null;
-
         // Add closing class for exit animation
         modal.classList.remove('open');
         modal.classList.add('closing');
@@ -4926,10 +4926,6 @@
     }
 
     function switchInsightsTab(modal, tabName) {
-        // Switching tabs invalidates any in-flight Peak generation so its late
-        // result can't re-render the Peak tab the user navigated away from.
-        state.peakRequestId = null;
-
         setActiveTab(tabName);
         modal.setAttribute('data-active-tab', tabName);
 
