@@ -3486,78 +3486,20 @@ class MyPlugin(StashPlugin):
             self.log(traceback.format_exc(), "debug")
 
     def run_cleanup_orphaned(self, args: dict[str, Any]) -> None:
+        """Clean up embeddings for deleted scenes, through the dispatch seam (#4, commit 4).
+
+        Log-only maintenance task: ``CleanupOrphanedTask`` reads valid scene IDs
+        from the Stash DB, finds orphaned embeddings, and (unless ``dry_run``)
+        deletes them with progress logging; ``dispatch`` owns uniform error
+        handling (a missing DB surfaces via its RuntimeError branch).
         """
-        Clean up embeddings for scenes that no longer exist in Stash.
 
-        This maintenance task finds and removes orphaned embeddings for scenes
-        that were deleted while the plugin was disabled or before the
-        Scene.Destroy.Post hook was implemented.
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.cleanup_orphaned import CleanupOrphanedTask
 
-        Args:
-            args: Task arguments containing:
-                - dry_run: "true" to only report what would be deleted
-        """
-        try:
-            from stash_ai.embeddings.storage import EmbeddingStorage
-            from stash_ai.tools.database import get_readonly_connection, get_stash_db_path
+            return CleanupOrphanedTask.from_context(ctx)
 
-            dry_run = str(args.get("dry_run", "true")).lower() == "true"
-
-            self.log(f"Starting orphaned embeddings cleanup (dry_run={dry_run})...", "info")
-
-            # Get all valid scene IDs from Stash database
-            db_path = get_stash_db_path()
-            if not db_path.exists():
-                self.error("Stash database not found")
-                return
-
-            conn = get_readonly_connection(db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM scenes")
-            valid_scene_ids = [row["id"] for row in cursor.fetchall()]
-            conn.close()
-
-            self.log(f"Found {len(valid_scene_ids)} scenes in Stash database", "info")
-
-            # Create storage instance (model_key doesn't matter for orphan detection)
-            storage = EmbeddingStorage()
-            orphaned_ids = storage.get_orphaned_scene_ids(valid_scene_ids)
-
-            if not orphaned_ids:
-                self.log("No orphaned embeddings found", "info")
-                return
-
-            self.log(f"Found {len(orphaned_ids)} orphaned scene IDs", "info")
-
-            if dry_run:
-                self.log(
-                    f"DRY RUN: Would delete embeddings for {len(orphaned_ids)} "
-                    f"orphaned scenes: {orphaned_ids[:10]}{'...' if len(orphaned_ids) > 10 else ''}",
-                    "info",
-                )
-                return
-
-            # Delete embeddings for each orphaned scene
-            total_deleted = 0
-            for i, scene_id in enumerate(orphaned_ids):
-                result = storage.delete_all_scene_data(scene_id)
-                deleted = sum(result.values())
-                total_deleted += deleted
-
-                if (i + 1) % 10 == 0 or i == len(orphaned_ids) - 1:
-                    self.log(f"Progress: {i + 1}/{len(orphaned_ids)} scenes processed", "info")
-                    self.progress(i + 1, len(orphaned_ids))
-
-            self.log(
-                f"Cleanup complete: deleted {total_deleted} items "
-                f"from {len(orphaned_ids)} orphaned scenes",
-                "info",
-            )
-
-        except ImportError as e:
-            self.error(f"Failed to import cleanup modules: {e}")
-        except Exception as e:
-            self.error(f"Orphaned embeddings cleanup failed: {e}")
+        self._dispatch(args, build_task)
 
     def run_embed_performers(self, args: dict[str, Any]) -> None:
         """
