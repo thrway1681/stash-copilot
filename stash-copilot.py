@@ -717,67 +717,38 @@ class MyPlugin(StashPlugin):
             self.error(f"Preview tag impact failed: {e}")
 
     def run_get_tag_suggestions(self, args: dict[str, Any]) -> None:
-        """Get embedding-based tag suggestions for a scene."""
+        """Get embedding-based tag suggestions for a scene, via the dispatch seam (#4).
+
+        Result-producing: ``TagSuggestionsTask.from_context`` resolves the
+        model_key + scene_id; ``on_result`` persists the result through the seam's
+        ResultStore (``tag_suggestions_{request_id}.json``, keyed by the task's
+        ``result_key``) and logs the summary; ``dispatch`` owns uniform error
+        handling. The missing-scene_id guard stays here (before the seam).
+        """
         scene_id = args.get("scene_id")
         if not scene_id:
             self.log("Missing scene_id", "error")
             return
 
-        scene_id = int(scene_id)
         request_id = args.get("request_id", "")
-
-        self.log(f"Computing tag suggestions for scene {scene_id}, request_id={request_id}", "info")
+        self.log(
+            f"Computing tag suggestions for scene {int(scene_id)}, request_id={request_id}", "info"
+        )
         self.log(f"Args received: {list(args.keys())}", "debug")
 
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.storage import EmbeddingStorage
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.tag_suggestions import TagSuggestionsTask
 
-            # Get model_key from plugin settings (same as other embedding tasks)
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
+            return TagSuggestionsTask.from_context(ctx)
 
-            if image_provider and image_model:
-                embedding_config = EmbeddingConfig(
-                    provider=cast("str", image_provider),
-                    model=cast("str", image_model),
-                    device=image_device,
-                )
-                model_key = embedding_config.model_key
-            else:
-                # Fallback to the most common model key in use
-                model_key = "openclip:ViT-H-14"
-
-            self.log(f"Using embedding model: {model_key}", "debug")
-
-            storage = EmbeddingStorage(model_key=model_key)
-            task = TagSuggestionsTask(
-                stash=self.stash_client,
-                storage=storage,
-                log_callback=self.log,
-                model_key=model_key,
-            )
-
-            result = task.run(scene_id=scene_id)
-
-            # Save result for frontend polling
-            if request_id:
-                assets_dir = os.path.join(PLUGIN_DIR, "assets")
-                os.makedirs(assets_dir, exist_ok=True)
-                result_path = os.path.join(assets_dir, f"tag_suggestions_{request_id}.json")
-                with open(result_path, "w") as f:
-                    json.dump(result, f, indent=2)
-
+        def on_result(task: Any, result: Any) -> None:
+            self._result_store().save(task.result_key, request_id, result)
             if result["status"] == "complete":
                 self.log(f"Found {len(result['suggestions'])} tag suggestions", "info")
             else:
                 self.log(f"Tag suggestions: {result['error']}", "warning")
 
-        except Exception as e:
-            self.error(f"Get tag suggestions failed: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_apply_suggested_tag(self, args: dict[str, Any]) -> None:
         """Apply a suggested tag to a scene, through the dispatch seam (#4, commit 4).
