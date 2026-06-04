@@ -99,4 +99,22 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
+
+  test('Performer Similar tab: request_id-keyed find_similar_performers resolves via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    // Seeded performer id 1 exists; the plugin injects a Similar tab on the
+    // performer page. Clicking it runs find_similar_performers (request_id-keyed).
+    // The fixture returns empty results -> the "No similar performers" state.
+    await page.goto('/performers/1', { waitUntil: 'domcontentloaded' });
+    await page.locator('.stash-copilot-performer-tab-nav').first().waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+
+    await page.locator('a[data-rb-event-key="performer-copilot-similar"]').click();
+
+    await expect(page.locator('.stash-copilot-performer-loading')).toBeHidden({ timeout: 20000 });
+    await expect(page.locator('.stash-copilot-performer-empty')).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
 });

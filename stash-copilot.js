@@ -13351,18 +13351,9 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         `;
 
         try {
-            // Generate a unique request ID
-            const requestId = `${performerId}_${Date.now()}`;
-
-            // Trigger the find similar performers task
-            await runPluginTask('Find Similar Performers', {
-                performer_id: performerId,
-                limit: '20',
-                request_id: requestId
-            });
-
-            // Poll for results
-            const results = await pollForResults(`similar_performers_${requestId}`, 60000);
+            // dispatchTask (#5) owns invocation + polling (request_id auto-keyed,
+            // similar_performers_{request_id}.json, 60s default timeout).
+            const results = await dispatchTask('findSimilarPerformers', { performer_id: performerId });
 
             if (results.status === 'error') {
                 throw new Error(results.error || 'Failed to find similar performers');
