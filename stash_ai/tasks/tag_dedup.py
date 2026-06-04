@@ -269,6 +269,10 @@ class MergeTagsTask:
     then deletes remove_tag from Stash and cleans up its embedding.
     """
 
+    #: Frontend result-file key. The handler routes ``run()``'s result through
+    #: the seam's ``ResultStore`` (``assets/tag_merge_{request_id}.json``).
+    result_key: ClassVar[str] = "tag_merge"
+
     def __init__(
         self,
         stash: StashClient,
@@ -280,17 +284,53 @@ class MergeTagsTask:
         self.storage = storage
         self.log = log_callback or (lambda msg, level: None)
         self.model_key = model_key
+        # Run params resolved by ``from_context``; ``run()`` falls back to these.
+        self.keep_tag_id: int = 0
+        self.remove_tag_id: int = 0
 
-    def run(self, keep_tag_id: int, remove_tag_id: int) -> MergeTagsResult:
+    @classmethod
+    def from_context(cls, ctx: TaskContext) -> MergeTagsTask:
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the image-embedding ``model_key`` (default ``"openclip:ViT-H-14"``)
+        + EmbeddingStorage and caches the keep/remove tag ids from args.
+        """
+        from ..embeddings.config import EmbeddingConfig
+
+        image_provider = ctx.plugin_settings.get("image_embedding_provider")
+        image_model = ctx.plugin_settings.get("image_embedding_model")
+        if image_provider and image_model:
+            model_key = EmbeddingConfig(provider=image_provider, model=image_model).model_key
+        else:
+            model_key = "openclip:ViT-H-14"
+
+        task = cls(
+            stash=ctx.stash,
+            storage=EmbeddingStorage(model_key=model_key),
+            log_callback=ctx.log,
+            model_key=model_key,
+        )
+        task.keep_tag_id = int(ctx.args.get("keep_tag_id", 0))
+        task.remove_tag_id = int(ctx.args.get("remove_tag_id", 0))
+        return task
+
+    def run(
+        self, keep_tag_id: int | None = None, remove_tag_id: int | None = None
+    ) -> MergeTagsResult:
         """Merge remove_tag into keep_tag.
 
         Args:
-            keep_tag_id: ID of the tag to keep
-            remove_tag_id: ID of the tag to delete after reassignment
+            keep_tag_id: ID of the tag to keep. ``None`` falls back to the
+                ``from_context``-resolved value (so the seam can call ``run()``
+                with no arguments).
+            remove_tag_id: ID of the tag to delete after reassignment. ``None``
+                falls back to the ``from_context``-resolved value.
 
         Returns:
             MergeTagsResult with status and scene count
         """
+        keep_tag_id = keep_tag_id if keep_tag_id is not None else self.keep_tag_id
+        remove_tag_id = remove_tag_id if remove_tag_id is not None else self.remove_tag_id
         try:
             # 1. Get the tag name BEFORE we delete it (needed for embedding cleanup)
             remove_tag_name = self._get_tag_name(remove_tag_id)
