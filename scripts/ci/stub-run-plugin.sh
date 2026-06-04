@@ -84,7 +84,13 @@ esac
 [ "$mode" = "find_similar_by_frame" ] && sleep 2
 
 mkdir -p ./assets
+# __NOW__ -> a fresh ISO timestamp each run. FIXED-file tasks (e.g. last_summary)
+# are overwritten in place, so the frontend detects a new result by a changed
+# generated_at; stamping it here keeps that freshness check working across
+# repeated runs against a persistent assets dir.
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Substitute the live ids into the fixture (templates may reference them).
 sed -e "s/__REQUEST_ID__/${request_id}/g" -e "s/__SCENE_ID__/${scene_id}/g" \
+  -e "s/__NOW__/${now}/g" \
   "$fixture" > "./assets/${stem}.json"
 exit 0

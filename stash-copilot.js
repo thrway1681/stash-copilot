@@ -189,7 +189,6 @@
         initialized: false,
         lastSummary: null,
         isGenerating: false,
-        generationStartTime: null,
         // Chat state
         activeTab: 'summary',
         chatHistory: null,
@@ -4789,15 +4788,60 @@
                 generateBtn.disabled = true;
                 generateBtn.textContent = 'Generating...';
 
+                const summaryContent = modal.querySelector('.stash-copilot-summary-content');
+                if (summaryContent) {
+                    summaryContent.innerHTML = `
+                        <div class="stash-copilot-info">
+                            <span class="stash-copilot-spinner"></span> Generating summary... This may take a moment.
+                        </div>
+                    `;
+                }
+
+                // last_summary.json is a FIXED file overwritten in place, so a
+                // "fresh" result is one whose generated_at differs from the value
+                // already on disk before we triggered. Capture that baseline so
+                // the poll ignores the stale summary still sitting in the file.
+                const baselineGeneratedAt = state.lastSummary && state.lastSummary.generated_at;
+                const isFresh = (d) => !!d && !!d.summary && d.generated_at !== baselineGeneratedAt;
+
                 try {
-                    await runPluginTask('Generate Summary', {});
-                    state.generationStartTime = Date.now();
-                    pollForSummary(modal);
-                } catch (error) {
-                    log('Failed to start summary generation: ' + error.message, 'error');
+                    // dispatchTask (#5) owns invocation + polling. generate_summary
+                    // is a FIXED-file task (last_summary.json); isDone waits for a
+                    // fresh, finished summary while onPoll renders the streaming
+                    // partials live as the backend writes them.
+                    const data = await dispatchTask('generateSummary', {}, {
+                        isDone: (d) => d.status === 'error' || (isFresh(d) && d.status !== 'streaming'),
+                        onPoll: (d) => {
+                            if (isFresh(d)) {
+                                state.lastSummary = d;
+                                renderSummaryInto(summaryContent, d);
+                            }
+                        }
+                    });
+
                     state.isGenerating = false;
                     generateBtn.disabled = false;
                     generateBtn.textContent = 'Generate Summary';
+
+                    if (data.status === 'error') {
+                        if (summaryContent) {
+                            summaryContent.innerHTML = `<p class="stash-copilot-error">${escapeHtml(data.error || 'Summary generation failed')}</p>`;
+                        }
+                        return;
+                    }
+                    state.lastSummary = data;
+                    renderSummaryInto(summaryContent, data);
+                } catch (error) {
+                    state.isGenerating = false;
+                    generateBtn.disabled = false;
+                    generateBtn.textContent = 'Generate Summary';
+                    log('Failed to generate summary: ' + error.message, 'error');
+                    if (summaryContent) {
+                        const msg = /timed out/i.test(error.message || '')
+                            ? 'Summary generation timed out. Try again.'
+                            : (error.message || 'Failed to generate summary');
+                        summaryContent.innerHTML = `<p class="stash-copilot-error">${escapeHtml(msg)}</p>`;
+                    }
                 }
             });
         }
@@ -6499,6 +6543,23 @@
         }
     }
 
+    /**
+     * Render a summary payload into the modal's .stash-copilot-summary-content.
+     * Shared by loadDropdownData (initial/cached read) and the Generate handler
+     * (streaming partials + final). Shows a cursor while status==='streaming'.
+     */
+    function renderSummaryInto(summaryContent, summary) {
+        if (!summaryContent || !summary || !summary.summary) return;
+        const isStreaming = summary.status === 'streaming';
+        const generatedAt = summary.generated_at
+            ? new Date(summary.generated_at).toLocaleString()
+            : '';
+        summaryContent.innerHTML = `
+            <div class="stash-copilot-summary-text">${renderMarkdown(summary.summary)}${isStreaming ? '<span class="stash-copilot-cursor"></span>' : ''}</div>
+            <div class="stash-copilot-summary-meta">${isStreaming ? 'Generating...' : (generatedAt ? 'Generated: ' + generatedAt : '')}</div>
+        `;
+    }
+
     // Load dropdown data
     async function loadDropdownData(dropdown) {
         const statsGrid = dropdown.querySelector('.stash-copilot-stats');
@@ -6552,14 +6613,7 @@
 
         // Load summary (only if not generating)
         const summary = await fetchLastSummary();
-        if (summary && summary.summary) {
-            const generatedAt = new Date(summary.generated_at).toLocaleString();
-            const isStreaming = summary.status === 'streaming';
-            summaryContent.innerHTML = `
-                <div class="stash-copilot-summary-text">${renderMarkdown(summary.summary)}${isStreaming ? '<span class="stash-copilot-cursor"></span>' : ''}</div>
-                <div class="stash-copilot-summary-meta">${isStreaming ? 'Generating...' : 'Generated: ' + generatedAt}</div>
-            `;
-        }
+        renderSummaryInto(summaryContent, summary);
     }
 
     // ====================================================================
