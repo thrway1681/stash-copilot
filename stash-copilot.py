@@ -1536,235 +1536,33 @@ class MyPlugin(StashPlugin):
             self.error(f"Failed to write similar results file: {e}")
 
     def run_search_by_text(self, args: dict[str, Any]) -> None:
+        """Semantic scene search by text, via the dispatch seam (#4, commit 4).
+
+        Result-producing: ``SearchByTextTask.from_context`` resolves the query +
+        model/search args; ``run()`` returns the result dict (or an error dict,
+        owning its runtime errors); ``on_result`` persists it through the seam's
+        ResultStore as ``search_results_{request_id|latest}.json``; ``dispatch``
+        owns uniform error handling. The empty-query guard writes its error result
+        here (before the seam).
         """
-        Search scenes by natural language text query (semantic search).
+        # Mirror _write_search_result's "request_id or 'latest'" filename rule.
+        request_id = args.get("request_id", "") or "latest"
 
-        Args:
-            args: Task arguments containing:
-                - query: Text query string (required)
-                - limit: Maximum results (default 24)
-                - offset: Pagination offset (default 0)
-                - request_id: Unique request ID for frontend validation
-                - model_key: Optional model key to search (e.g., "openclip:ViT-H-14")
-                             If not provided, uses currently configured model from settings
-        """
-
-        try:
-            from stash_ai.embeddings.config import EmbeddingConfig
-            from stash_ai.embeddings.provider import get_embedding_provider
-            from stash_ai.embeddings.storage import EmbeddingStorage
-
-            query = args.get("query", "").strip()
-            if not query:
-                self._write_search_result("", {"status": "error", "error": "Query is required"})
-                return
-
-            limit = int(args.get("limit", 24))
-            offset = int(args.get("offset", 0))
-            request_id = args.get("request_id", "")
-            requested_model_key = args.get("model_key", "").strip()
-            frame_search = args.get("frame_search", "").lower() == "true"
-
-            self.log(
-                f"Searching scenes for: '{query}' (limit={limit}, offset={offset}, frame_search={frame_search})",
-                "info",
+        if not args.get("query", "").strip():
+            self._result_store().save(
+                "search_results", request_id, {"status": "error", "error": "Query is required"}
             )
+            return
 
-            # Get device setting from plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-            image_device = plugin_settings.get("image_embedding_device") or "auto"
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.search_by_text import SearchByTextTask
 
-            # If model_key is provided, use it; otherwise fall back to plugin settings
-            if requested_model_key:
-                # Create config from model_key
-                embedding_config = EmbeddingConfig.from_model_key(
-                    requested_model_key, device=image_device
-                )
-                model_key = requested_model_key
-                self.log(f"Using requested model: {model_key}", "info")
-            else:
-                # Fall back to plugin settings
-                image_provider = plugin_settings.get("image_embedding_provider")
-                image_model = plugin_settings.get("image_embedding_model")
+            return SearchByTextTask.from_context(ctx)
 
-                if not image_provider or not image_model:
-                    self._write_search_result(
-                        request_id,
-                        {
-                            "status": "error",
-                            "error": "Image embedding provider not configured. Set up in Plugin Settings.",
-                        },
-                    )
-                    return
+        def on_result(_task: Any, result: Any) -> None:
+            self._result_store().save("search_results", request_id, result)
 
-                embedding_config = EmbeddingConfig(
-                    provider=cast("str", image_provider),
-                    model=cast("str", image_model),
-                    device=image_device,
-                )
-                model_key = embedding_config.model_key
-
-            embedder = get_embedding_provider(embedding_config)
-            storage = EmbeddingStorage(model_key=model_key)
-
-            # Check for embeddings
-            stats = storage.get_stats()
-            if stats["total_embeddings"] == 0:
-                self._write_search_result(
-                    request_id,
-                    {
-                        "status": "error",
-                        "error": "No scene embeddings found. Run 'Embed All Scenes' task first.",
-                    },
-                )
-                return
-
-            # Frame-level search using FAISS index
-            if frame_search:
-                import numpy as np
-
-                from stash_ai.embeddings.frame_search import FrameSearchIndex
-
-                plugin_dir = os.path.dirname(os.path.abspath(__file__))
-                assets_dir = os.path.join(plugin_dir, "assets")
-
-                frame_index = FrameSearchIndex(assets_dir=assets_dir, model_key=model_key)
-
-                if not frame_index.exists:
-                    self._write_search_result(
-                        request_id,
-                        {
-                            "status": "error",
-                            "error": f"Frame search index not built for model '{model_key}'. Run 'Build Frame Search Index' task first.",
-                        },
-                    )
-                    return
-
-                # Embed the query text
-                try:
-                    result = embedder.embed_text(query)
-                    query_embedding = np.array(result["embedding"], dtype=np.float32)
-                except Exception as e:
-                    self._write_search_result(
-                        request_id, {"status": "error", "error": f"Failed to embed query: {e!s}"}
-                    )
-                    return
-
-                # Search frames
-                frame_matches = frame_index.search(query_embedding, top_k=2000)
-
-                # Aggregate to scenes
-                scene_matches = frame_index.aggregate_to_scenes(frame_matches)
-
-                # Apply pagination
-                paginated = scene_matches[offset : offset + limit]
-
-                # Fetch scene details
-                scene_details = self._get_scene_details_batch([m.scene_id for m in paginated])
-
-                # Build result data with frame info
-                result_data = []
-                for m in paginated:
-                    scene = scene_details.get(m.scene_id, {})
-                    # Format frame path
-                    frame_path = (
-                        f"embedded_frames/scene_{m.scene_id}/frame_{m.best_frame_index:04d}.jpg"
-                    )
-                    result_data.append(
-                        {
-                            "scene_id": m.scene_id,
-                            "similarity": m.similarity,
-                            "best_frame_index": m.best_frame_index,
-                            "best_timestamp": m.best_timestamp,
-                            "frame_path": frame_path,
-                            "scene": scene,
-                        }
-                    )
-
-                has_more = len(scene_matches) > (offset + limit)
-
-                self._write_search_result(
-                    request_id,
-                    {
-                        "status": "complete",
-                        "query": query,
-                        "model_key": model_key,
-                        "frame_search": True,
-                        "results": result_data,
-                        "offset": offset,
-                        "limit": limit,
-                        "has_more": has_more,
-                        "request_id": request_id,
-                        "total_scenes": len(scene_matches),
-                    },
-                )
-
-                self.log(f"Frame search complete: {len(result_data)} scenes for '{query}'", "info")
-                return
-
-            # Embed the query text
-            try:
-                result = embedder.embed_text(query)
-                text_query_embedding = result["embedding"]
-            except Exception as e:
-                self._write_search_result(
-                    request_id, {"status": "error", "error": f"Failed to embed query: {e!s}"}
-                )
-                return
-
-            # Find similar scenes
-            # Note: Text-to-image search typically has lower similarity scores (0.01-0.10)
-            # so we use no minimum threshold and rely on relative ranking
-            results = storage.find_similar(
-                query_embedding=text_query_embedding,
-                limit=limit,
-                offset=offset,
-                min_similarity=0.0,
-            )
-
-            # Fetch full scene details from SQLite
-            scene_details = self._get_scene_details_batch([r.scene_id for r in results])
-
-            # Build result data with embedded scene details
-            result_data = []
-            for r in results:
-                scene = scene_details.get(r.scene_id, {})
-                result_data.append(
-                    {"scene_id": r.scene_id, "similarity": r.similarity, "scene": scene}
-                )
-
-            # has_more is true if we got a full page of results
-            has_more = len(results) == limit
-
-            # Write results to JSON file for frontend polling
-            self._write_search_result(
-                request_id,
-                {
-                    "status": "complete",
-                    "query": query,
-                    "model_key": model_key,
-                    "results": result_data,
-                    "offset": offset,
-                    "limit": limit,
-                    "has_more": has_more,
-                    "request_id": request_id,
-                    "total_embeddings": stats["total_embeddings"],
-                },
-            )
-
-            self.log(f"Search complete: {len(result_data)} results for '{query}'", "info")
-
-        except ImportError as e:
-            self.error(f"Failed to import embedding modules: {e}")
-            self._write_search_result(
-                args.get("request_id", ""),
-                {"status": "error", "error": f"Failed to import embedding modules: {e}"},
-            )
-        except Exception as e:
-            self.error(f"Search error: {e}")
-            self._write_search_result(
-                args.get("request_id", ""), {"status": "error", "error": str(e)}
-            )
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_find_similar_by_frame(self, args: dict[str, Any]) -> None:
         """Find similar scenes by extracting and embedding the current video frame.
@@ -2014,28 +1812,6 @@ class MyPlugin(StashPlugin):
             self.log(f"Wrote frame search results to: {result_file}", "debug")
         except Exception as e:
             self.error(f"Failed to write frame search results: {e}")
-
-    def _write_search_result(self, request_id: str, data: dict[str, Any]) -> None:
-        """Write text search results to JSON file for frontend polling."""
-        import json as json_module
-        import os
-
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
-        assets_dir = os.path.join(plugin_dir, "assets")
-
-        # Ensure assets directory exists
-        os.makedirs(assets_dir, exist_ok=True)
-
-        # Use request_id for filename to support concurrent searches
-        filename = f"search_results_{request_id or 'latest'}.json"
-        result_file = os.path.join(assets_dir, filename)
-
-        try:
-            with open(result_file, "w") as f:
-                json_module.dump(data, f)
-            self.log(f"Wrote search results to: {result_file}", "debug")
-        except Exception as e:
-            self.error(f"Failed to write search results file: {e}")
 
     def run_get_embedding_models(self, args: dict[str, Any]) -> None:
         """List available embedding models + stats, through the dispatch seam (#4, commit 4).
