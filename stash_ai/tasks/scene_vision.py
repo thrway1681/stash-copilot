@@ -35,6 +35,7 @@ from .smart_frame_selector import FrameSelection, SmartFrameSelector
 
 if TYPE_CHECKING:
     from ..stash_client import StashClient
+    from .dispatch import TaskContext
 
 
 @dataclass
@@ -827,6 +828,19 @@ class SceneVisionTask:
         self._similar_scenes: list[SimilarityResult] = []  # Cache for similar scenes
         self._current_classification: dict[str, Any] | None = None  # For tool gating
 
+        # Run-time selectors resolved by ``from_context`` (dispatch seam, #4); the
+        # seam calls ``run()`` with no arguments, so it reads these instead.
+        self._scene_id: str = ""
+        self._message: str | None = None
+        self._conversation_id: str | None = None
+        self._clear_frames: bool = False
+        self._user_confirmed: bool = False
+        self._use_limited_frames: bool = False
+        self._quick_mode: bool = False
+        self._skip_verification: bool = False
+        self._frame_count: int | None = None
+        self._custom_prompts: dict[str, str] | None = None
+
         # Frame extraction settings
         self.fps_rate = fps_rate
         self.min_frames = min_frames
@@ -880,6 +894,157 @@ class SceneVisionTask:
             log_callback=self.log,
             progress_callback=frame_progress,
         )
+
+    @classmethod
+    def from_context(cls, ctx: "TaskContext") -> "SceneVisionTask":
+        """Build the task from a standard :class:`TaskContext` (dispatch seam, #4).
+
+        Resolves the vision/text LLM configs, the image-embedding augmentation
+        config, the excluded tags, and the frame-extraction settings, then caches
+        the run-time selectors (scene/message/conversation + the multi-stage
+        options) for :meth:`run`. Also performs the optional ``clear_history``
+        deletion (fresh-analysis re-run), matching the old handler's pre-run step.
+        Log-only: declares no ``result_key`` — it emits a ``JSON_RESULT:`` line
+        over the log and persists its own conversation history; nothing is polled.
+        """
+        from ..config import get_text_llm_settings, get_vision_llm_settings
+
+        args = ctx.args
+        plugin_settings = ctx.plugin_settings
+
+        scene_id = args.get("scene_id", "")
+        message = args.get("message", "")
+        conversation_id = args.get("conversation_id", "")
+        # clear_history clears conversation history only; clear_frames clears the
+        # extracted-frame cache. Legacy clear_cache clears both.
+        clear_history = args.get("clear_history", "").lower() == "true"
+        clear_frames = args.get("clear_frames", "").lower() == "true"
+        if args.get("clear_cache", "").lower() == "true":
+            clear_history = True
+            clear_frames = True
+        # When clearing history (re-analyze), also clear frames so different frames
+        # are selected, leading to varied descriptions.
+        if clear_history:
+            clear_frames = True
+
+        ctx.log(f"Scene Vision Analysis: scene {scene_id}", "info")
+
+        # Vision LLM (falls back to text LLM if not configured).
+        vision_llm = get_vision_llm_settings(plugin_settings, args)
+        ctx.log(f"Using vision model: {vision_llm.provider}/{vision_llm.model}", "info")
+
+        # Text LLM for tag suggestions.
+        text_llm = get_text_llm_settings(plugin_settings, args)
+        if text_llm.provider != vision_llm.provider or text_llm.model != vision_llm.model:
+            ctx.log(f"Using text model for tags: {text_llm.provider}/{text_llm.model}", "info")
+
+        hosted_max_frames = int(plugin_settings.get("vision_hosted_max_frames") or "10")
+
+        # Multi-stage vision analysis options.
+        user_confirmed = args.get("user_confirmed", "").lower() == "true"
+        use_limited_frames = args.get("use_limited_frames", "").lower() == "true"
+        quick_mode = args.get("quick_mode", "").lower() == "true"
+        skip_verification = args.get("skip_verification", "").lower() == "true"
+        frame_count_str = args.get("frame_count", "")
+        frame_count = (
+            int(frame_count_str) if frame_count_str and frame_count_str.isdigit() else None
+        )
+
+        # Custom per-stage prompts (JSON string or dict).
+        custom_prompts_raw = args.get("custom_prompts", "")
+        custom_prompts: dict[str, str] | None = None
+        if custom_prompts_raw:
+            if isinstance(custom_prompts_raw, str):
+                try:
+                    custom_prompts = json.loads(custom_prompts_raw)
+                except json.JSONDecodeError:
+                    ctx.log(
+                        f"Failed to parse custom_prompts as JSON: {custom_prompts_raw[:100]}",
+                        "warning",
+                    )
+            elif isinstance(custom_prompts_raw, dict):
+                custom_prompts = custom_prompts_raw
+
+        # Excluded tags (parent exclusion also excludes children downstream).
+        excluded_tags_str = plugin_settings.get("excluded_tags", "")
+        excluded_tags = (
+            [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
+            if excluded_tags_str
+            else []
+        )
+        if excluded_tags:
+            ctx.log(f"Excluding tags (and children): {excluded_tags}", "info")
+
+        # Frame extraction: 10s interval (0.1 fps) default, no max (0 = unlimited).
+        frame_interval = float(plugin_settings.get("vision_frame_interval") or "10")
+        fps_rate = 1.0 / frame_interval
+        min_frames = int(plugin_settings.get("vision_min_frames") or "1")
+        max_frames = int(plugin_settings.get("vision_max_frames") or "0")
+        ctx.log(
+            f"Frame extraction: interval={frame_interval}s (fps={fps_rate}), "
+            f"min={min_frames}, max={max_frames} (0=unlimited)",
+            "debug",
+        )
+
+        custom_system_prompt = args.get("custom_system_prompt", "")
+        custom_description_prompt = args.get("custom_description_prompt", "")
+        if custom_system_prompt:
+            ctx.log("Using custom system prompt from UI", "debug")
+        if custom_description_prompt:
+            ctx.log("Using custom description prompt from UI", "debug")
+
+        # Image embeddings for context augmentation (similar-scene lookup).
+        image_embedding_config = None
+        image_provider = plugin_settings.get("image_embedding_provider")
+        image_model = plugin_settings.get("image_embedding_model")
+        if image_provider and image_model:
+            image_embedding_config = EmbeddingConfig(
+                provider=image_provider,
+                model=image_model,
+                device=plugin_settings.get("image_embedding_device") or "auto",
+            )
+            ctx.log(f"Vision augmentation enabled: {image_provider}/{image_model}", "info")
+
+        task = cls(
+            stash=ctx.stash,
+            llm_config=vision_llm.to_config(),
+            tag_llm_config=text_llm.to_config(),
+            image_embedding_config=image_embedding_config,
+            log_callback=ctx.log,
+            progress_callback=ctx.progress,
+            excluded_tags=excluded_tags,
+            fps_rate=fps_rate,
+            min_frames=min_frames,
+            max_frames=max_frames,
+            custom_system_prompt=custom_system_prompt,
+            custom_description_prompt=custom_description_prompt,
+            hosted_max_frames=hosted_max_frames,
+        )
+
+        # Clear conversation history if requested (fresh re-analysis).
+        if clear_history:
+            ctx.log("Clearing conversation history for fresh analysis", "info")
+            history_file = os.path.join(task.assets_dir, f"vision_history_{scene_id}.json")
+            ctx.log(f"Looking for history file: {history_file}", "info")
+            if os.path.exists(history_file):
+                os.remove(history_file)
+                ctx.log("Deleted history file successfully", "info")
+            else:
+                ctx.log("History file does not exist at expected path", "info")
+
+        # Cache run-time selectors for run().
+        task._scene_id = scene_id
+        task._message = message if message else None
+        task._conversation_id = conversation_id if conversation_id else None
+        task._clear_frames = clear_frames
+        task._user_confirmed = user_confirmed
+        task._use_limited_frames = use_limited_frames
+        task._quick_mode = quick_mode
+        task._skip_verification = skip_verification
+        task._frame_count = frame_count
+        task._custom_prompts = custom_prompts
+
+        return task
 
     def _get_assets_dir(self) -> str:
         """Get the scene vision assets directory."""
@@ -2993,40 +3158,30 @@ class SceneVisionTask:
         self.log(f"Parsed {len(tags)} valid tags from response", "debug")
         return tags
 
-    def run(
-        self,
-        scene_id: str,
-        message: str | None = None,
-        conversation_id: str | None = None,
-        clear_frames: bool = False,
-        user_confirmed: bool = False,
-        use_limited_frames: bool = False,
-        quick_mode: bool = False,
-        skip_verification: bool = False,
-        frame_count: int | None = None,
-        custom_prompts: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """
         Analyze a scene using cached frames or continue a vision conversation.
 
-        This method is READ-ONLY for the embedded_frames directory. Frames must
-        be extracted via the 'Embed Scene' task before running vision analysis.
-
-        Args:
-            scene_id: The scene ID to analyze
-            message: Optional follow-up message (if continuing conversation)
-            conversation_id: Optional conversation ID to continue
-            clear_frames: DEPRECATED - ignored, logs warning if True
-            user_confirmed: If True, user has confirmed proceeding with hosted provider
-            use_limited_frames: If True, sample frames uniformly instead of using all
-            quick_mode: If True, use single-pass analysis instead of multi-stage
-            skip_verification: If True, skip the verification stage in multi-stage
-            frame_count: Override auto frame count (None = smart selection)
-            custom_prompts: Custom prompts for each stage (classification, description, etc.)
+        Dispatch-seam entry (#4): reads the run-time selectors that
+        :meth:`from_context` cached on the instance (scene/message/conversation
+        + the multi-stage options). This method is READ-ONLY for the
+        embedded_frames directory — frames must be extracted via the 'Embed
+        Scene' task before running vision analysis.
 
         Returns:
             Dict with conversation_id, description, suggested_tags, response
         """
+        scene_id = self._scene_id
+        message = self._message
+        conversation_id = self._conversation_id
+        clear_frames = self._clear_frames
+        user_confirmed = self._user_confirmed
+        use_limited_frames = self._use_limited_frames
+        quick_mode = self._quick_mode
+        skip_verification = self._skip_verification
+        frame_count = self._frame_count
+        custom_prompts = self._custom_prompts
+
         self.log(f"Scene vision analysis for scene {scene_id}", "info")
 
         # Load or create conversation history

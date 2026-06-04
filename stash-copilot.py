@@ -1125,184 +1125,30 @@ class MyPlugin(StashPlugin):
         self._dispatch(args, build_task)
 
     def run_scene_vision(self, args: dict[str, Any]) -> None:
-        """
-        Run scene vision analysis using a multimodal LLM.
+        """Run scene vision analysis (multimodal LLM), via the dispatch seam (#4, commit 4).
 
-        Args:
-            args: Task arguments containing scene_id, optional message, conversation_id, clear_cache
+        Log-only: ``SceneVisionTask.from_context`` resolves the vision/text LLM
+        configs, image-embedding augmentation, excluded tags, and frame settings,
+        caches the run selectors, and performs the optional ``clear_history``
+        deletion; ``run()`` does the two-stage analysis and returns the result
+        dict; ``on_result`` logs the banner and emits the ``JSON_RESULT:`` line the
+        frontend parses from stdout (the task owns its own conversation-history
+        file — no polled result file). The missing-scene_id guard stays here
+        (before the seam); ``dispatch`` owns uniform error handling.
         """
-        try:
-            import json as json_module
-            import os
+        if not args.get("scene_id", ""):
+            self.error("No scene_id provided")
+            return
 
-            from stash_ai.config import get_text_llm_settings, get_vision_llm_settings
+        def build_task(ctx: TaskContext) -> Any:
             from stash_ai.tasks.scene_vision import SceneVisionTask
 
-            scene_id = args.get("scene_id", "")
+            return SceneVisionTask.from_context(ctx)
+
+        def on_result(_task: Any, result: Any) -> None:
+            import json as json_module
+
             message = args.get("message", "")
-            conversation_id = args.get("conversation_id", "")
-            # clear_history: clears conversation history only (for re-analysis with same frames)
-            # clear_frames: clears extracted frames cache (forces re-extraction)
-            clear_history = args.get("clear_history", "").lower() == "true"
-            clear_frames = args.get("clear_frames", "").lower() == "true"
-            # Legacy support: clear_cache clears both
-            if args.get("clear_cache", "").lower() == "true":
-                clear_history = True
-                clear_frames = True
-
-            # When clearing history (re-analyze), also clear frames for truly fresh analysis
-            # This ensures different frames are selected, leading to varied descriptions
-            if clear_history:
-                clear_frames = True
-
-            if not scene_id:
-                self.error("No scene_id provided")
-                return
-
-            self.log(f"Scene Vision Analysis: scene {scene_id}", "info")
-
-            # Clear conversation history if requested (for re-analysis)
-            if clear_history:
-                self.log("Clearing conversation history for fresh analysis", "info")
-                plugin_dir = os.path.dirname(os.path.abspath(__file__))
-                history_file = os.path.join(
-                    plugin_dir, "assets", "scene_vision", f"vision_history_{scene_id}.json"
-                )
-                self.log(f"Looking for history file: {history_file}", "info")
-                if os.path.exists(history_file):
-                    os.remove(history_file)
-                    self.log("Deleted history file successfully", "info")
-                else:
-                    self.log("History file does not exist at expected path", "info")
-
-            # Get plugin settings
-            plugin_settings = self.get_plugin_settings("stash-copilot")
-
-            # Get vision LLM settings (falls back to text LLM if not configured)
-            vision_llm = get_vision_llm_settings(plugin_settings, args)
-            self.log(f"Using vision model: {vision_llm.provider}/{vision_llm.model}", "info")
-
-            # Get text LLM settings for tag suggestions
-            text_llm = get_text_llm_settings(plugin_settings, args)
-            if text_llm.provider != vision_llm.provider or text_llm.model != vision_llm.model:
-                self.log(f"Using text model for tags: {text_llm.provider}/{text_llm.model}", "info")
-
-            # Get hosted provider max frames setting (default 10)
-            hosted_max_frames = int(plugin_settings.get("vision_hosted_max_frames") or "10")
-
-            # Get user confirmation flag (for hosted provider warning bypass)
-            user_confirmed = args.get("user_confirmed", "").lower() == "true"
-            # Get limited frames flag (use uniformly sampled subset for hosted providers)
-            use_limited_frames = args.get("use_limited_frames", "").lower() == "true"
-
-            # Multi-stage vision analysis options
-            quick_mode = args.get("quick_mode", "").lower() == "true"
-            skip_verification = args.get("skip_verification", "").lower() == "true"
-            frame_count_str = args.get("frame_count", "")
-            frame_count = (
-                int(frame_count_str) if frame_count_str and frame_count_str.isdigit() else None
-            )
-
-            # Parse custom prompts (can be JSON string or dict)
-            custom_prompts_raw = args.get("custom_prompts", "")
-            custom_prompts = None
-            if custom_prompts_raw:
-                if isinstance(custom_prompts_raw, str):
-                    try:
-                        import json
-
-                        custom_prompts = json.loads(custom_prompts_raw)
-                    except json.JSONDecodeError:
-                        self.log(
-                            f"Failed to parse custom_prompts as JSON: {custom_prompts_raw[:100]}",
-                            "warning",
-                        )
-                elif isinstance(custom_prompts_raw, dict):
-                    custom_prompts = custom_prompts_raw
-
-            # Create LLM configs
-            llm_config = vision_llm.to_config()
-            tag_llm_config = text_llm.to_config()
-
-            # Parse excluded tags (comma-separated string to list)
-            # When parent tags are excluded, their children are also excluded
-            excluded_tags_str = plugin_settings.get("excluded_tags", "")
-            excluded_tags = (
-                [tag.strip() for tag in excluded_tags_str.split(",") if tag.strip()]
-                if excluded_tags_str
-                else []
-            )
-
-            if excluded_tags:
-                self.log(f"Excluding tags (and children): {excluded_tags}", "info")
-
-            # Get frame extraction settings
-            # Default: 10s interval (0.1 fps), no max (0 = unlimited, extract based on duration)
-            frame_interval = float(plugin_settings.get("vision_frame_interval") or "10")
-            fps_rate = 1.0 / frame_interval  # Convert interval to fps
-            min_frames = int(plugin_settings.get("vision_min_frames") or "1")
-            max_frames = int(plugin_settings.get("vision_max_frames") or "0")
-
-            self.log(
-                f"Frame extraction: interval={frame_interval}s (fps={fps_rate}), min={min_frames}, max={max_frames} (0=unlimited)",
-                "debug",
-            )
-
-            # Get custom prompts from args (for prompt iteration via UI)
-            custom_system_prompt = args.get("custom_system_prompt", "")
-            custom_description_prompt = args.get("custom_description_prompt", "")
-
-            if custom_system_prompt:
-                self.log("Using custom system prompt from UI", "debug")
-            if custom_description_prompt:
-                self.log("Using custom description prompt from UI", "debug")
-
-            # Get image embedding settings for context augmentation
-            from stash_ai.embeddings.config import EmbeddingConfig
-
-            image_embedding_config = None
-            image_provider = plugin_settings.get("image_embedding_provider")
-            image_model = plugin_settings.get("image_embedding_model")
-
-            if image_provider and image_model:
-                image_embedding_config = EmbeddingConfig(
-                    provider=image_provider,
-                    model=image_model,
-                    device=plugin_settings.get("image_embedding_device") or "auto",
-                )
-                self.log(f"Vision augmentation enabled: {image_provider}/{image_model}", "info")
-
-            # Create and run the task
-            task = SceneVisionTask(
-                stash=self.stash_client,
-                llm_config=llm_config,
-                tag_llm_config=tag_llm_config,
-                image_embedding_config=image_embedding_config,
-                log_callback=self.log,
-                progress_callback=self.progress,
-                excluded_tags=excluded_tags,
-                fps_rate=fps_rate,
-                min_frames=min_frames,
-                max_frames=max_frames,
-                custom_system_prompt=custom_system_prompt,
-                custom_description_prompt=custom_description_prompt,
-                hosted_max_frames=hosted_max_frames,
-            )
-
-            result = task.run(
-                scene_id=scene_id,
-                message=message if message else None,
-                conversation_id=conversation_id if conversation_id else None,
-                clear_frames=clear_frames,
-                user_confirmed=user_confirmed,
-                use_limited_frames=use_limited_frames,
-                quick_mode=quick_mode,
-                skip_verification=skip_verification,
-                frame_count=frame_count,
-                custom_prompts=custom_prompts,
-            )
-
-            # Output the result as JSON for frontend consumption
             self.log("=" * 50, "info")
             self.log("SCENE VISION ANALYSIS", "info")
             self.log("=" * 50, "info")
@@ -1334,14 +1180,7 @@ class MyPlugin(StashPlugin):
 
             self.log("=" * 50, "info")
 
-        except ImportError as e:
-            self.error(f"Failed to import Stash AI modules: {e}")
-        except ConnectionError as e:
-            self.error(f"Connection error: {e}")
-        except RuntimeError as e:
-            self.error(f"Task failed: {e}")
-        except Exception as e:
-            self.error(f"Unexpected error: {e}")
+        self._dispatch(args, build_task, on_result=on_result)
 
     def run_embed_scenes(self, args: dict[str, Any]) -> None:
         """Run scene embedding generation through the dispatch seam (#4, commit 4).
