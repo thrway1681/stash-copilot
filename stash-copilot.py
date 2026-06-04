@@ -355,7 +355,7 @@ class MyPlugin(StashPlugin):
             "stats_summary": self.run_stats_summary,
             "ask": self.run_ask,
             "chat": self.run_chat,
-            "clear_chat": lambda args: self.run_clear_chat(),
+            "clear_chat": self.run_clear_chat,
             "scene_vision": self.run_scene_vision,
             "embed_scenes": self.run_embed_scenes,
             "find_similar": self.run_find_similar,
@@ -1430,25 +1430,21 @@ class MyPlugin(StashPlugin):
         except Exception as e:
             self.error(f"Unexpected error: {e}")
 
-    def run_clear_chat(self) -> None:
+    def run_clear_chat(self, args: dict[str, Any]) -> None:
+        """Clear the chat conversation history through the dispatch seam (#4, commit 4).
+
+        Log-only: ``ClearChatTask`` deletes ``assets/chat_history.json`` and
+        declares no result_key; ``dispatch`` owns uniform error handling,
+        replacing the hand-rolled try/except. The ``clear_chat`` mode ignores its
+        args, but the handler now takes ``args`` to match the dispatch shape.
         """
-        Clear the chat conversation history.
-        """
-        try:
-            import os
 
-            # Get the chat history file path
-            plugin_dir = os.path.dirname(os.path.abspath(__file__))
-            history_file = os.path.join(plugin_dir, "assets", "chat_history.json")
+        def build_task(ctx: TaskContext) -> Any:
+            from stash_ai.tasks.clear_chat import ClearChatTask
 
-            if os.path.exists(history_file):
-                os.remove(history_file)
-                self.log("Chat history cleared", "info")
-            else:
-                self.log("No chat history to clear", "info")
+            return ClearChatTask.from_context(ctx)
 
-        except Exception as e:
-            self.error(f"Failed to clear chat history: {e}")
+        self._dispatch(args, build_task)
 
     def run_scene_vision(self, args: dict[str, Any]) -> None:
         """
