@@ -4,9 +4,21 @@
     // Plugin configuration
     const PLUGIN_ID = 'stash-copilot';
     const PLUGIN_NAME = 'My Plugin';
-    const SUMMARY_FILE = '/plugin/stash-copilot/assets/last_summary.json';
-    const CHAT_FILE = '/plugin/stash-copilot/assets/chat_history.json';
-    const SCENE_VISION_PATH = '/plugin/stash-copilot/assets/scene_vision';
+
+    /**
+     * Build a URL into the plugin's served assets dir from a path relative to it.
+     * This is the ONE place the `/plugin/<id>/assets/` mount prefix lives — every
+     * asset fetch (result JSON, vendored libs, frame images) routes through here, so
+     * a mount-point change is a one-line edit. assetUrl() is the {stem}.json case
+     * used by dispatchTask's poll loop.
+     */
+    function assetPath(rel) {
+        return `/plugin/${PLUGIN_ID}/assets/${rel}`;
+    }
+
+    const SUMMARY_FILE = assetPath('last_summary.json');
+    const CHAT_FILE = assetPath('chat_history.json');
+    const SCENE_VISION_PATH = assetPath('scene_vision');
 
     // ===================================================================
     // Cross-stack task contract (issue #5, commit 1)
@@ -109,9 +121,9 @@
     // predicates and timeouts are overridable per call via opts (isDone /
     // pollTimeout / onPoll). Added here unused; wired up in commit 3.
 
-    /** Build a polled result file's URL from its stem — the one place the prefix lives. */
+    /** Build a polled result file's URL from its stem ({stem}.json under the assets dir). */
     function assetUrl(stem) {
-        return `/plugin/${PLUGIN_ID}/assets/${stem}.json`;
+        return assetPath(`${stem}.json`);
     }
 
     /** Default predicate: is the polled result file in a terminal state? */
@@ -347,7 +359,7 @@
                 return;
             }
             const script = document.createElement('script');
-            script.src = '/plugin/stash-copilot/assets/plotly-gl3d.min.js';
+            script.src = assetPath('plotly-gl3d.min.js');
             script.onload = () => {
                 log('Plotly.js GL3D loaded');
                 resolve(window.Plotly);
@@ -376,8 +388,8 @@
 
         // Load from local assets (CSP blocks external CDNs)
         return Promise.all([
-            loadScript('/plugin/stash-copilot/assets/marked.min.js'),
-            loadScript('/plugin/stash-copilot/assets/purify.min.js')
+            loadScript(assetPath('marked.min.js')),
+            loadScript(assetPath('purify.min.js'))
         ]).then(() => {
             markdownLibs.marked = window.marked;
             markdownLibs.DOMPurify = window.DOMPurify;
@@ -1219,7 +1231,7 @@
 
         try {
             // Fetch stats from backend
-            const response = await fetch(`/plugin/stash-copilot/assets/o_moment_stats.json?t=${Date.now()}`);
+            const response = await fetch(`${assetPath('o_moment_stats.json')}?t=${Date.now()}`);
 
             if (!response.ok) {
                 // No stats file yet - show zeros
@@ -2509,7 +2521,7 @@
                     if (searchMode === 'frame' && item.best_timestamp != null) {
                         entry.matchTimestamp = item.best_timestamp;
                         if (item.frame_path) {
-                            entry.overrideThumbnail = `/plugin/stash-copilot/assets/${item.frame_path}`;
+                            entry.overrideThumbnail = assetPath(item.frame_path);
                         }
                         entry.scoreLabel = 'frame match';
                     }
@@ -4258,7 +4270,7 @@
                         <div class="stash-copilot-frame-selections-list">
                             ${frameSelections.map((sel, i) => {
                                 const reasonClass = sel.selection_reason === 'novelty' ? 'novelty' : 'temporal';
-                                const imagePath = sel.path ? `/plugin/stash-copilot/assets/${sel.path}` : '';
+                                const imagePath = sel.path ? assetPath(sel.path) : '';
                                 const noveltyText = sel.selection_reason === 'novelty' && sel.novelty_score !== undefined
                                     ? `${(sel.novelty_score * 100).toFixed(0)}%`
                                     : '';
@@ -5531,7 +5543,7 @@
         // Attempt to load persisted taste map
         try {
             const resp = await fetch(
-                `/plugin/stash-copilot/assets/taste_map_latest.json?t=${Date.now()}`,
+                `${assetPath('taste_map_latest.json')}?t=${Date.now()}`,
                 { cache: 'no-store' }
             );
             if (resp.ok) {
@@ -6349,7 +6361,7 @@
 
                 if (searchState.frameSearch && item.frame_path) {
                     // Use frame thumbnail for frame search results
-                    overrideThumbnail = `/plugin/stash-copilot/assets/${item.frame_path}`;
+                    overrideThumbnail = assetPath(item.frame_path);
                     matchTimestamp = item.best_timestamp;
                 }
 
@@ -6688,7 +6700,7 @@
         // Attempt to load persisted tag gaps data
         try {
             const resp = await fetch(
-                `/plugin/stash-copilot/assets/tag_gaps_latest.json?t=${Date.now()}`,
+                `${assetPath('tag_gaps_latest.json')}?t=${Date.now()}`,
                 { cache: 'no-store' }
             );
             if (resp.ok) {
@@ -7394,7 +7406,7 @@
         const manualTagsEl = container.querySelector('.stash-copilot-label-manual-tags');
 
         // Load image
-        const framePath = item.frame_path.replace(/^.*?assets\//, '/plugin/stash-copilot/assets/');
+        const framePath = item.frame_path.replace(/^.*?assets\//, assetPath(''));
         imageEl.src = framePath;
         imageEl.alt = `Scene ${item.scene_id} - Frame ${item.frame_index}`;
 
@@ -7744,7 +7756,7 @@
             const frameKey = `${item.scene_id}_${item.frame_index}`;
             const hasAnnotations = !!labelingState.annotations[frameKey];
             const isSelected = i === labelingState.currentIndex;
-            const framePath = item.frame_path.replace(/^.*?assets\//, '/plugin/stash-copilot/assets/');
+            const framePath = item.frame_path.replace(/^.*?assets\//, assetPath(''));
 
             const cell = document.createElement('div');
             cell.className = `stash-copilot-label-grid-cell${isSelected ? ' selected' : ''}${hasAnnotations ? ' labeled' : ''}`;
@@ -8599,7 +8611,7 @@
                 const frameSizes = debugInfo.description_frame_sizes || [];
                 let framesHtml = '';
                 for (let i = 1; i <= frameCount; i++) {
-                    const frameUrl = `/plugin/stash-copilot/assets/embedded_frames/scene_${sceneId}/frame_${String(i).padStart(4, '0')}.jpg`;
+                    const frameUrl = assetPath(`embedded_frames/scene_${sceneId}/frame_${String(i).padStart(4, '0')}.jpg`);
                     const sizeKb = frameSizes[i - 1] ? Math.round(frameSizes[i - 1] * 0.75 / 1024) : '?';
                     framesHtml += `<img src="${frameUrl}" class="stash-copilot-debug-frame" title="Frame ${i} (~${sizeKb}KB)" loading="lazy">`;
                 }
@@ -9593,7 +9605,7 @@
 
     // Poll for similar scene results
     async function pollSimilarResults(sceneId, requestId) {
-        const resultFile = `/plugin/stash-copilot/assets/similar_results_${sceneId}.json`;
+        const resultFile = assetPath(`similar_results_${sceneId}.json`);
         const tabState = getTabState();
 
         const checkResult = async () => {
@@ -10516,7 +10528,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
 
         // Uncovered frames strip
         if (data.uncovered_frame_list && data.uncovered_frame_list.length > 0) {
-            const frameDir = `/plugin/stash-copilot/assets/embedded_frames/scene_${sceneId}`;
+            const frameDir = assetPath(`embedded_frames/scene_${sceneId}`);
             html += `
                 <div class="stash-copilot-sidebar-gaps-frames">
                     <div class="stash-copilot-sidebar-gaps-section-title">Uncovered Frames</div>
@@ -12450,7 +12462,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         const cardsHtml = results.map((result, idx) => {
             const scene = result.scene || {};
             const frameThumbnail = result.frame_path
-                ? `/plugin/stash-copilot/assets/${result.frame_path}`
+                ? assetPath(result.frame_path)
                 : null;
             return buildSceneCard({
                 scene: scene,
@@ -13089,7 +13101,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
     async function pollForResults(filename, timeoutMs = 60000) {
         const startTime = Date.now();
         const pollInterval = 200; // Poll every 200ms
-        const resultFile = `/plugin/stash-copilot/assets/${filename}.json`;
+        const resultFile = assetPath(`${filename}.json`);
 
         while (Date.now() - startTime < timeoutMs) {
             try {
@@ -14161,7 +14173,7 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
 
     const EROS_POLL_INTERVAL_MS = 250;
     const EROS_POLL_TIMEOUT_MS = 30000;
-    const EROS_ASSET_BASE = '/plugin/stash-copilot/assets/eroscripts';
+    const EROS_ASSET_BASE = assetPath('eroscripts');
 
     const eroState = {
         modal: null,
