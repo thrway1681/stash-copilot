@@ -209,8 +209,6 @@
         recommendationsGeneratedAt: null,
         recommendationsCache: {}, // Per-mode cache: { discover_new: {results, profile, generatedAt}, rewatch: {...} }
         isGeneratingRecommendations: false,
-        recommendationsRequestId: null,
-        recommendationsPollInterval: null,
         recommendationsPage: 1,
         recommendationsPerPage: 12,
         // Unified recommendations view (modal only)
@@ -218,8 +216,6 @@
         recommendationsDiscoverResults: [],
         recommendationsRewatchResults: [],
         recommendationsMergedResults: [],
-        recommendationsDiscoverRequestId: null,
-        recommendationsRewatchRequestId: null,
         // Peak Moments state
         peakResults: null,
         peakPage: 1,
@@ -983,8 +979,6 @@
         const timestamp = Date.now();
         const discoverRequestId = `rec_discover_${timestamp}`;
         const rewatchRequestId = `rec_rewatch_${timestamp}`;
-        state.recommendationsDiscoverRequestId = discoverRequestId;
-        state.recommendationsRewatchRequestId = rewatchRequestId;
         state.isGeneratingRecommendations = true;
         state.recommendationsPage = 1; // Reset to first page for new results
 
@@ -1004,13 +998,10 @@
 
             // Check if session mode has scenes
             if (isSessionMode && sessionScenes.length === 0) {
-                state.isGeneratingRecommendations = false;
-                generateBtn.disabled = false;
-                generateBtn.textContent = 'Generate';
                 contentContainer.innerHTML = `
                     <p class="stash-copilot-rec-empty">No scenes viewed this session yet. Browse some scenes first, then come back for recommendations!</p>
                 `;
-                return;
+                return;  // finally resets the button + isGenerating flag
             }
 
             // Build common task parameters
@@ -1028,177 +1019,85 @@
             }
 
             // Build separate params for each task
-            const discoverParams = {
-                ...commonParams,
-                request_id: discoverRequestId
-            };
-            const rewatchParams = {
-                ...commonParams,
-                request_id: rewatchRequestId
-            };
+            const discoverParams = { ...commonParams, request_id: discoverRequestId };
+            const rewatchParams = { ...commonParams, request_id: rewatchRequestId };
 
             const decayLabel = isSessionMode
                 ? `this session (${sessionScenes.length} scenes)`
                 : (state.recommendationsTimeDecayDays > 0 ? `${state.recommendationsTimeDecayDays} days` : 'all time');
             log(`Firing both recommendation tasks concurrently (recency: ${decayLabel})`);
 
-            // Fire BOTH tasks concurrently
-            await Promise.all([
-                runPluginTask('Get Recommendations (Discover)', discoverParams),
-                runPluginTask('Get Recommendations (Re-watch)', rewatchParams)
+            // dispatchTask (#5) owns invocation + polling. Run Discover + Re-watch
+            // concurrently via allSettled (NOT all) so one erroring/timing-out side
+            // never discards a completed sibling. recsDiscover/recsRewatch are
+            // request_id-keyed -> two distinct recommendations_{request_id}.json
+            // files (no collision); pollTimeout 120000 preserves the real budget
+            // (registry default 60000 would halve it); status-only isDone avoids
+            // the default !!data.results early-resolve.
+            const recsOpts = {
+                pollTimeout: 120000,
+                isDone: (d) => d && (d.status === 'complete' || d.status === 'error')
+            };
+            const [discRes, rwRes] = await Promise.allSettled([
+                dispatchTask('recsDiscover', discoverParams, recsOpts),
+                dispatchTask('recsRewatch', rewatchParams, recsOpts)
             ]);
 
-            // Start unified polling for both result files
-            pollUnifiedRecommendationsResults(dropdown, discoverRequestId, rewatchRequestId);
+            const discData = discRes.status === 'fulfilled' ? discRes.value : null;
+            const rwData = rwRes.status === 'fulfilled' ? rwRes.value : null;
+
+            // Capture each side's results. Profile precedence is discover-first
+            // (rewatch fills it only if discover didn't complete) — mirrors the
+            // old combined poll.
+            if (discData && discData.status === 'complete') {
+                state.recommendationsDiscoverResults = (discData.results || []).map(r => ({ ...r, _source: 'discover' }));
+                state.recommendationsProfile = discData.profile;
+            }
+            if (rwData && rwData.status === 'complete') {
+                state.recommendationsRewatchResults = (rwData.results || []).map(r => ({ ...r, _source: 'rewatch' }));
+                if (!state.recommendationsProfile) state.recommendationsProfile = rwData.profile;
+            }
+
+            const discErr = discData && discData.status === 'error' ? (discData.error || 'Discover failed') : null;
+            const rwErr = rwData && rwData.status === 'error' ? (rwData.error || 'Re-watch failed') : null;
+            const haveResults = state.recommendationsDiscoverResults.length > 0 ||
+                                state.recommendationsRewatchResults.length > 0;
+
+            if (haveResults) {
+                // One-completes-one-fails / partial-on-timeout both land here and
+                // render the survivor — matches the old poll's terminal + partial
+                // branches.
+                mergeAndRenderModalRecsResults(dropdown);
+            } else if (discErr && rwErr) {
+                const c = dropdown.querySelector('.stash-copilot-recommendations-content');
+                if (c) c.innerHTML = `<p class="stash-copilot-rec-error">Failed to generate recommendations. Discover: ${escapeHtml(discErr)}; Re-watch: ${escapeHtml(rwErr)}</p>`;
+            } else if (discData && rwData) {
+                // Both sides reached a terminal state but yielded no results (both
+                // complete-empty, or one complete-empty + one error) — render the
+                // empty state ("No recommendations found"), matching the old poll's
+                // both-done path. (Only a genuine timeout falls through below.)
+                mergeAndRenderModalRecsResults(dropdown);
+            } else {
+                // At least one side timed out / rejected with no results to show.
+                const c = dropdown.querySelector('.stash-copilot-recommendations-content');
+                if (c) c.innerHTML = `<p class="stash-copilot-rec-error">Request timed out. Please try again.</p>`;
+            }
 
         } catch (error) {
-            log(`Error starting recommendations: ${error.message}`, 'error');
+            log(`Error generating recommendations: ${error.message}`, 'error');
+            const c = dropdown.querySelector('.stash-copilot-recommendations-content');
+            if (c) c.innerHTML = `<p class="stash-copilot-rec-error">Failed to generate recommendations. Please try again.</p>`;
+        } finally {
+            // Always reset — a second Generate can't start mid-flight (the
+            // isGeneratingRecommendations re-entrancy guard at the top blocks it),
+            // so there is never a newer run whose UI this could disturb. A
+            // navigate-away is left to complete: the modal caches the user's
+            // requested recs (shown on return) and renders into the hidden tab,
+            // which is benign — mirroring the merged PR-A Peak decision.
             state.isGeneratingRecommendations = false;
-            generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate';
-            contentContainer.innerHTML = `
-                <p class="stash-copilot-rec-error">Failed to generate recommendations. Please try again.</p>
-            `;
+            const btn = dropdown.querySelector('.stash-copilot-rec-generate-btn');
+            if (btn) { btn.disabled = false; btn.textContent = 'Generate'; }
         }
-    }
-
-    /**
-     * Poll for both discover and rewatch result files in the modal, merge when both complete.
-     */
-    function pollUnifiedRecommendationsResults(dropdown, discoverRequestId, rewatchRequestId) {
-        if (state.recommendationsPollInterval) {
-            clearInterval(state.recommendationsPollInterval);
-        }
-
-        const discoverFile = `/plugin/stash-copilot/assets/recommendations_${discoverRequestId}.json`;
-        const rewatchFile = `/plugin/stash-copilot/assets/recommendations_${rewatchRequestId}.json`;
-
-        let discoverDone = false;
-        let rewatchDone = false;
-        let discoverError = null;
-        let rewatchError = null;
-
-        state.recommendationsPollInterval = setInterval(async () => {
-            // Bail if request IDs have changed (new search started)
-            if (state.recommendationsDiscoverRequestId !== discoverRequestId ||
-                state.recommendationsRewatchRequestId !== rewatchRequestId) {
-                clearInterval(state.recommendationsPollInterval);
-                state.recommendationsPollInterval = null;
-                return;
-            }
-
-            try {
-                // Poll discover results
-                if (!discoverDone) {
-                    try {
-                        const resp = await fetch(discoverFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                        if (resp.ok) {
-                            const data = await resp.json();
-                            if (data.status === 'complete') {
-                                discoverDone = true;
-                                state.recommendationsDiscoverResults = (data.results || []).map(r => ({
-                                    ...r,
-                                    _source: 'discover'
-                                }));
-                                state.recommendationsProfile = data.profile;
-                                log(`Modal discover results received: ${state.recommendationsDiscoverResults.length} results`);
-                            } else if (data.status === 'error') {
-                                discoverDone = true;
-                                discoverError = data.error || 'Discover failed';
-                                log(`Modal discover task error: ${discoverError}`, 'error');
-                            }
-                        }
-                    } catch (e) {
-                        // File not ready yet
-                    }
-                }
-
-                // Poll rewatch results
-                if (!rewatchDone) {
-                    try {
-                        const resp = await fetch(rewatchFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                        if (resp.ok) {
-                            const data = await resp.json();
-                            if (data.status === 'complete') {
-                                rewatchDone = true;
-                                state.recommendationsRewatchResults = (data.results || []).map(r => ({
-                                    ...r,
-                                    _source: 'rewatch'
-                                }));
-                                if (!state.recommendationsProfile) {
-                                    state.recommendationsProfile = data.profile;
-                                }
-                                log(`Modal rewatch results received: ${state.recommendationsRewatchResults.length} results`);
-                            } else if (data.status === 'error') {
-                                rewatchDone = true;
-                                rewatchError = data.error || 'Re-watch failed';
-                                log(`Modal rewatch task error: ${rewatchError}`, 'error');
-                            }
-                        }
-                    } catch (e) {
-                        // File not ready yet
-                    }
-                }
-
-                // When both are done, merge and render
-                if (discoverDone && rewatchDone) {
-                    clearInterval(state.recommendationsPollInterval);
-                    state.recommendationsPollInterval = null;
-                    state.isGeneratingRecommendations = false;
-
-                    // Update generate button
-                    const generateBtn = dropdown.querySelector('.stash-copilot-rec-generate-btn');
-                    if (generateBtn) {
-                        generateBtn.disabled = false;
-                        generateBtn.textContent = 'Generate';
-                    }
-
-                    // If both errored, show error
-                    if (discoverError && rewatchError) {
-                        const contentContainer = dropdown.querySelector('.stash-copilot-recommendations-content');
-                        contentContainer.innerHTML = `
-                            <p class="stash-copilot-rec-error">Failed to generate recommendations. Discover: ${discoverError}; Re-watch: ${rewatchError}</p>
-                        `;
-                        return;
-                    }
-
-                    mergeAndRenderModalRecsResults(dropdown);
-                }
-            } catch (e) {
-                log(`Unified recs poll error: ${e.message}`);
-            }
-        }, 200);
-
-        // Timeout after 120s
-        setTimeout(() => {
-            // Don't interfere if a newer search has started
-            if (state.recommendationsDiscoverRequestId !== discoverRequestId ||
-                state.recommendationsRewatchRequestId !== rewatchRequestId) {
-                return;
-            }
-            if (state.recommendationsPollInterval) {
-                clearInterval(state.recommendationsPollInterval);
-                state.recommendationsPollInterval = null;
-                state.isGeneratingRecommendations = false;
-
-                const generateBtn = dropdown.querySelector('.stash-copilot-rec-generate-btn');
-                if (generateBtn) {
-                    generateBtn.disabled = false;
-                    generateBtn.textContent = 'Generate';
-                }
-
-                // If timed out but have partial results, render what we have
-                if (state.recommendationsDiscoverResults.length > 0 || state.recommendationsRewatchResults.length > 0) {
-                    log('Modal recs poll timed out but partial results available, rendering');
-                    mergeAndRenderModalRecsResults(dropdown);
-                } else {
-                    const contentContainer = dropdown.querySelector('.stash-copilot-recommendations-content');
-                    contentContainer.innerHTML = `
-                        <p class="stash-copilot-rec-error">Request timed out. Please try again.</p>
-                    `;
-                }
-            }
-        }, 120000);
     }
 
     /**

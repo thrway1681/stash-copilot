@@ -401,6 +401,34 @@ test.describe('feature flows (stub backend)', () => {
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 
+  test('AI Insights modal: concurrent Discover+Re-watch recommendations resolve + merge via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    await page.locator('.stash-copilot-insights-tab[data-tab="recommendations"]').click();
+    const generateBtn = page.locator('.stash-copilot-rec-generate-btn');
+    await generateBtn.click();
+
+    // recsDiscover + recsRewatch fire concurrently (Promise.allSettled), each
+    // request_id-keyed -> its own recommendations_<rid>.json; the merged results
+    // render as recs cards and the button re-enables in the finally. (The stub
+    // serves the same fixture for both, so dedup collapses them — this proves
+    // the concurrent plumbing + merge, not the distinct-source split.)
+    const content = page.locator('.stash-copilot-recommendations-content');
+    await expect(content.locator('.stash-copilot-card[data-theme="recs"]').first()).toBeVisible({ timeout: 20000 });
+    await expect(generateBtn).toBeEnabled();
+
+    // The view-filter buttons re-filter from cache synchronously (no re-fire).
+    await page.locator('.stash-copilot-rec-viewfilter[data-filter="new"]').click();
+    await expect(content.locator('.stash-copilot-card[data-theme="recs"]').first()).toBeVisible({ timeout: 5000 });
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
   test('Tag dedup page: request_id-keyed find_duplicate_tags + merge_tags resolve via the stub', async ({ page }) => {
     const pageErrors = await collectPageErrors(page);
 
