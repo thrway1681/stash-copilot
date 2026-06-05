@@ -12112,11 +12112,15 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
             request_id: myRequestId
         };
 
-        // The shared file means the default predicate (!!data.results) could
-        // accept a sibling request's snapshot. Gate on the three echo-back fields
-        // the backend stamps (request_id / filter_mode / offset); a terminal
-        // status (incl. error) is only accepted AFTER those match, so a sibling's
-        // error can't abort our request.
+        // similar_results_{scene_id}.json is shared by every request for this
+        // scene. A SUCCESS snapshot carries the echo-back fields (request_id /
+        // filter_mode / offset), so gate on those to reject a sibling's completed
+        // result and keep polling for ours (the default !!data.results predicate
+        // would wrongly accept it). An ERROR snapshot is bare — the backend stamps
+        // NO echo-back fields on errors (find_similar.py) — so the gates skip and
+        // it is accepted; that's correct because find_similar's errors are
+        // scene-level (no-embedding / unexpected) and therefore identical for
+        // every concurrent same-scene request, so showing one is showing ours.
         const isDone = (data) => {
             if (!data) return false;
             if (data.request_id && data.request_id !== myRequestId) return false;
