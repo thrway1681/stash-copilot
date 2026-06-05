@@ -429,6 +429,53 @@ test.describe('feature flows (stub backend)', () => {
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
 
+  test('AI Insights modal: chat (fixed chat_history) send + reply renders via the stub', async ({ page }) => {
+    const pageErrors = await collectPageErrors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#stash-copilot-nav-btn').waitFor({ timeout: 30000 });
+    await dismissStashDialogs(page);
+    await page.locator('#stash-copilot-nav-btn').click();
+
+    await page.locator('.stash-copilot-insights-tab[data-tab="chat"]').click();
+
+    // Wait for loadChatHistory (async) to FULLY complete before clearing. It sets
+    // state.lastRenderedMessageCount and un-hides the clear button (display:flex)
+    // only AFTER renderChatMessages resolves; clearing before that would be
+    // overwritten by the late count assignment. The clear button being un-hidden
+    // (history loaded) OR the empty state showing (no history) signals completion.
+    await page.waitForFunction(() => {
+      const clear = document.querySelector('.stash-copilot-clear-chat') as HTMLElement | null;
+      const empty = document.querySelector('.stash-copilot-chat-empty');
+      return (!!clear && getComputedStyle(clear).display !== 'none') || !!empty;
+    }, { timeout: 10000 });
+
+    // chat_history.json + lastRenderedMessageCount persist across runs; if a prior
+    // run left messages, clear to reset the count so the fixture's message count
+    // matches deterministically.
+    const emptyState = page.locator('.stash-copilot-chat-empty');
+    const clearBtn = page.locator('.stash-copilot-clear-chat');
+    if (await clearBtn.isVisible().catch(() => false)) {
+      await clearBtn.click();
+      await expect(emptyState).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.stash-copilot-chat-message')).toHaveCount(0);
+    }
+
+    // Send a message; the stub writes chat.json (status:complete, user + assistant
+    // message, far-future updated_at) into the fixed chat_history.json. dispatchTask
+    // renders the new (assistant) message and resolves on the fresh terminal snapshot.
+    const input = page.locator('.stash-copilot-chat-input');
+    await input.fill('Tell me about my library');
+    await page.locator('.stash-copilot-chat-send').click();
+
+    await expect(page.locator('.stash-copilot-chat-message.assistant')).toContainText('stub assistant reply', {
+      timeout: 20000,
+    });
+    await expect(input).toBeEnabled();
+
+    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
+  });
+
   test('Tag dedup page: request_id-keyed find_duplicate_tags + merge_tags resolve via the stub', async ({ page }) => {
     const pageErrors = await collectPageErrors(page);
 

@@ -1,0 +1,10 @@
+{
+  "conversation_id": "ci-chat",
+  "created_at": "2099-01-01T00:00:00Z",
+  "updated_at": "2099-01-01T00:00:00Z",
+  "status": "complete",
+  "messages": [
+    { "role": "user", "content": "hello from ci" },
+    { "role": "assistant", "content": "Hi! This is the stub assistant reply for the chat contract test." }
+  ]
+}
