@@ -12092,63 +12092,87 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
             similarState.tabs['different-performers'] = { allResults: [], allSceneDetails: [], currentPage: 1, backendOffset: 0, hasMoreBackend: true, isSearching: false, loaded: false };
         }
 
-        // Trigger backend search via GraphQL
+        // Generation token + echo-back gates. find_similar is scene_id-keyed, so
+        // EVERY request for this scene writes ONE shared similar_results_{scene_id}
+        // .json. Thread a request_id the backend echoes back, capture it (plus the
+        // active filter mode), and use it to (a) gate the polled file as ours and
+        // (b) drop a stale result if a re-fire (tab switch / weight slider / frame
+        // -search exit) superseded us during the uncancellable await.
+        const myRequestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        similarState.requestId = myRequestId;
+        const expectedFilterMode = similarState.activeTab;
+        const excludePerformers = similarState.activeTab === 'different-performers';
+
+        const taskArgs = {
+            scene_id: String(sceneId),
+            limit: String(similarState.fetchBatchSize || 100),
+            offset: '0',
+            exclude_common_performers: excludePerformers ? 'true' : 'false',
+            visual_weight: String(similarState.visualWeight),
+            request_id: myRequestId
+        };
+
+        // similar_results_{scene_id}.json is shared by every request for this
+        // scene. A SUCCESS snapshot carries the echo-back fields (request_id /
+        // filter_mode / offset), so gate on those to reject a sibling's completed
+        // result and keep polling for ours (the default !!data.results predicate
+        // would wrongly accept it). An ERROR snapshot is bare — the backend stamps
+        // NO echo-back fields on errors (find_similar.py) — so the gates skip and
+        // it is accepted; that's correct because find_similar's errors are
+        // scene-level (no-embedding / unexpected) and therefore identical for
+        // every concurrent same-scene request, so showing one is showing ours.
+        const isDone = (data) => {
+            if (!data) return false;
+            if (data.request_id && data.request_id !== myRequestId) return false;
+            if (data.filter_mode && data.filter_mode !== expectedFilterMode) return false;
+            if (data.offset !== undefined && Number(data.offset) !== 0) return false;  // sidebar is always offset 0
+            return data.status === 'complete' || data.status === 'error' || !!data.results;
+        };
+
+        // dispatchTask (#5) owns invocation + polling (60s budget = the old loop's
+        // ceiling). The await is uncancellable, so guard the post-await render.
+        let data;
         try {
-            const excludePerformers = similarState.activeTab === 'different-performers';
-            const taskArgs = {
-                scene_id: String(sceneId),
-                limit: String(similarState.fetchBatchSize || 100),
-                offset: '0',
-                exclude_common_performers: excludePerformers ? 'true' : 'false',
-                visual_weight: String(similarState.visualWeight)
-            };
-
-            await runPluginTask('Find Similar Scenes', taskArgs);
-
-            // Poll for results
-            pollSidebarSimilarResults(sceneId, panel);
-
+            data = await dispatchTask('findSimilarScenes', taskArgs, { isDone });
         } catch (e) {
+            // Drop a stale timeout if a frame search now owns the panel, a newer
+            // similar search superseded us, or the scene navigated away.
+            if (frameSearchState.active) return;
+            if (similarState.requestId !== myRequestId) return;
+            if (document.getElementById('scene-copilot-similar-panel') !== panel) return;
             log(`Similar search error: ${e.message}`, 'error');
-            showSidebarError(panel, e.message);
+            showSidebarError(panel, /timed out/i.test(e.message || '') ? 'Search timed out. Please try again.' : e.message);
+            return;
         }
-    }
 
-    async function pollSidebarSimilarResults(sceneId, panel) {
-        const resultFile = `/plugin/stash-copilot/assets/similar_results_${sceneId}.json`;
+        // Cancellation guards (PR #95 family): drop a late result if the user
+        // entered frame search (it replaced the panel's results view), a newer
+        // similar search superseded us, or the scene page was torn down/replaced.
+        if (frameSearchState.active) return;
+        if (similarState.requestId !== myRequestId) return;
+        if (document.getElementById('scene-copilot-similar-panel') !== panel) return;
 
-        const pollInterval = setInterval(async () => {
-            try {
-                const response = await fetch(resultFile + `?t=${Date.now()}`, { cache: 'no-store' });
-                if (response.ok) {
-                    const data = await response.json();
+        if (data.status === 'error') {
+            showSidebarError(panel, data.error || 'Search failed');
+            return;
+        }
 
-                    if (data.status === 'complete' || data.results) {
-                        clearInterval(pollInterval);
-
-                        // Store results - scene details are embedded in results from backend
-                        const tabState = similarState.tabs[similarState.activeTab];
-                        tabState.allResults = data.results || [];
-                        tabState.allSceneDetails = tabState.allResults.map(r => r.scene || null);
-                        tabState.hasMoreBackend = data.has_more || false;
-                        tabState.loaded = true;
-
-                        // Store model_key for display
-                        similarState.modelKey = data.model_key || 'unknown';
-
-                        // Render results directly (no separate fetch needed)
-                        renderSidebarSimilarResultsUI(tabState, panel);
-                    } else if (data.status === 'error') {
-                        clearInterval(pollInterval);
-                        showSidebarError(panel, data.error || 'Search failed');
-                    }
-                }
-            } catch (e) {
-                log(`Similar poll error: ${e.message}`);
-            }
-        }, 300);
-
-        setTimeout(() => clearInterval(pollInterval), 60000);
+        // Store into the tab we actually searched (expectedFilterMode), NOT the
+        // live active tab: the user may have switched to an already-loaded tab
+        // while we were in flight, and a result for one tab must not overwrite the
+        // other tab's cache. The filter_mode gate guarantees data is for
+        // expectedFilterMode. Scene details are embedded in results from the backend.
+        const tabState = similarState.tabs[expectedFilterMode];
+        tabState.allResults = data.results || [];
+        tabState.allSceneDetails = tabState.allResults.map(r => r.scene || null);
+        tabState.hasMoreBackend = data.has_more || false;
+        tabState.loaded = true;
+        similarState.modelKey = data.model_key || 'unknown';
+        // Only paint the panel if the user is still viewing this tab; otherwise the
+        // result is cached and shown when they switch back.
+        if (expectedFilterMode === similarState.activeTab) {
+            renderSidebarSimilarResultsUI(tabState, panel);
+        }
     }
 
     async function fetchSidebarSceneDetails(tabState, panel) {
