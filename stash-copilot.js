@@ -3602,28 +3602,36 @@
         showTypingIndicator(messagesContainer);
 
         try {
-            await runPluginTask('Chat', {
+            // dispatchTask (#5) owns invocation + polling: chat is the FIXED-file
+            // task (chat_history.json, 120s budget). onPoll renders streaming
+            // partials live as the backend rewrites the file; isDone waits for a
+            // fresh terminal snapshot with all messages rendered.
+            await dispatchTask('chat', {
                 message: message,
                 conversation_id: state.conversationId || ''
+            }, {
+                pollTimeout: 120000,
+                onPoll: (history) => applyChatTick(history, messagesContainer),
+                isDone: chatTickIsDone
             });
 
-            log('Chat task started');
-
-            // Start polling for response
-            pollChatResponse(dropdown);
+            finishChat(dropdown);
+            const liveInput = dropdown.querySelector('.stash-copilot-chat-input');
+            if (liveInput) liveInput.focus();
 
         } catch (error) {
-            log(`Chat send error: ${error.message}`, 'error');
-            hideTypingIndicator(messagesContainer);
-            state.isChatting = false;
-            input.disabled = false;
-            sendBtn.disabled = false;
-
-            // Show error message
-            const errorEl = document.createElement('div');
-            errorEl.className = 'stash-copilot-chat-message error';
-            errorEl.innerHTML = `<div class="stash-copilot-message-content">Failed to send message. Please try again.</div>`;
-            messagesContainer.appendChild(errorEl);
+            finishChat(dropdown);
+            // Preserve the original distinction: a poll TIMEOUT just re-enabled the
+            // input (no message); a SEND failure appended an error bubble.
+            if (/timed out/i.test(error.message || '')) {
+                log('Chat polling timed out', 'warn');
+            } else {
+                log(`Chat send error: ${error.message}`, 'error');
+                const errorEl = document.createElement('div');
+                errorEl.className = 'stash-copilot-chat-message error';
+                errorEl.innerHTML = `<div class="stash-copilot-message-content">Failed to send message. Please try again.</div>`;
+                messagesContainer.appendChild(errorEl);
+            }
         }
     }
 
@@ -3650,15 +3658,76 @@
         if (typing) typing.remove();
     }
 
-    // Poll for chat response updates
+    // ===== Shared chat-poll tick logic =====
+    // Used by BOTH the send flow (dispatchTask's onPoll/isDone) and the
+    // resume-on-reopen poll (pollChatResponse). chat_history.json is a fixed file
+    // the backend rewrites incrementally during a turn (streaming -> tool_executing
+    // -> complete/error); "fresh" means updated_at >= the chatStartTime captured
+    // when this turn began.
+
+    /** Apply one chat_history snapshot: render new messages, tool statuses, typing. */
+    function applyChatTick(history, messagesContainer) {
+        if (!history || !messagesContainer) return;
+        const historyTime = new Date(history.updated_at).getTime();
+        // Skip ANY pre-turn snapshot: a fresh write for THIS turn has
+        // updated_at >= chatStartTime. (Don't render a stale-but-terminal previous
+        // turn, which would double-render its tail before the backend's first
+        // write lands.) The resume path sets chatStartTime = updated_at - 1000, so
+        // its own in-flight file is always fresh by construction.
+        if (historyTime < state.chatStartTime) return;
+
+        // Mirror fetchChatHistory's side effects (dispatchTask fetches the file itself).
+        state.chatHistory = history;
+        if (history.conversation_id) state.conversationId = history.conversation_id;
+
+        const newMessageCount = history.messages.length;
+        if (newMessageCount > state.lastRenderedMessageCount) {
+            // Render only the new messages (preserves the typing-indicator animation).
+            renderNewChatMessages(messagesContainer, history.messages, state.lastRenderedMessageCount);
+            state.lastRenderedMessageCount = newMessageCount;
+        }
+
+        updateToolCallStatuses(messagesContainer, history.messages);
+
+        const isProcessing = history.status === 'streaming' || history.status === 'tool_executing';
+        const hasTypingIndicator = !!messagesContainer.querySelector('.stash-copilot-typing');
+        if (isProcessing && !hasTypingIndicator) {
+            showTypingIndicator(messagesContainer);
+        } else if (!isProcessing && hasTypingIndicator) {
+            hideTypingIndicator(messagesContainer);
+        }
+    }
+
+    /** Terminal predicate: fresh + terminal status + all messages rendered. */
+    function chatTickIsDone(history) {
+        if (!history) return false;
+        const historyTime = new Date(history.updated_at).getTime();
+        const isTerminal = history.status === 'complete' || history.status === 'error' || history.status === 'idle';
+        return isTerminal && historyTime >= state.chatStartTime && history.messages.length === state.lastRenderedMessageCount;
+    }
+
+    /** Settle the chat UI when a turn finishes (or times out). */
+    function finishChat(dropdown) {
+        const messagesContainer = dropdown.querySelector('.stash-copilot-chat-messages');
+        if (messagesContainer) hideTypingIndicator(messagesContainer);
+        state.isChatting = false;
+        const input = dropdown.querySelector('.stash-copilot-chat-input');
+        const sendBtn = dropdown.querySelector('.stash-copilot-chat-send');
+        if (input) input.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+    }
+
+    // Resume-on-reopen poll: a turn was already in flight when the modal was
+    // reopened (loadChatHistory saw a streaming/tool_executing status), so this is
+    // a no-task READ of chat_history.json — it CANNOT route through dispatchTask,
+    // which would dispatch a brand-new Chat turn. It shares the per-tick logic
+    // with the send flow via applyChatTick / chatTickIsDone / finishChat.
     function pollChatResponse(dropdown) {
         // Clear any existing poll interval
         if (state.chatPollInterval) {
             clearInterval(state.chatPollInterval);
         }
 
-        const input = dropdown.querySelector('.stash-copilot-chat-input');
-        const sendBtn = dropdown.querySelector('.stash-copilot-chat-send');
         const messagesContainer = dropdown.querySelector('.stash-copilot-chat-messages');
 
         let attempts = 0;
@@ -3668,57 +3737,22 @@
             attempts++;
 
             const history = await fetchChatHistory();
-            if (!history) return;
-
-            // Only process updates after we started chatting (unless status is terminal)
-            const historyTime = new Date(history.updated_at).getTime();
-            const isTerminalStatus = history.status === 'complete' || history.status === 'error' || history.status === 'idle';
-
-            // Early exit only if timestamp is old AND status is not terminal
-            if (historyTime < state.chatStartTime && !isTerminalStatus) return;
-
-            // Only render if there are new messages (incremental update)
-            const newMessageCount = history.messages.length;
-            if (newMessageCount > state.lastRenderedMessageCount) {
-                // Render only the new messages (preserves typing indicator animation)
-                renderNewChatMessages(messagesContainer, history.messages, state.lastRenderedMessageCount);
-                state.lastRenderedMessageCount = newMessageCount;
-            }
-
-            // Update tool call statuses for already-rendered messages
-            updateToolCallStatuses(messagesContainer, history.messages);
-
-            // Only toggle typing indicator if status actually changed
-            const isProcessing = history.status === 'streaming' || history.status === 'tool_executing';
-            const hasTypingIndicator = !!messagesContainer.querySelector('.stash-copilot-typing');
-
-            if (isProcessing && !hasTypingIndicator) {
-                showTypingIndicator(messagesContainer);
-            } else if (!isProcessing && hasTypingIndicator) {
-                hideTypingIndicator(messagesContainer);
-            }
-
-            // Check status - only stop if ALL conditions are met:
-            // 1. Status is terminal (complete/error/idle)
-            // 2. Timestamp is from current chat session (not stale)
-            // 3. All messages have been rendered (no race condition)
-            if (isTerminalStatus && historyTime >= state.chatStartTime && newMessageCount === state.lastRenderedMessageCount) {
-                clearInterval(state.chatPollInterval);
-                state.chatPollInterval = null;
-                hideTypingIndicator(messagesContainer);
-                state.isChatting = false;
-                input.disabled = false;
-                sendBtn.disabled = false;
-                input.focus();
+            if (history) {
+                applyChatTick(history, messagesContainer);
+                if (chatTickIsDone(history)) {
+                    clearInterval(state.chatPollInterval);
+                    state.chatPollInterval = null;
+                    finishChat(dropdown);
+                    const liveInput = dropdown.querySelector('.stash-copilot-chat-input');
+                    if (liveInput) liveInput.focus();
+                    return;
+                }
             }
 
             if (attempts >= maxAttempts) {
                 clearInterval(state.chatPollInterval);
                 state.chatPollInterval = null;
-                hideTypingIndicator(messagesContainer);
-                state.isChatting = false;
-                input.disabled = false;
-                sendBtn.disabled = false;
+                finishChat(dropdown);
                 log('Chat polling timed out', 'warn');
             }
         }, 200);
