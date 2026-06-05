@@ -53,9 +53,12 @@ def _read(path: Path) -> str:
 def _parse_js_tasks() -> list[dict[str, object]]:
     """Parse the ``const TASKS = { ... }`` registry from stash-copilot.js.
 
-    Returns one dict per entry: ``{key, name, resultKey (str|None), keying, poll}``.
-    Relies on the registry's one-object-literal-per-line shape; entries contain no
-    nested braces, so ``\\{([^}]*)\\}`` captures each entry body cleanly.
+    Returns one dict per entry: ``{key, name, resultKey (str|None), keying}``.
+    Relies on the registry's one-object-literal-per-line shape. Each entry nests a
+    single ``defaultArgs: { ... }`` object, so the entry-body capture allows exactly
+    one level of nesting (``\\{(?:[^{}]|\\{[^{}]*\\})*\\}``) -- this keeps every field
+    (including ones that follow ``defaultArgs``) inside the captured body rather than
+    truncating at the first inner brace.
     """
     text = _read(JS_FILE)
     block_match = re.search(r"const TASKS\s*=\s*\{(.*?)\n\s*\};", text, re.DOTALL)
@@ -63,14 +66,13 @@ def _parse_js_tasks() -> list[dict[str, object]]:
     block = block_match.group(1)
 
     entries: list[dict[str, object]] = []
-    for entry in re.finditer(r"(\w+)\s*:\s*\{([^}]*)\}", block):
+    for entry in re.finditer(r"(\w+)\s*:\s*\{((?:[^{}]|\{[^{}]*\})*)\}", block):
         key = entry.group(1)
         body = entry.group(2)
 
         name_m = re.search(r"name\s*:\s*'([^']*)'", body)
         result_m = re.search(r"resultKey\s*:\s*(null|'([^']*)')", body)
         keying_m = re.search(r"keying\s*:\s*'([^']*)'", body)
-        poll_m = re.search(r"poll\s*:\s*(true|false)", body)
 
         assert name_m, f"TASKS entry '{key}' has no parseable name: {body!r}"
         assert result_m, f"TASKS entry '{key}' has no parseable resultKey: {body!r}"
@@ -82,7 +84,6 @@ def _parse_js_tasks() -> list[dict[str, object]]:
                 "name": name_m.group(1),
                 "resultKey": result_m.group(2),  # None when `resultKey: null`
                 "keying": keying_m.group(1),
-                "poll": (poll_m.group(1) != "false") if poll_m else True,
             }
         )
     return entries
