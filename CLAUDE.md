@@ -221,6 +221,41 @@ uv run py-spy record -o profile.svg -- python stash-copilot.py
 /usr/bin/time -v uv run python stash-copilot.py 2>&1 | grep "Maximum resident"
 ```
 
+## Cross-Stack Task Contract (the dispatch seam)
+
+Every frontend task invocation routes through a single seam in `stash-copilot.js`
+(issue #5), so the Stash task name, the polled result-file key, and the backend
+`result_key` are each declared **once** instead of duplicated across ~30
+hand-rolled call sites.
+
+- **`TASKS` registry** (top of `stash-copilot.js`): one entry per frontend action,
+  declaring `name` (the EXACT `stash-copilot.yml` task name), `resultKey` (the
+  backend `result_key`, or `null` for fire-and-forget), `keying`
+  (`request_id` | `scene_id` | `fixed` | `none`), `defaultArgs`, and `pollTimeout`.
+  Keyed per feature, not per backend mode — variants may share a `resultKey` and
+  differ only in `defaultArgs` (e.g. the three recommendations modes).
+- **`dispatchTask(key, args, opts)`**: looks the key up in `TASKS`, runs the task
+  under its exact yml name via `runPluginTask`, then (for result-producing tasks)
+  runs ONE poll loop over the result file until done. Per-call overrides live in
+  `opts`: `isDone` (terminal-state predicate), `pollTimeout`, `pollInterval`,
+  `onPoll` (per-tick callback for live status). Throws on unknown key, missing
+  `scene_id` (scene-keyed tasks), or timeout.
+- **`assetPath(rel)`**: the ONE place the `/plugin/<id>/assets/` mount prefix
+  lives — every asset fetch (result JSON, vendored libs, frame images) routes
+  through it. `assetUrl(stem)` is the `{stem}.json` poll-loop special case.
+
+**Result-file contract (issue #4):** the backend's `ResultStore` writes
+`assets/{result_key}_{request_id}.json` (or `_{scene_id}`, or a fixed name); each
+backend task declares `result_key` as a class attribute. Two tasks write a
+fixed-name file directly and declare no `result_key` — the FIXED-file allowlist:
+`chat` → `chat_history.json`, `stats_summary` → `last_summary.json`.
+
+**Guard:** `tests/tasks/test_dispatch_contract_guard.py` parses the JS `TASKS`
+registry, `stash-copilot.yml`, and the backend `result_key` declarations and fails
+CI if they drift — a yml-name typo (silent no-op) or a `resultKey` mismatch (poll
+timeout) can't ship. When adding or renaming a task, update all three sides; the
+guard confirms they agree.
+
 ## Scene Page UI Architecture
 
 The plugin extends Stash's scene page by injecting four AI tabs into the native sidebar: **Analyze**, **Similar**, **Recs**, **Tags** (in `stash-copilot.js`). All sidebar CSS classes use the `stash-copilot-sidebar-*` prefix. Scene cards use a unified component system via `buildSceneCard()` / `setupSceneCardEvents()` with CSS custom property theming (`--card-accent`, `--card-accent-rgb`). New themes are added with `[data-theme="name"]` selectors. UI style: modern AI aesthetic (glows, gradients, animations).
