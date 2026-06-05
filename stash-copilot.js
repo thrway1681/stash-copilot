@@ -7302,66 +7302,45 @@
         loadingEl.style.display = 'flex';
 
         const requestId = `label_${Date.now()}`;
+        const statusEl = loadingEl.querySelector('.stash-copilot-label-loading-status');
         labelingState.isLoading = true;
 
         try {
-            await runPluginTask('Prepare Labeling Session', {
+            // dispatchTask (#5) owns invocation + polling: prepare_labeling_session
+            // is request_id-keyed -> labeling_session_{request_id}.json (5min budget
+            // — large libraries need time for sampling). no_embeddings is a terminal
+            // state the default predicate misses.
+            const data = await dispatchTask('prepareLabelingSession', {
                 batch_size: String(batchSize),
                 request_id: requestId,
+            }, {
+                isDone: (d) => d.status === 'complete' || d.status === 'error' || d.status === 'no_embeddings',
+                onPoll: () => { if (statusEl) statusEl.textContent = 'Computing uncertainty scores...'; }
             });
 
-            await pollLabelingSession(container, requestId);
+            labelingState.isLoading = false;
+            if (data.status === 'complete') {
+                labelingState.sessionId = data.session_id;
+                labelingState.batch = data.batch;
+                labelingState.vocabulary = data.vocabulary;
+                labelingState.currentIndex = 0;
+                labelingState.annotations = {};
+                loadingEl.style.display = 'none';
+                showLabelingUI(container);
+                renderCurrentFrame(container);
+            } else {
+                // error / no_embeddings
+                loadingEl.style.display = 'none';
+                introEl.style.display = 'flex';
+                alert(data.error || 'Failed to prepare session');
+            }
         } catch (error) {
             log(`Error starting session: ${error.message}`, 'error');
+            labelingState.isLoading = false;
             loadingEl.style.display = 'none';
             introEl.style.display = 'flex';
+            if (/timed out/i.test(error.message || '')) alert('Session preparation timed out');
         }
-    }
-
-    async function pollLabelingSession(container, requestId) {
-        const loadingEl = container.querySelector('.stash-copilot-label-loading');
-        const statusEl = loadingEl.querySelector('.stash-copilot-label-loading-status');
-
-        const maxAttempts = 300; // 5 min — large libraries need time for sampling
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            try {
-                const resp = await fetch(
-                    `/plugin/stash-copilot/assets/labeling_session_${requestId}.json?t=${Date.now()}`,
-                    { cache: 'no-store' }
-                );
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data.status === 'complete') {
-                        labelingState.sessionId = data.session_id;
-                        labelingState.batch = data.batch;
-                        labelingState.vocabulary = data.vocabulary;
-                        labelingState.currentIndex = 0;
-                        labelingState.annotations = {};
-                        labelingState.isLoading = false;
-
-                        loadingEl.style.display = 'none';
-                        showLabelingUI(container);
-                        renderCurrentFrame(container);
-                        return;
-                    } else if (data.status === 'error' || data.status === 'no_embeddings') {
-                        loadingEl.style.display = 'none';
-                        const introEl = container.querySelector('.stash-copilot-label-intro');
-                        introEl.style.display = 'flex';
-                        alert(data.error || 'Failed to prepare session');
-                        return;
-                    }
-                    if (statusEl) statusEl.textContent = 'Computing uncertainty scores...';
-                }
-            } catch (e) {
-                // File not ready yet
-            }
-            await new Promise(r => setTimeout(r, 1000));
-        }
-
-        loadingEl.style.display = 'none';
-        const introEl = container.querySelector('.stash-copilot-label-intro');
-        introEl.style.display = 'flex';
-        alert('Session preparation timed out');
     }
 
     function showLabelingUI(container) {
@@ -7381,33 +7360,23 @@
 
         const requestId = `sessions_${Date.now()}`;
         try {
-            await runPluginTask('Get Labeling Sessions', { request_id: requestId });
+            // dispatchTask (#5) owns invocation + polling: get_labeling_sessions is
+            // request_id-keyed -> labeling_sessions_{request_id}.json (15s budget).
+            const data = await dispatchTask('getLabelingSessions', { request_id: requestId }, {
+                isDone: (d) => d.status === 'complete' || d.status === 'error'
+            });
 
-            // Poll for result
-            for (let i = 0; i < 30; i++) {
-                try {
-                    const resp = await fetch(
-                        `/plugin/stash-copilot/assets/labeling_sessions_${requestId}.json?t=${Date.now()}`,
-                        { cache: 'no-store' }
-                    );
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data.status === 'complete' && data.sessions && data.sessions.length > 0) {
-                            sessionsEl.innerHTML = '<h3 style="color: #999; font-size: 14px; margin-top: 24px;">Previous Sessions</h3>' +
-                                data.sessions.map(s => `
-                                    <div class="stash-copilot-label-session-card" data-session-id="${s.session_id}">
-                                        <span class="session-status ${s.status}">${s.status}</span>
-                                        <span class="session-progress">${s.labeled_count}/${s.total_frames} labeled</span>
-                                        <span class="session-date">${new Date(s.created_at).toLocaleDateString()}</span>
-                                    </div>
-                                `).join('');
-                            return;
-                        }
-                        if (data.status === 'complete') return; // no sessions
-                    }
-                } catch (e) { /* not ready */ }
-                await new Promise(r => setTimeout(r, 500));
+            if (data.status === 'complete' && data.sessions && data.sessions.length > 0) {
+                sessionsEl.innerHTML = '<h3 style="color: #999; font-size: 14px; margin-top: 24px;">Previous Sessions</h3>' +
+                    data.sessions.map(s => `
+                        <div class="stash-copilot-label-session-card" data-session-id="${s.session_id}">
+                            <span class="session-status ${s.status}">${s.status}</span>
+                            <span class="session-progress">${s.labeled_count}/${s.total_frames} labeled</span>
+                            <span class="session-date">${new Date(s.created_at).toLocaleDateString()}</span>
+                        </div>
+                    `).join('');
             }
+            // else: no sessions (or error) — leave the section empty, as before.
         } catch (e) {
             log(`Error loading sessions: ${e.message}`, 'error');
         }
@@ -7807,32 +7776,22 @@
         }
 
         try {
-            await runPluginTask('Export Labeling Dataset', {
+            // dispatchTask (#5) owns invocation + polling: export_labeling_dataset
+            // is request_id-keyed -> labeling_export_{request_id}.json (60s budget).
+            const data = await dispatchTask('exportLabelingDataset', {
                 request_id: requestId,
                 include_negatives: 'true',
+            }, {
+                isDone: (d) => d.status === 'complete' || d.status === 'error'
             });
 
-            for (let i = 0; i < 60; i++) {
-                try {
-                    const resp = await fetch(
-                        `/plugin/stash-copilot/assets/labeling_export_${requestId}.json?t=${Date.now()}`,
-                        { cache: 'no-store' }
-                    );
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data.status === 'complete') {
-                            alert(`Exported ${data.total_images} images with ${data.total_tags} tags to:\n${data.export_path}`);
-                            break;
-                        } else if (data.status === 'error') {
-                            alert(`Export failed: ${data.error}`);
-                            break;
-                        }
-                    }
-                } catch (e) { /* not ready */ }
-                await new Promise(r => setTimeout(r, 1000));
+            if (data.status === 'complete') {
+                alert(`Exported ${data.total_images} images with ${data.total_tags} tags to:\n${data.export_path}`);
+            } else {
+                alert(`Export failed: ${data.error}`);
             }
         } catch (e) {
-            alert(`Export failed: ${e.message}`);
+            alert(/timed out/i.test(e.message || '') ? 'Export timed out. Please try again.' : `Export failed: ${e.message}`);
         } finally {
             if (exportBtn) {
                 exportBtn.disabled = false;
