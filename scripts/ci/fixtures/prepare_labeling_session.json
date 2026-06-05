@@ -1,0 +1,17 @@
+{
+  "status": "complete",
+  "session_id": "ci-session",
+  "vocabulary": ["outdoor", "indoor", "hd"],
+  "batch": [
+    {
+      "frame_path": "assets/embedded_frames/scene_1/frame_0001.jpg",
+      "scene_id": 1,
+      "frame_index": 1,
+      "scene_title": "CI Frame 1",
+      "timestamp": "0:05",
+      "uncertainty_score": 0.5,
+      "suggested_tags": []
+    }
+  ],
+  "request_id": "__REQUEST_ID__"
+}
