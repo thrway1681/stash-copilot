@@ -76,12 +76,13 @@ case "$keyed_by" in
   *)          stem="${result_key}_${request_id}" ;;
 esac
 
-# Some flows are covered by cancellation regression tests that navigate away
-# mid-task (frame search "Back to Similar"; recommendations modal tab-switch).
-# A brief delay before writing the result makes those races deterministic: the
-# navigate-away action reliably lands before the result file appears, letting
-# the test verify the generation-token guard drops the late result instead of
-# re-rendering the abandoned view.
+# Some flows are covered by cancellation regression tests that fire a new
+# request mid-task (frame search "Back to Similar"; sidebar Recs Discover->Re-watch
+# mode switch). A brief delay before writing the result makes those races
+# deterministic: the new request reliably supersedes the in-flight one before its
+# file appears, letting the test verify the supersede guard drops the stale
+# result. (The Recs delay also lets the modal/Peak "completes on return" tests
+# fire while the user navigates away — those intentionally complete, no guard.)
 case "$mode" in
   find_similar_by_frame|recommendations) sleep 2 ;;
 esac
