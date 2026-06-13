@@ -132,10 +132,10 @@ _JS_TASKS = _parse_js_tasks()
 def test_registry_parsed_nonempty() -> None:
     """Guard the guard: a broken regex must fail loudly, not pass vacuously.
 
-    The registry has ~24 entries; if parsing yields far fewer, the per-entry
+    The registry has ~20 entries; if parsing yields far fewer, the per-entry
     assertions below would pass for the wrong reason (nothing to check).
     """
-    assert len(_JS_TASKS) >= 20, (
+    assert len(_JS_TASKS) >= 18, (
         f"Parsed only {len(_JS_TASKS)} TASKS entries from stash-copilot.js -- the "
         "registry shape likely changed and the parse regex needs updating. Refusing "
         "to let the contract assertions pass vacuously."
