@@ -77,3 +77,10 @@ def test_typed_subpaths_sit_directly_under_the_data_root(
 
     assert resolved == root / leaf
     assert resolved.parent == root
+
+
+def test_autouse_fixture_redirects_data_dir_without_explicit_setup(tmp_path: Path) -> None:
+    """The suite-wide autouse fixture (tests/conftest.py) already points data_dir()
+    at the per-test temp dir, so code under test never touches the real ~/.stash even
+    when the test sets nothing itself."""
+    assert paths.data_dir() == tmp_path / "stash-copilot"
