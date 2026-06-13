@@ -447,28 +447,6 @@ tasks:
       mode: clear_dismissed_tags
       scene_id: ""
 
-  - name: Find Duplicate Tags
-    description: Find duplicate tags using embedding similarity for review and merge
-    defaultArgs:
-      mode: find_duplicate_tags
-      request_id: ""
-
-  - name: Merge Tags
-    description: Merge one tag into another (reassign scenes, delete source tag)
-    defaultArgs:
-      mode: merge_tags
-      keep_tag_id: ""
-      remove_tag_id: ""
-      request_id: ""
-
-  - name: Dismiss Tag Merge
-    description: Dismiss a duplicate tag candidate (mark as not duplicates)
-    defaultArgs:
-      mode: dismiss_tag_merge
-      tag_a_name: ""
-      tag_b_name: ""
-      request_id: ""
-
   - name: Prepare Labeling Session
     description: Prepare a batch of frames for labeling using uncertainty sampling
     defaultArgs:

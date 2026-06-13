@@ -66,11 +66,6 @@ from stash_ai.tasks.recommendations import RecommendationsTask
 from stash_ai.tasks.scene_vision import SceneVisionTask
 from stash_ai.tasks.search_by_text import SearchByTextTask
 from stash_ai.tasks.stats_summary import StatsSummaryTask
-from stash_ai.tasks.tag_dedup import (
-    DismissTagMergeTask,
-    FindDuplicateTagsTask,
-    MergeTagsTask,
-)
 from stash_ai.tasks.tag_gap_detection import (
     PreviewTagImpactTask,
     SceneTagGapsTask,
@@ -104,9 +99,6 @@ RESULT_PRODUCING: dict[str, type] = {
     "get_scene_tag_gaps": SceneTagGapsTask,
     "preview_tag_impact": PreviewTagImpactTask,
     "get_tag_suggestions": TagSuggestionsTask,
-    "find_duplicate_tags": FindDuplicateTagsTask,
-    "merge_tags": MergeTagsTask,
-    "dismiss_tag_merge": DismissTagMergeTask,
     "find_similar": FindSimilarTask,
     "find_similar_by_frame": FindSimilarByFrameTask,
     "find_similar_performers": FindSimilarPerformersTask,
