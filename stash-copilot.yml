@@ -447,33 +447,6 @@ tasks:
       mode: clear_dismissed_tags
       scene_id: ""
 
-  - name: Prepare Labeling Session
-    description: Prepare a batch of frames for labeling using uncertainty sampling
-    defaultArgs:
-      mode: prepare_labeling_session
-      batch_size: "200"
-      request_id: ""
-
-  - name: Sync Labeling Annotations
-    description: Sync annotation labels from the labeling UI
-    defaultArgs:
-      mode: sync_labeling_annotations
-      request_id: ""
-      payload: ""
-
-  - name: Export Labeling Dataset
-    description: Export labeled data as WebDataset for training
-    defaultArgs:
-      mode: export_labeling_dataset
-      request_id: ""
-      include_negatives: "true"
-
-  - name: Get Labeling Sessions
-    description: List labeling sessions with progress stats
-    defaultArgs:
-      mode: get_labeling_sessions
-      request_id: ""
-
   - name: Find Similar by Frame
     description: Extract current frame, embed it, and find similar scenes via frame index
     defaultArgs:

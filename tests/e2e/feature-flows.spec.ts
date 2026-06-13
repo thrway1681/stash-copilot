@@ -475,22 +475,4 @@ test.describe('feature flows (stub backend)', () => {
 
     expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
   });
-
-  test('Labeling page: prepare_labeling_session + get_labeling_sessions resolve via the stub', async ({ page }) => {
-    const pageErrors = await collectPageErrors(page);
-
-    // The plugin renders its own labeling page (onPageChange -> renderLabelingPage),
-    // which auto-loads previous sessions (get_labeling_sessions, request_id-keyed).
-    await page.goto('/plugins/stash-copilot/label', { waitUntil: 'domcontentloaded' });
-    await page.locator('.stash-copilot-label-page').waitFor({ timeout: 30000 });
-    await dismissStashDialogs(page);
-    await expect(page.locator('.stash-copilot-label-intro')).toBeVisible({ timeout: 10000 });
-
-    // Start a session: prepare_labeling_session (request_id-keyed) resolves to the
-    // stub's batch, transitioning from the intro to the labeling UI (footer shown).
-    await page.locator('.stash-copilot-label-start-btn').click();
-    await expect(page.locator('.stash-copilot-label-footer')).toBeVisible({ timeout: 20000 });
-
-    expect(pageErrors, `uncaught JS errors:\n${pageErrors.map((e) => e.stack || e.message).join('\n')}`).toEqual([]);
-  });
 });

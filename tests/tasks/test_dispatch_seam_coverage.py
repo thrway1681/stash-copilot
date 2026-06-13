@@ -56,12 +56,6 @@ from stash_ai.tasks.frame_analysis import (
     FrameAnalysisTask,
     StartFrameAnalysisTask,
 )
-from stash_ai.tasks.labeling_actions import (
-    ExportLabelingDatasetTask,
-    GetLabelingSessionsTask,
-    PrepareLabelingSessionTask,
-    SyncLabelingAnnotationsTask,
-)
 from stash_ai.tasks.recommendations import RecommendationsTask
 from stash_ai.tasks.scene_vision import SceneVisionTask
 from stash_ai.tasks.search_by_text import SearchByTextTask
@@ -104,10 +98,6 @@ RESULT_PRODUCING: dict[str, type] = {
     "find_similar_performers": FindSimilarPerformersTask,
     "search_by_text": SearchByTextTask,
     "get_embedding_models": GetEmbeddingModelsTask,
-    "prepare_labeling_session": PrepareLabelingSessionTask,
-    "sync_labeling_annotations": SyncLabelingAnnotationsTask,
-    "export_labeling_dataset": ExportLabelingDatasetTask,
-    "get_labeling_sessions": GetLabelingSessionsTask,
     "eroscripts_validate_auth": EroscriptsValidateAuthTask,
     "eroscripts_search": EroscriptsSearchTask,
     "eroscripts_download": EroscriptsDownloadTask,

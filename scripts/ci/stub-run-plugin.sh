@@ -52,10 +52,6 @@ case "$mode" in
   get_embedding_models)     result_key="embedding_models" ;;
   find_similar_by_frame)    result_key="frame_search" ;;
   find_similar_performers)  result_key="similar_performers" ;;
-  prepare_labeling_session) result_key="labeling_session" ;;
-  sync_labeling_annotations) result_key="labeling_sync" ;;
-  export_labeling_dataset)  result_key="labeling_export" ;;
-  get_labeling_sessions)    result_key="labeling_sessions" ;;
   find_similar)             result_key="similar_results"; keyed_by="scene_id" ;;
   chat)                     result_key="chat_history";    keyed_by="fixed" ;;
   stats_summary)            result_key="last_summary";    keyed_by="fixed" ;;
