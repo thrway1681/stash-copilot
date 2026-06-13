@@ -381,10 +381,6 @@ class MyPlugin(StashPlugin):
             "apply_suggested_tag": self.run_apply_suggested_tag,
             "dismiss_suggested_tag": self.run_dismiss_suggested_tag,
             "clear_dismissed_tags": self.run_clear_dismissed_tags,
-            "prepare_labeling_session": self.run_prepare_labeling_session,
-            "sync_labeling_annotations": self.run_sync_labeling_annotations,
-            "export_labeling_dataset": self.run_export_labeling_dataset,
-            "get_labeling_sessions": self.run_get_labeling_sessions,
             "eroscripts_validate_auth": self.run_eroscripts_validate_auth,
             "eroscripts_search": self.run_eroscripts_search,
             "eroscripts_download": self.run_eroscripts_download,
@@ -787,72 +783,6 @@ class MyPlugin(StashPlugin):
             from stash_ai.tasks.tag_suggestion_actions import ClearDismissedTagsTask
 
             return ClearDismissedTagsTask.from_context(ctx)
-
-        self._dispatch(args, build_task)
-
-    def run_prepare_labeling_session(self, args: dict[str, Any]) -> None:
-        """Prepare a labeling session, via the dispatch seam (#4, commit 4).
-
-        Result-producing (task-internal writer): ``PrepareLabelingSessionTask``
-        syncs the tag vocabulary, samples an uncertainty batch, and writes its own
-        ``labeling_session_{request_id}.json`` on success or a specific error dict
-        on failure (declares ``result_key="labeling_session"``); ``dispatch`` owns
-        uniform error handling. (Slated for removal under #13.)
-        """
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.labeling_actions import PrepareLabelingSessionTask
-
-            return PrepareLabelingSessionTask.from_context(ctx)
-
-        self._dispatch(args, build_task)
-
-    def run_sync_labeling_annotations(self, args: dict[str, Any]) -> None:
-        """Sync annotations from the labeling UI, via the dispatch seam (#4, commit 4).
-
-        Result-producing (task-internal writer): ``SyncLabelingAnnotationsTask``
-        applies the payload and writes ``labeling_sync_{request_id}.json`` on
-        success (logs only on error; declares ``result_key="labeling_sync"``);
-        ``dispatch`` owns uniform error handling. (Slated for removal under #13.)
-        """
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.labeling_actions import SyncLabelingAnnotationsTask
-
-            return SyncLabelingAnnotationsTask.from_context(ctx)
-
-        self._dispatch(args, build_task)
-
-    def run_export_labeling_dataset(self, args: dict[str, Any]) -> None:
-        """Export labeled data as WebDataset, via the dispatch seam (#4, commit 4).
-
-        Result-producing (task-internal writer): ``ExportLabelingDatasetTask``
-        exports the dataset and writes its own ``labeling_export_{request_id}.json``
-        on success or a specific error dict on failure (declares
-        ``result_key="labeling_export"``); ``dispatch`` owns uniform error
-        handling. (Slated for removal under #13.)
-        """
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.labeling_actions import ExportLabelingDatasetTask
-
-            return ExportLabelingDatasetTask.from_context(ctx)
-
-        self._dispatch(args, build_task)
-
-    def run_get_labeling_sessions(self, args: dict[str, Any]) -> None:
-        """List labeling sessions, via the dispatch seam (#4, commit 4).
-
-        Result-producing (task-internal writer): ``GetLabelingSessionsTask`` lists
-        sessions and writes ``labeling_sessions_{request_id}.json`` on success
-        (logs only on error; declares ``result_key="labeling_sessions"``);
-        ``dispatch`` owns uniform error handling. (Slated for removal under #13.)
-        """
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.labeling_actions import GetLabelingSessionsTask
-
-            return GetLabelingSessionsTask.from_context(ctx)
 
         self._dispatch(args, build_task)
 
