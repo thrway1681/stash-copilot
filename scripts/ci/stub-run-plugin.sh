@@ -48,9 +48,6 @@ case "$mode" in
   get_scene_tag_gaps)       result_key="tag_gaps_scene" ;;
   preview_tag_impact)       result_key="tag_preview" ;;
   get_tag_suggestions)      result_key="tag_suggestions" ;;
-  find_duplicate_tags)      result_key="tag_dedup" ;;
-  merge_tags)               result_key="tag_merge" ;;
-  dismiss_tag_merge)        result_key="tag_dismiss" ;;
   search_by_text)           result_key="search_results" ;;
   get_embedding_models)     result_key="embedding_models" ;;
   find_similar_by_frame)    result_key="frame_search" ;;

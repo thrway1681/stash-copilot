@@ -381,9 +381,6 @@ class MyPlugin(StashPlugin):
             "apply_suggested_tag": self.run_apply_suggested_tag,
             "dismiss_suggested_tag": self.run_dismiss_suggested_tag,
             "clear_dismissed_tags": self.run_clear_dismissed_tags,
-            "find_duplicate_tags": self.run_find_duplicate_tags,
-            "merge_tags": self.run_merge_tags,
-            "dismiss_tag_merge": self.run_dismiss_tag_merge,
             "prepare_labeling_session": self.run_prepare_labeling_session,
             "sync_labeling_annotations": self.run_sync_labeling_annotations,
             "export_labeling_dataset": self.run_export_labeling_dataset,
@@ -792,89 +789,6 @@ class MyPlugin(StashPlugin):
             return ClearDismissedTagsTask.from_context(ctx)
 
         self._dispatch(args, build_task)
-
-    def run_find_duplicate_tags(self, args: dict[str, Any]) -> None:
-        """Find duplicate tags through the dispatch seam (#4, commit 4).
-
-        Result-producing: ``FindDuplicateTagsTask.from_context`` resolves the
-        model_key + storage; ``on_result`` persists the result through the seam's
-        ResultStore (keyed by the task's ``result_key``) and logs the summary;
-        ``dispatch`` owns uniform error handling.
-        """
-        request_id = args.get("request_id", "")
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.tag_dedup import FindDuplicateTagsTask
-
-            return FindDuplicateTagsTask.from_context(ctx)
-
-        def on_result(task: Any, result: Any) -> None:
-            # Persist for frontend polling via the dispatch seam's result store.
-            self._result_store().save(task.result_key, request_id, result)
-            if result["status"] == "complete":
-                self.log(f"Found {len(result['candidates'])} duplicate tag candidates", "info")
-            else:
-                self.log(f"Tag dedup: {result.get('error', 'unknown error')}", "warning")
-
-        self._dispatch(args, build_task, on_result=on_result)
-
-    def run_merge_tags(self, args: dict[str, Any]) -> None:
-        """Merge one tag into another, through the dispatch seam (#4, commit 4).
-
-        Result-producing: ``MergeTagsTask.from_context`` caches the keep/remove
-        tag ids; ``on_result`` persists the result through the seam's ResultStore
-        (``tag_merge_{request_id}.json``, keyed by the task's ``result_key``) and
-        logs the summary; ``dispatch`` owns uniform error handling. The missing-id
-        guard stays here (before the seam) so it's a clean no-op.
-        """
-        keep_tag_id = int(args.get("keep_tag_id", 0))
-        remove_tag_id = int(args.get("remove_tag_id", 0))
-        request_id = args.get("request_id", "")
-
-        if not keep_tag_id or not remove_tag_id:
-            self.log("Missing keep_tag_id or remove_tag_id", "error")
-            return
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.tag_dedup import MergeTagsTask
-
-            return MergeTagsTask.from_context(ctx)
-
-        def on_result(task: Any, result: Any) -> None:
-            self._result_store().save(task.result_key, request_id, result)
-            if result["status"] == "complete":
-                self.log(f"Merged tags: {result['scenes_updated']} scenes updated", "info")
-            else:
-                self.log(f"Tag merge error: {result.get('error')}", "warning")
-
-        self._dispatch(args, build_task, on_result=on_result)
-
-    def run_dismiss_tag_merge(self, args: dict[str, Any]) -> None:
-        """Dismiss a tag-merge candidate through the dispatch seam (#4, commit 4).
-
-        Side-effecting: ``DismissTagMergeTask`` records the dismissal in
-        EmbeddingStorage; ``on_result`` persists the ``{"status": "complete"}``
-        confirmation through the seam's ResultStore (``tag_dismiss_{request_id}.
-        json``); ``dispatch`` owns uniform error handling. The missing-name guard
-        stays here (before the seam) so it's a clean no-op.
-        """
-        tag_a_name = args.get("tag_a_name", "")
-        tag_b_name = args.get("tag_b_name", "")
-        request_id = args.get("request_id", "")
-
-        if not tag_a_name or not tag_b_name:
-            self.log("Missing tag_a_name or tag_b_name", "error")
-            return
-
-        def build_task(ctx: TaskContext) -> Any:
-            from stash_ai.tasks.tag_dedup import DismissTagMergeTask
-
-            return DismissTagMergeTask.from_context(ctx)
-
-        def on_result(task: Any, result: Any) -> None:
-            self._result_store().save(task.result_key, request_id, result)
-
-        self._dispatch(args, build_task, on_result=on_result)
 
     def run_prepare_labeling_session(self, args: dict[str, Any]) -> None:
         """Prepare a labeling session, via the dispatch seam (#4, commit 4).

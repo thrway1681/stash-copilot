@@ -79,17 +79,13 @@
         getEmbeddingModels:  { name: 'Get Embedding Models',  resultKey: 'embedding_models', keying: 'request_id', defaultArgs: {}, pollTimeout: 6000 },
         searchScenesByText:  { name: 'Search Scenes by Text', resultKey: 'search_results',   keying: 'request_id', defaultArgs: { limit: '240', offset: '0' }, pollTimeout: 60000 },
 
-        // ---- tag gaps / suggestions / dedup ----
+        // ---- tag gaps / suggestions ----
         detectTagGaps:       { name: 'Detect Tag Gaps',      resultKey: 'tag_gaps',        keying: 'request_id', defaultArgs: { force: 'false' }, pollTimeout: 600000 },
         getSceneTagGaps:     { name: 'Get Scene Tag Gaps',   resultKey: 'tag_gaps_scene',  keying: 'request_id', defaultArgs: {}, pollTimeout: 30000 },
         previewTagImpact:    { name: 'Preview Tag Impact',   resultKey: 'tag_preview',     keying: 'request_id', defaultArgs: {}, pollTimeout: 15000 },
         getTagSuggestions:   { name: 'Get Tag Suggestions',  resultKey: 'tag_suggestions', keying: 'request_id', defaultArgs: {}, pollTimeout: 60000 },
         dismissSuggestedTag: { name: 'Dismiss Suggested Tag', resultKey: null, keying: 'none', defaultArgs: {} },
         clearDismissedTags:  { name: 'Clear Dismissed Tags',  resultKey: null, keying: 'none', defaultArgs: {} },
-        findDuplicateTags:   { name: 'Find Duplicate Tags',   resultKey: 'tag_dedup', keying: 'request_id', defaultArgs: {}, pollTimeout: 30000 },
-        mergeTags:           { name: 'Merge Tags',            resultKey: 'tag_merge', keying: 'request_id', defaultArgs: {}, pollTimeout: 20000 },
-        // backend writes tag_dismiss_{request_id}.json, but the frontend treats this as fire-and-forget:
-        dismissTagMerge:     { name: 'Dismiss Tag Merge',     resultKey: 'tag_dismiss', keying: 'request_id', defaultArgs: {}, poll: false },
 
         // ---- labeling ----
         prepareLabelingSession:  { name: 'Prepare Labeling Session', resultKey: 'labeling_session',  keying: 'request_id', defaultArgs: { batch_size: '200' }, pollTimeout: 300000 },
@@ -244,15 +240,7 @@
         tagGapsData: null,
         tagGapsRequestId: null,
         // AI Insights Modal state
-        insightsModalOpen: false,
-        // Tag dedup state
-        tagDedupCandidates: [],
-        tagDedupCurrentIndex: 0,
-        tagDedupMergeCount: 0,
-        tagDedupSkipCount: 0,
-        tagDedupScenesUpdated: 0,
-        tagDedupRequestId: null,
-        tagDedupProcessing: false
+        insightsModalOpen: false
     };
 
     // Scene vision state (separate from main state)
@@ -13292,443 +13280,8 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         } else if (path === '/plugins/stash-copilot/search') {
             // Render semantic search page
             setTimeout(renderSearchPage, 100);
-        } else if (path === '/plugins/stash-copilot/tag-dedup') {
-            // Render tag dedup page
-            setTimeout(renderTagDedupPage, 100);
         }
         // Navbar dropdown handles stats display globally now
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // Tag Deduplication UI
-    // ═══════════════════════════════════════════════════════════════════
-
-    /**
-     * Create nav button for tag dedup page
-     */
-    function createDedupNavButton() {
-        if (document.getElementById('stash-copilot-dedup-nav-item')) return;
-
-        const labelingNavItem = document.getElementById('stash-copilot-labeling-nav-item');
-        const searchNavItem = document.getElementById('stash-copilot-search-nav-item');
-        const insertAfter = labelingNavItem || searchNavItem;
-
-        if (!insertAfter) {
-            const tagsLink = document.querySelector('.navbar-nav a[href="/tags"]');
-            if (!tagsLink) return;
-            var insertPoint = tagsLink.closest('.nav-item') || tagsLink.parentElement;
-        } else {
-            var insertPoint = insertAfter;
-        }
-
-        const navItem = document.createElement('li');
-        navItem.className = 'nav-item';
-        navItem.id = 'stash-copilot-dedup-nav-item';
-
-        const btn = document.createElement('a');
-        btn.id = 'stash-copilot-dedup-nav-btn';
-        btn.className = 'nav-link';
-        btn.href = '/plugins/stash-copilot/tag-dedup';
-        btn.innerHTML = `
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                <circle cx="9" cy="7" r="4"/>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-            <span>Tag Dedup</span>
-        `;
-        btn.title = 'Find and merge duplicate tags';
-
-        navItem.appendChild(btn);
-        insertPoint.parentNode.insertBefore(navItem, insertPoint.nextSibling);
-
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            navigateToDedupPage();
-        });
-
-        log('Tag Dedup nav button created');
-    }
-
-    function navigateToDedupPage() {
-        history.pushState({ stashCopilotDedup: true }, '', '/plugins/stash-copilot/tag-dedup');
-        renderTagDedupPage();
-    }
-
-    /**
-     * Handle browser back/forward for dedup page
-     */
-    function setupDedupNavigationHandler() {
-        window.addEventListener('popstate', () => {
-            const path = window.location.pathname;
-            if (path === '/plugins/stash-copilot/tag-dedup') {
-                renderTagDedupPage();
-            } else if (document.querySelector('.stash-copilot-dedup-page')) {
-                window.location.reload();
-            }
-        });
-    }
-
-    /**
-     * Render the tag dedup page (full SPA page replacement)
-     */
-    function renderTagDedupPage() {
-        // Guard against double-render (click handler + onPageChange both fire)
-        if (document.querySelector('.stash-copilot-dedup-page')) {
-            log('Tag dedup page already rendered, skipping');
-            return;
-        }
-        log('Rendering tag dedup page...');
-
-        let mainContent = document.querySelector('.main');
-        if (!mainContent) mainContent = document.querySelector('#root > div:last-child');
-        if (!mainContent) mainContent = document.querySelector('.container-fluid') || document.querySelector('#root');
-        if (!mainContent) {
-            log('Could not find main content area', 'error');
-            return;
-        }
-
-        // Reset state
-        state.tagDedupCandidates = [];
-        state.tagDedupCurrentIndex = 0;
-        state.tagDedupMergeCount = 0;
-        state.tagDedupSkipCount = 0;
-        state.tagDedupScenesUpdated = 0;
-        state.tagDedupProcessing = false;
-
-        mainContent.innerHTML = `
-            <div class="stash-copilot-dedup-page">
-                <div class="stash-copilot-dedup-header">
-                    <div class="stash-copilot-dedup-header-left">
-                        <a href="/tags" class="stash-copilot-dedup-back-btn" onclick="event.preventDefault(); window.location.href='/tags';">← Back</a>
-                        <h1 class="stash-copilot-dedup-title">
-                            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                                <circle cx="9" cy="7" r="4"/>
-                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                            </svg>
-                            Tag Deduplication
-                        </h1>
-                    </div>
-                </div>
-                <div class="stash-copilot-dedup-body">
-                    <div class="stash-copilot-dedup-loading">
-                        <div class="stash-copilot-spinner"></div>
-                        <span>Scanning for duplicate tags...</span>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Add keyboard listener
-        document.removeEventListener('keydown', handleDedupKeyboard);
-        document.addEventListener('keydown', handleDedupKeyboard);
-
-        // Start the scan
-        startTagDedupScan();
-    }
-
-    async function startTagDedupScan() {
-        const requestId = `dedup_${Date.now()}`;
-        state.tagDedupRequestId = requestId;
-
-        try {
-            // dispatchTask (#5) owns invocation + polling: find_duplicate_tags is
-            // request_id-keyed -> tag_dedup_{request_id}.json (30s budget).
-            // no_embeddings is a terminal state the default predicate misses.
-            const data = await dispatchTask('findDuplicateTags', {
-                mode: 'find_duplicate_tags',
-                request_id: requestId,
-            }, {
-                isDone: (d) => d.status === 'complete' || d.status === 'no_embeddings' || d.status === 'error',
-            });
-
-            // Supersede guard: a newer scan started while this awaited.
-            if (state.tagDedupRequestId !== requestId) return;
-
-            if (data.status === 'complete' && data.candidates && data.candidates.length > 0) {
-                state.tagDedupCandidates = data.candidates;
-                renderDedupPair();
-            } else if (data.status === 'complete') {
-                renderDedupEmpty('No duplicate tags found above 75% similarity.');
-            } else if (data.status === 'no_embeddings') {
-                renderDedupEmpty('No tag embeddings found. Run "Build Tag Vocabulary" first.');
-            } else {
-                renderDedupError(data.error || 'Unknown error');
-            }
-        } catch (e) {
-            if (state.tagDedupRequestId !== requestId) return;
-            log(`Tag dedup scan error: ${e.message}`, 'error');
-            renderDedupError(/timed out/i.test(e.message || '')
-                ? 'Scan timed out. Check plugin logs.'
-                : 'Failed to start scan. Check plugin logs.');
-        }
-    }
-
-    function renderDedupPair() {
-        const body = document.querySelector('.stash-copilot-dedup-body');
-        if (!body) return;
-
-        const candidates = state.tagDedupCandidates;
-        const idx = state.tagDedupCurrentIndex;
-
-        if (idx >= candidates.length) {
-            renderDedupSummary();
-            return;
-        }
-
-        const candidate = candidates[idx];
-        const total = candidates.length;
-        const similarityPct = Math.round(candidate.similarity * 100);
-        const progressPct = Math.round((idx / total) * 100);
-
-        body.innerHTML = `
-            <div class="stash-copilot-dedup-pair-enter">
-                <div class="stash-copilot-dedup-pair-info">
-                    Pair ${idx + 1} of ${total}
-                    <span class="stash-copilot-dedup-similarity-badge">${similarityPct}% similar</span>
-                </div>
-
-                <div class="stash-copilot-dedup-versus">
-                    <div class="stash-copilot-dedup-card ${candidate.suggested_keep === 'a' ? 'suggested' : ''}" data-side="a">
-                        <div class="stash-copilot-dedup-tag-name">${escapeHtml(candidate.tag_a.name)}</div>
-                        <div class="stash-copilot-dedup-scene-count"><strong>${candidate.tag_a.scene_count}</strong> scenes</div>
-                        ${candidate.suggested_keep === 'a' ? '<div class="stash-copilot-dedup-keep-badge">suggested keep</div>' : ''}
-                    </div>
-
-                    <div class="stash-copilot-dedup-vs">VS</div>
-
-                    <div class="stash-copilot-dedup-card ${candidate.suggested_keep === 'b' ? 'suggested' : ''}" data-side="b">
-                        <div class="stash-copilot-dedup-tag-name">${escapeHtml(candidate.tag_b.name)}</div>
-                        <div class="stash-copilot-dedup-scene-count"><strong>${candidate.tag_b.scene_count}</strong> scenes</div>
-                        ${candidate.suggested_keep === 'b' ? '<div class="stash-copilot-dedup-keep-badge">suggested keep</div>' : ''}
-                    </div>
-                </div>
-
-                <div class="stash-copilot-dedup-actions">
-                    <button class="stash-copilot-dedup-btn keep-left" id="dedup-keep-left">
-                        ← Keep Left
-                    </button>
-                    <button class="stash-copilot-dedup-btn skip-btn" id="dedup-skip">
-                        Skip
-                    </button>
-                    <button class="stash-copilot-dedup-btn keep-right" id="dedup-keep-right">
-                        Keep Right →
-                    </button>
-                </div>
-
-                <div class="stash-copilot-dedup-keyboard-hint">
-                    <kbd>←</kbd> Keep Left
-                    <kbd>↓</kbd> Skip
-                    <kbd>→</kbd> Keep Right
-                </div>
-
-                <div class="stash-copilot-dedup-merge-status" id="dedup-merge-status" style="display:none"></div>
-
-                <div class="stash-copilot-dedup-progress">
-                    <div class="stash-copilot-dedup-progress-bar">
-                        <div class="stash-copilot-dedup-progress-fill" style="width: ${progressPct}%"></div>
-                    </div>
-                    <div class="stash-copilot-dedup-progress-text">
-                        ${state.tagDedupMergeCount} merged · ${state.tagDedupSkipCount} skipped
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Attach click handlers to cards and buttons
-        body.querySelector('.stash-copilot-dedup-card[data-side="a"]').addEventListener('click', () => handleDedupKeep('a'));
-        body.querySelector('.stash-copilot-dedup-card[data-side="b"]').addEventListener('click', () => handleDedupKeep('b'));
-        body.querySelector('#dedup-keep-left').addEventListener('click', () => handleDedupKeep('a'));
-        body.querySelector('#dedup-keep-right').addEventListener('click', () => handleDedupKeep('b'));
-        body.querySelector('#dedup-skip').addEventListener('click', () => handleDedupSkip());
-    }
-
-    async function handleDedupKeep(side) {
-        if (state.tagDedupProcessing) return;
-        state.tagDedupProcessing = true;
-
-        const candidate = state.tagDedupCandidates[state.tagDedupCurrentIndex];
-        if (!candidate) { state.tagDedupProcessing = false; return; }
-
-        const keepTag = side === 'a' ? candidate.tag_a : candidate.tag_b;
-        const removeTag = side === 'a' ? candidate.tag_b : candidate.tag_a;
-        const removeSide = side === 'a' ? 'b' : 'a';
-        const keepSide = side;
-
-        // Animate cards
-        const removeCard = document.querySelector(`.stash-copilot-dedup-card[data-side="${removeSide}"]`);
-        const keepCard = document.querySelector(`.stash-copilot-dedup-card[data-side="${keepSide}"]`);
-        if (removeCard) removeCard.classList.add('removing');
-        if (keepCard) keepCard.classList.add('keeping');
-
-        // Disable buttons and show merge status
-        document.querySelectorAll('.stash-copilot-dedup-btn').forEach(b => b.disabled = true);
-        const statusEl = document.getElementById('dedup-merge-status');
-        if (statusEl) {
-            statusEl.style.display = 'flex';
-            statusEl.className = 'stash-copilot-dedup-merge-status merging';
-            statusEl.innerHTML = `<div class="status-spinner"></div> Merging "${escapeHtml(removeTag.name)}" into "${escapeHtml(keepTag.name)}"…`;
-        }
-
-        try {
-            const requestId = `merge_${Date.now()}`;
-            // dispatchTask (#5) owns invocation + polling: merge_tags is
-            // request_id-keyed -> tag_merge_{request_id}.json (20s budget).
-            const data = await dispatchTask('mergeTags', {
-                mode: 'merge_tags',
-                keep_tag_id: String(keepTag.id),
-                remove_tag_id: String(removeTag.id),
-                request_id: requestId,
-            });
-
-            if (data.status === 'complete') {
-                state.tagDedupMergeCount++;
-                state.tagDedupScenesUpdated += data.scenes_updated || 0;
-                removeMergedTagFromCandidates(removeTag.id);
-
-                // Show success status briefly
-                if (statusEl) {
-                    const scenesMsg = data.scenes_updated ? `${data.scenes_updated} scene${data.scenes_updated !== 1 ? 's' : ''} updated` : 'No scenes to update';
-                    statusEl.className = 'stash-copilot-dedup-merge-status success';
-                    statusEl.innerHTML = `✓ Merged! ${scenesMsg}`;
-                }
-                await new Promise(r => setTimeout(r, 600));
-            } else {
-                log(`Merge failed: ${data.error}`, 'error');
-                if (statusEl) {
-                    statusEl.className = 'stash-copilot-dedup-merge-status error';
-                    statusEl.innerHTML = `✗ ${data.error || 'Merge failed'}`;
-                }
-                await new Promise(r => setTimeout(r, 1500));
-            }
-
-            state.tagDedupCurrentIndex++;
-            state.tagDedupProcessing = false;
-            renderDedupPair();
-        } catch (e) {
-            log(`Merge error: ${e.message}`, 'error');
-            const timedOut = /timed out/i.test(e.message || '');
-            if (statusEl) {
-                statusEl.className = 'stash-copilot-dedup-merge-status error';
-                statusEl.innerHTML = timedOut ? '✗ Merge timed out' : `✗ ${e.message}`;
-            }
-            // Preserve the original split: a timeout advances to the next pair;
-            // a failure to start the task re-enables the buttons on this pair.
-            if (timedOut) {
-                await new Promise(r => setTimeout(r, 1500));
-                state.tagDedupCurrentIndex++;
-                renderDedupPair();
-            } else {
-                document.querySelectorAll('.stash-copilot-dedup-btn').forEach(b => b.disabled = false);
-            }
-            state.tagDedupProcessing = false;
-        }
-    }
-
-    function removeMergedTagFromCandidates(removedTagId) {
-        const remaining = state.tagDedupCandidates.slice(state.tagDedupCurrentIndex + 1);
-        const filtered = remaining.filter(
-            c => c.tag_a.id !== removedTagId && c.tag_b.id !== removedTagId
-        );
-        state.tagDedupCandidates = [
-            ...state.tagDedupCandidates.slice(0, state.tagDedupCurrentIndex + 1),
-            ...filtered,
-        ];
-    }
-
-    async function handleDedupSkip() {
-        if (state.tagDedupProcessing) return;
-        state.tagDedupProcessing = true;
-
-        const candidate = state.tagDedupCandidates[state.tagDedupCurrentIndex];
-        if (!candidate) { state.tagDedupProcessing = false; return; }
-
-        try {
-            const requestId = `dismiss_${Date.now()}`;
-            await dispatchTask('dismissTagMerge', {
-                tag_a_name: candidate.tag_a.name,
-                tag_b_name: candidate.tag_b.name,
-                request_id: requestId,
-            });
-        } catch (e) {
-            log(`Dismiss error: ${e.message}`, 'warn');
-        }
-
-        state.tagDedupSkipCount++;
-        state.tagDedupCurrentIndex++;
-        state.tagDedupProcessing = false;
-        renderDedupPair();
-    }
-
-    function handleDedupKeyboard(event) {
-        // Don't capture if typing in an input, or not on dedup page
-        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
-        if (!document.querySelector('.stash-copilot-dedup-page')) return;
-        if (state.tagDedupProcessing) return;
-
-        if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            handleDedupKeep('a');
-        } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            handleDedupKeep('b');
-        } else if (event.key === 'ArrowDown' || event.key === 's') {
-            event.preventDefault();
-            handleDedupSkip();
-        }
-    }
-
-    function renderDedupSummary() {
-        const body = document.querySelector('.stash-copilot-dedup-body');
-        if (!body) return;
-
-        document.removeEventListener('keydown', handleDedupKeyboard);
-
-        body.innerHTML = `
-            <div class="stash-copilot-dedup-summary">
-                <h3>Deduplication Complete</h3>
-                <p class="stash-copilot-dedup-summary-subtitle">All candidate pairs have been reviewed.</p>
-                <div class="stash-copilot-dedup-summary-stats">
-                    <div class="stash-copilot-dedup-stat">
-                        <div class="stash-copilot-dedup-stat-value">${state.tagDedupMergeCount}</div>
-                        <div class="stash-copilot-dedup-stat-label">Tags Merged</div>
-                    </div>
-                    <div class="stash-copilot-dedup-stat">
-                        <div class="stash-copilot-dedup-stat-value">${state.tagDedupSkipCount}</div>
-                        <div class="stash-copilot-dedup-stat-label">Skipped</div>
-                    </div>
-                    <div class="stash-copilot-dedup-stat">
-                        <div class="stash-copilot-dedup-stat-value">${state.tagDedupScenesUpdated}</div>
-                        <div class="stash-copilot-dedup-stat-label">Scenes Updated</div>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderDedupEmpty(message) {
-        const body = document.querySelector('.stash-copilot-dedup-body');
-        if (!body) return;
-        body.innerHTML = `
-            <div class="stash-copilot-dedup-empty">
-                <div class="stash-copilot-dedup-empty-icon">✓</div>
-                <p>${escapeHtml(message)}</p>
-            </div>
-        `;
-    }
-
-    function renderDedupError(message) {
-        const body = document.querySelector('.stash-copilot-dedup-body');
-        if (!body) return;
-        body.innerHTML = `
-            <div class="stash-copilot-dedup-empty">
-                <div class="stash-copilot-dedup-empty-icon">⚠</div>
-                <p>${escapeHtml(message)}</p>
-            </div>
-        `;
     }
 
     // Initialize plugin
@@ -13757,15 +13310,12 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
                 if (!document.getElementById('stash-copilot-search-nav-btn')) {
                     createSearchNavButton();
                 }
-                // Image Labeling and Tag Dedup nav buttons are intentionally
-                // not injected. The underlying pages and route handlers stay
-                // wired up for direct URL access; only the navbar entry
-                // points are hidden. Re-enable by uncommenting below.
+                // The Image Labeling nav button is intentionally not injected.
+                // The underlying page and route handler stay wired up for direct
+                // URL access; only the navbar entry point is hidden. Re-enable by
+                // uncommenting below.
                 // if (!document.getElementById('stash-copilot-labeling-nav-btn')) {
                 //     createLabelingNavButton();
-                // }
-                // if (!document.getElementById('stash-copilot-dedup-nav-btn')) {
-                //     createDedupNavButton();
                 // }
             } else {
                 // Retry after a short delay
@@ -13778,7 +13328,6 @@ A scene might have 80% library coverage but only 40% scene-tag coverage — mean
         // Setup handler for browser back/forward navigation from search/labeling pages
         setupSearchNavigationHandler();
         setupLabelingNavigationHandler();
-        setupDedupNavigationHandler();
 
         // Listen for page changes (for scene enhancements)
         const stash = window.stash || {};
