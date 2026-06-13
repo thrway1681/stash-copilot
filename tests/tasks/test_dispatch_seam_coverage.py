@@ -8,7 +8,7 @@ execution: every mode the plugin dispatches is handled by collapsing its
 * **result-producing** — it persists a result the frontend polls and declares a
   ``result_key`` (``assets/{result_key}_{request_id}.json``). Some route through
   :class:`~stash_ai.tasks.result_store.ResultStore`; others (recommendations,
-  taste map, labeling, eroscripts) write their own file. Both are valid — the
+  taste map, eroscripts) write their own file. Both are valid — the
   guard only requires the ``result_key`` marker.
 * **log-only** — it logs, prints to stdout, mutates the DB, or writes a
   non-polled artifact, and declares no ``result_key``.
