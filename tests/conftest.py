@@ -12,6 +12,21 @@ from tests.fixtures.mock_stash import create_mock_stash
 from tests.fixtures.schema import create_mock_schema, populate_test_data
 
 
+@pytest.fixture(autouse=True)
+def _isolate_stash_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point ``STASH_CONFIG_DIR`` at a per-test temp dir for the whole suite.
+
+    ``stash_ai.paths.data_dir()`` — and everything routed onto it as the runtime-data
+    relocation (#14) proceeds — resolves generated data under
+    ``$STASH_CONFIG_DIR/stash-copilot/``. Without this redirect, a test that reaches
+    that code would read from (and create dirs in) the developer's real ``~/.stash``.
+    Autouse so it covers every test; per-test ``tmp_path`` keeps tests isolated.
+    Tests that exercise the resolution itself (``tests/test_paths.py``) override or
+    clear the var through their own function-scoped ``monkeypatch``, which wins.
+    """
+    monkeypatch.setenv("STASH_CONFIG_DIR", str(tmp_path))
+
+
 class NonClosingConnection:
     """
     Wrapper around sqlite3.Connection that makes close() a no-op.
