@@ -1,7 +1,6 @@
 """Task for generating scene embeddings."""
 
 import json
-import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -10,6 +9,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
+
+from stash_ai import paths
 
 from ..config import LLMConfig
 from ..embeddings.base import BaseImageEmbeddingProvider
@@ -156,15 +157,13 @@ class EmbedScenesTask:
         self.log(f"Using embedding model key: {model_key}", "debug")
 
         # Setup frame extractor
-        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        cache_dir = os.path.join(plugin_dir, "assets", "embedded_frames")
         self.frame_extractor = FrameExtractor(
             config=FrameExtractionConfig(
                 fps_rate=self.config.fps_rate,
                 min_frames=self.config.min_frames,
                 max_frames=self.config.max_frames,
             ),
-            cache_dir=cache_dir,
+            cache_dir=str(paths.frames_cache_dir()),
             log_callback=self.log,
         )
 
@@ -788,14 +787,11 @@ class EmbedScenesTask:
         """
         # Check for cached vision history
         if self.config.use_cached_descriptions:
-            plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            history_file = os.path.join(
-                plugin_dir, "assets", "scene_vision", f"vision_history_{scene_id}.json"
-            )
+            history_file = paths.scene_vision_dir() / f"vision_history_{scene_id}.json"
 
-            if os.path.exists(history_file):
+            if history_file.exists():
                 try:
-                    with open(history_file) as f:
+                    with history_file.open() as f:
                         history = json.load(f)
                     if history.get("description"):
                         self.log(
