@@ -119,6 +119,11 @@ jobs:
           docker compose -f docker-compose.dev.yml up -d
           STASH_URL=http://localhost:3000 STASH_LIBRARY="$MEDIA_ABS" \
             EMBED_DEVICE=cpu bash scripts/dev_stash_bootstrap.sh
+          # The container writes the bind-mounted config directory as root, while
+          # ML tasks run on the host. Give those tasks the same writable Data
+          # Directory that a real Stash plugin process receives.
+          sudo install -d -o "$(id -u)" -g "$(id -g)" \
+            docker/stash-config/stash-copilot
 
       - name: Seed engagement (recs need >=3 engaged scenes + unwatched ones)
         run: |
