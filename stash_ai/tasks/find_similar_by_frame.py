@@ -9,12 +9,12 @@ frame index for visually similar frames across the library.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .. import paths
 from ..embeddings.config import EmbeddingConfig
 from ..embeddings.frame_search import FrameSearchIndex
 from ..embeddings.provider import get_embedding_provider
@@ -118,13 +118,9 @@ class FindSimilarByFrameTask:
             video_path = row["video_path"]
 
             # Step 2: Extract frame at timestamp (ephemeral - no disk caching)
-            plugin_dir = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            )
-            assets_dir = os.path.join(plugin_dir, "assets")
             extractor = FrameExtractor(
                 config=FrameExtractionConfig(),
-                cache_dir=os.path.join(assets_dir, "embedded_frames"),
+                cache_dir=str(paths.frames_cache_dir()),
                 log_callback=self.log,
             )
 
@@ -166,7 +162,7 @@ class FindSimilarByFrameTask:
             self.log(f"Embedded frame: {result['dimensions']} dims", "debug")
 
             # Step 4: Load frame search index
-            frame_index = FrameSearchIndex(assets_dir=assets_dir, model_key=model_key)
+            frame_index = FrameSearchIndex(model_key=model_key)
 
             if not frame_index.exists:
                 return {

@@ -8,7 +8,6 @@ search and frame-level FAISS search (``frame_search``).
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -124,10 +123,7 @@ class SearchByTextTask:
 
                 from ..embeddings.frame_search import FrameSearchIndex
 
-                plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-                assets_dir = os.path.join(plugin_dir, "assets")
-
-                frame_index = FrameSearchIndex(assets_dir=assets_dir, model_key=model_key)
+                frame_index = FrameSearchIndex(model_key=model_key)
                 if not frame_index.exists:
                     return {
                         "status": "error",

@@ -11,6 +11,8 @@ import faiss
 import numpy as np
 from numpy.typing import NDArray
 
+from stash_ai import paths
+
 if TYPE_CHECKING:
     from stash_ai.embeddings.storage import EmbeddingStorage
 
@@ -64,23 +66,28 @@ class FrameSearchIndex:
     Uses memory-mapped loading and binary metadata for fast startup.
     """
 
-    def __init__(self, assets_dir: str, model_key: str = "siglip"):
+    def __init__(
+        self,
+        data_dir: str | Path | None = None,
+        model_key: str = "siglip",
+    ) -> None:
         """Initialize the frame search index.
 
         Args:
-            assets_dir: Path to assets directory for index storage
+            data_dir: Data Directory for index storage. Uses ``stash_ai.paths``
+                when omitted.
             model_key: Embedding model key (e.g., "siglip", "openclip:ViT-H-14")
         """
-        self.assets_dir = Path(assets_dir)
+        self.data_dir = Path(data_dir) if data_dir is not None else paths.data_dir()
         self.model_key = model_key
 
         # Sanitize model_key for filename (replace : with -)
         safe_key = model_key.replace(":", "-").replace("/", "-")
-        self.index_path = self.assets_dir / f"frame_search_{safe_key}.index"
-        self.meta_path = self.assets_dir / f"frame_search_{safe_key}_meta.npz"
-        self.info_path = self.assets_dir / f"frame_search_{safe_key}_info.json"
+        self.index_path = self.data_dir / f"frame_search_{safe_key}.index"
+        self.meta_path = self.data_dir / f"frame_search_{safe_key}_meta.npz"
+        self.info_path = self.data_dir / f"frame_search_{safe_key}_info.json"
         # Legacy JSON path for migration
-        self._legacy_meta_path = self.assets_dir / f"frame_search_{safe_key}_meta.json"
+        self._legacy_meta_path = self.data_dir / f"frame_search_{safe_key}_meta.json"
 
         # Lazy-loaded index and metadata arrays
         self._index: faiss.IndexFlatIP | None = None
@@ -118,8 +125,7 @@ class FrameSearchIndex:
             IndexInfo with build statistics
         """
 
-        # Ensure assets directory exists
-        self.assets_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # Count total frames for this model (the store owns the SQL).
         total_frames = storage.count_frame_embeddings(self.model_key)
@@ -214,7 +220,7 @@ class FrameSearchIndex:
         # This avoids the FAISS mmap overhead (~35s) by using numpy's
         # simpler format (instant mmap open, ~0.5s scoring).
         vectors_npy_path = (
-            self.assets_dir
+            self.data_dir
             / f"frame_vectors_{self.model_key.replace(':', '-').replace('/', '-')}.npy"
         )
         vectors = faiss.rev_swig_ptr(index.get_xb(), index.ntotal * index.d).reshape(
