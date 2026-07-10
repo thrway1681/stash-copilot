@@ -1,6 +1,5 @@
 """Embedding-based query tools for similarity search."""
 
-import os
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
@@ -657,7 +656,7 @@ class FilterScenesByVisualContentTool(BaseTool):
         self,
         stash: "StashClient",
         embedding_config: EmbeddingConfig | None = None,
-        assets_dir: str | None = None,
+        data_dir: str | None = None,
     ) -> None:
         """
         Initialize the visual content filter tool.
@@ -665,8 +664,8 @@ class FilterScenesByVisualContentTool(BaseTool):
         Args:
             stash: StashClient instance
             embedding_config: Config for embedding provider (required for text embedding)
-            assets_dir: Path to assets directory for frame search index.
-                        Derived from plugin root if not provided.
+            data_dir: Explicit Data Directory override for the frame search index.
+                The shared path resolver is used when omitted.
         """
         super().__init__(stash)
         if not embedding_config:
@@ -676,13 +675,7 @@ class FilterScenesByVisualContentTool(BaseTool):
         self.storage = EmbeddingStorage(model_key=self.model_key)
         self.embedding_config = embedding_config
 
-        if assets_dir is None:
-            plugin_dir = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            )
-            self._assets_dir = os.path.join(plugin_dir, "assets")
-        else:
-            self._assets_dir = assets_dir
+        self._data_dir = data_dir
 
     @property
     def name(self) -> str:
@@ -947,7 +940,7 @@ class FilterScenesByVisualContentTool(BaseTool):
         from ..embeddings.frame_search import FrameSearchIndex, SceneMatch
 
         frame_index = FrameSearchIndex(
-            assets_dir=self._assets_dir,
+            data_dir=self._data_dir,
             model_key=self.model_key,
         )
 

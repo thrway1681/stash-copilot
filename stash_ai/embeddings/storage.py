@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from stash_ai import paths
+
 if TYPE_CHECKING:
     from stash_ai.recommendations.types import TasteCluster
 
@@ -175,16 +177,12 @@ class EmbeddingStorage:
         Initialize embedding storage.
 
         Args:
-            db_path: Path to SQLite database. Defaults to plugin assets directory.
+            db_path: Path to SQLite database. Defaults to the update-safe data directory.
             model_key: Model identifier for this storage instance (e.g., "siglip",
                 "openclip:ViT-H-14"). All operations will be scoped to this model.
         """
         if db_path is None:
-            # Default to plugin assets directory
-            plugin_dir = Path(__file__).parent.parent.parent
-            assets_dir = plugin_dir / "assets"
-            assets_dir.mkdir(exist_ok=True)
-            db_path = str(assets_dir / "stash_copilot.sqlite")
+            db_path = str(paths.embeddings_db_path())
 
         self.db_path = db_path
         self.model_key = model_key

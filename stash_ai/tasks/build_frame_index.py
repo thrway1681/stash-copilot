@@ -7,7 +7,6 @@ progress + a final summary; it declares no ``result_key`` (nothing is polled).
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -76,9 +75,7 @@ class BuildFrameIndexTask:
         self.log(f"Building frame search index for model: {self.model_key}", "info")
 
         storage = EmbeddingStorage(model_key=self.model_key)
-        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        assets_dir = os.path.join(plugin_dir, "assets")
-        frame_index = FrameSearchIndex(assets_dir=assets_dir, model_key=self.model_key)
+        frame_index = FrameSearchIndex(model_key=self.model_key)
 
         def progress_callback(current: int, total: int) -> None:
             self.progress(current, total)

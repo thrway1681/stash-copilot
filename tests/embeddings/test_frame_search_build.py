@@ -13,10 +13,20 @@ from pathlib import Path
 
 import pytest
 
+from stash_ai import paths
 from stash_ai.embeddings.frame_search import FrameSearchIndex
 from stash_ai.embeddings.storage import EmbeddingStorage
 
 MODEL_KEY = "test_model"
+
+
+def test_default_index_files_resolve_under_data_dir() -> None:
+    """The frame-search index shares the update-safe Data Directory."""
+    index = FrameSearchIndex(model_key=MODEL_KEY)
+
+    assert index.index_path.parent == paths.data_dir()
+    assert index.meta_path.parent == paths.data_dir()
+    assert index.info_path.parent == paths.data_dir()
 
 
 @pytest.fixture
@@ -35,7 +45,7 @@ def storage(temp_db: str) -> EmbeddingStorage:
 
 
 @pytest.fixture
-def assets_dir() -> Generator[str, None, None]:
+def data_dir() -> Generator[str, None, None]:
     """A throwaway directory for the index files build() writes."""
     with tempfile.TemporaryDirectory() as d:
         yield d
@@ -51,21 +61,19 @@ def _store_frame(store: EmbeddingStorage, scene_id: int, frame_index: int, value
     )
 
 
-def test_build_raises_when_no_frames(storage: EmbeddingStorage, assets_dir: str) -> None:
-    index = FrameSearchIndex(assets_dir=assets_dir, model_key=MODEL_KEY)
+def test_build_raises_when_no_frames(storage: EmbeddingStorage, data_dir: str) -> None:
+    index = FrameSearchIndex(data_dir=data_dir, model_key=MODEL_KEY)
     with pytest.raises(ValueError, match="No frame embeddings"):
         index.build(storage)
 
 
-def test_build_indexes_all_frames_across_batches(
-    storage: EmbeddingStorage, assets_dir: str
-) -> None:
+def test_build_indexes_all_frames_across_batches(storage: EmbeddingStorage, data_dir: str) -> None:
     # Three scenes, several frames each, inserted out of order.
     frames = [(2, 0), (1, 1), (1, 0), (3, 0), (3, 1), (3, 2)]
     for scene_id, frame_index in frames:
         _store_frame(storage, scene_id, frame_index, float(scene_id) + frame_index / 10.0)
 
-    index = FrameSearchIndex(assets_dir=assets_dir, model_key=MODEL_KEY)
+    index = FrameSearchIndex(data_dir=data_dir, model_key=MODEL_KEY)
     # batch_size=2 forces the streaming loop across multiple batches.
     info = index.build(storage, batch_size=2)
 
@@ -81,17 +89,17 @@ def test_build_indexes_all_frames_across_batches(
     assert Path(index.info_path).exists()
 
 
-def test_build_metadata_is_row_aligned(storage: EmbeddingStorage, assets_dir: str) -> None:
+def test_build_metadata_is_row_aligned(storage: EmbeddingStorage, data_dir: str) -> None:
     # Frames spanning two scenes; build must keep scene/frame/timestamp aligned.
     _store_frame(storage, 5, 0, 5.0)
     _store_frame(storage, 5, 1, 5.1)
     _store_frame(storage, 7, 0, 7.0)
 
-    index = FrameSearchIndex(assets_dir=assets_dir, model_key=MODEL_KEY)
+    index = FrameSearchIndex(data_dir=data_dir, model_key=MODEL_KEY)
     index.build(storage, batch_size=2)
 
     # Reload from disk to confirm what was persisted, not in-memory state.
-    reloaded = FrameSearchIndex(assets_dir=assets_dir, model_key=MODEL_KEY)
+    reloaded = FrameSearchIndex(data_dir=data_dir, model_key=MODEL_KEY)
     reloaded.load()
 
     assert reloaded._scene_ids is not None
