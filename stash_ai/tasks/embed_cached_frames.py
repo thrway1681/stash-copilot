@@ -1,8 +1,8 @@
 """Task for embedding cached frames that don't have frame embeddings yet.
 
 This task backfills frame embeddings for scenes that already have frames
-in the embedded_frames directory but were embedded before individual frame
-storage was implemented.
+in the Data Directory's frames cache but were embedded before individual
+frame storage was implemented.
 """
 
 import re
@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
+
+from stash_ai import paths
 
 from ..embeddings.base import BaseEmbeddingProvider, BaseImageEmbeddingProvider
 from ..embeddings.config import EmbeddingConfig
@@ -27,7 +29,7 @@ class EmbedCachedFramesTask:
     Task for embedding cached frames that don't have frame-level embeddings.
 
     This is a backfill task for scenes that:
-    1. Have frames extracted in assets/embedded_frames/scene_*
+    1. Have frames extracted in the Data Directory's embedded_frames/scene_*
     2. Don't have frame embeddings in the database yet
 
     The task computes embeddings using the configured image embedding model
@@ -72,9 +74,8 @@ class EmbedCachedFramesTask:
         # Lock for GPU operations to prevent resource contention
         self._gpu_lock = Lock()
 
-        # Cache directory
-        plugin_dir = Path(__file__).parent.parent.parent
-        self.cache_dir = plugin_dir / "assets" / "embedded_frames"
+        # Read the frames cache written by the designated scene embedder.
+        self.cache_dir = paths.frames_cache_dir()
 
     @property
     def embedder(self) -> BaseEmbeddingProvider:

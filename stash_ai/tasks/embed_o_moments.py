@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import TYPE_CHECKING, Any, cast
 
+from stash_ai import paths
+
 from ..embeddings.config import EmbeddingConfig
 from ..embeddings.provider import get_embedding_provider
 from ..embeddings.storage import EmbeddingStorage
@@ -87,13 +89,11 @@ class EmbedOMomentsTask:
         self.log(f"Using embedding model key: {model_key}", "debug")
 
         # Setup frame extractor
-        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        cache_dir = os.path.join(plugin_dir, "assets", "o_moment_cache")
         self.frame_extractor = FrameExtractor(
             config=FrameExtractionConfig(
                 frame_width=self.config.frame_width,
             ),
-            cache_dir=cache_dir,
+            cache_dir=str(paths.o_moment_cache_dir()),
             log_callback=self.log,
         )
 
